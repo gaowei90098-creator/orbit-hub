@@ -1,0 +1,83 @@
+{
+  "name": "orbit",
+  "version": "0.1.0",
+  "description": "Local collaboration hub for heterogeneous AI coding agents (Claude Code, Codex). Inter-agent messaging, shared task board, file-conflict prevention, live dashboard.",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "bin": {
+    "orbit": "./dist/cli.js",
+    "agent-hub": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx src/cli.ts start",
+    "mcp": "tsx src/cli.ts mcp",
+    "build": "tsc -p tsconfig.json",
+    "build:dashboard": "npm --prefix dashboard install && npm --prefix dashboard run build",
+    "build:all": "npm run build && npm run build:dashboard",
+    "start": "node dist/cli.js start",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "app": "electron electron/main.mjs",
+    "app:icon": "node electron/generate-icon.mjs",
+    "app:pack": "electron-builder --mac dir"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "author": "Orbit",
+  "build": {
+    "appId": "com.orbit.localai",
+    "productName": "Orbit",
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "**/*",
+      "!src/**",
+      "!tests/**",
+      "!coverage/**",
+      "!release/**",
+      "!dashboard/node_modules/**",
+      "!dashboard/src/**",
+      "!dashboard/public/**",
+      "!dashboard/index.html",
+      "!dashboard/vite.config.ts",
+      "!dashboard/tsconfig.json",
+      "!dashboard/package.json",
+      "!dashboard/package-lock.json",
+      "!integrations/**",
+      "!examples/**",
+      "!README.md",
+      "!tsconfig.json",
+      "!vitest.config.ts",
+      "!electron/generate-icon.mjs"
+    ],
+    "mac": {
+      "target": "dir",
+      "icon": "electron/icon.png",
+      "category": "public.app-category.developer-tools",
+      "identity": null
+    }
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.9.1",
+    "@types/supertest": "^7.2.0",
+    "@vitest/coverage-v8": "^4.1.8",
+    "electron": "^42.3.3",
+    "electron-builder": "^26.8.1",
+    "supertest": "^7.2.2",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "express": "^5.2.1",
+    "zod": "^4.4.3"
+  }
+}

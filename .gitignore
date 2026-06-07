@@ -1,0 +1,21 @@
+node_modules/
+dist/
+dashboard/dist/
+coverage/
+*.log
+.DS_Store
+
+# 运行时数据（hub 数据库 + 隔离工作区）
+.agent-hub/
+.orbit/
+*-orbit/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# 构建/打包产物
+release/
+
+# 工具临时目录
+.preview-snake/
