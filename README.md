@@ -30,23 +30,41 @@
 
 ---
 
-## 📰 News
+## 📜 What is Orbit
 
-* 🚩 **[2026.06] First real cross-vendor collaboration shipped.** Claude Code and the Codex desktop app built a complete, runnable app **together** on Orbit — frontend by Claude, backend by Codex, integrated green on the first try. See [Real collaboration, for real](#-real-collaboration-for-real).
-* 🚩 **[2026.06] Dashboard refresh + automatic Codex desktop-app detection.** Orbit now finds the macOS Codex app even when it's not on your `PATH`, and the live console got a full visual polish.
-* 🚩 **[2026.06] Phases 1–4 complete** — environment detection, git-worktree isolation, a 16-state mission machine, self-syncing contracts, and integration-with-approval. **123 tests green, type-checked, zero flakes.**
+AI coding agents have gotten genuinely good — but they still work **alone**. The moment you put two of them on the same project (or two teammates each driving their own), the *coordination* falls apart: they take turns, the shared working tree throws conflicts, and neither agent knows what the other just changed. The agents are state-of-the-art; the collaboration between them is stuck in 1999.
 
-## 📜 Introduction
+**Orbit is the missing coordination layer for AI coding agents.** It gives every agent a shared **task board + file soft-locks + a self-syncing interface contract + an agent-to-agent message bus + a live dashboard** — so multiple agents (and multiple people) can work the *same* codebase **in parallel** instead of in turns: divide work atomically, get warned before touching the same file, and renegotiate an interface the instant it changes — **without ever sharing a model API key**.
 
-Two people in a hackathon, each driving a *different* AI coding agent on the *same* repo. What happens? They go **linear** — one waits while the other commits, the shared working tree throws conflicts, and neither agent has any idea what the other just changed. The agents are powerful; the *collaboration* is stuck in 1999.
-
-**Orbit fixes the collaboration layer.** It gives every agent a shared **message bus + task board + file soft-locks + a self-syncing interface contract + a live dashboard**, so Claude Code and Codex can divide work, claim it atomically, warn each other before touching the same file, and renegotiate an API the instant it changes — **without ever sharing a model API key**.
-
-Both Claude Code and Codex are **MCP clients**. Orbit runs one small **hub server** (state + REST + SSE + live dashboard); each agent launches a tiny **stdio MCP adapter** that connects to it. The exact same code runs on `localhost` today and over a tunnel for your teammates tomorrow.
+Both Claude Code and Codex are **MCP clients**. Orbit runs one small **hub server** (state + REST + SSE + live dashboard); each agent launches a tiny **stdio MCP adapter** that connects to it. The same code runs on `localhost` for yourself today and over a tunnel for your team tomorrow.
 
 <p align="center">
   <b>Claude Code</b> ⇄ <i>stdio MCP adapter</i> ⇄ <b>Orbit Hub</b> ⇄ <i>stdio MCP adapter</i> ⇄ <b>Codex</b>
 </p>
+
+## 💡 Why it matters
+
+Orbit turns the everyday failure modes of multi-agent work into wins:
+
+| Without a coordination layer | With Orbit |
+|---|---|
+| Agents **take turns** — one idles while the other works | They work **in parallel**, each on its own task / branch |
+| Shared interfaces drift; you **manually re-sync** and rework | The **contract syncs itself** — change `User`, everyone sees it instantly |
+| Two agents edit the same file and **clobber** each other | **Soft locks** warn *before* the collision, not after |
+| You're **locked into one vendor's** agent | **Vendor-neutral** — Claude Code, Codex and others share one hub |
+
+The payoff is the boring-but-valuable thing real teams want: **less idle time, fewer merge conflicts, fewer "wait — you changed the API?" moments.** It's collaboration *efficiency*, not a science project.
+
+## 💼 What you can build with it
+
+Orbit is coordination infrastructure for **any workflow where more than one agent touches the same code**:
+
+- **Solo dev, multiple agents.** Run Claude Code *and* Codex at once; hand each a slice of a feature and let them coordinate instead of you babysitting two terminals.
+- **Team, mixed tools.** Everyone keeps their preferred agent — and their own login & billing. Orbit is the shared room they all work in; nobody is forced onto one vendor.
+- **Big task, fan-out.** Split a refactor or a feature across several agents in parallel worktrees; Orbit keeps the contract aligned and the files un-clobbered, then hands you **one reviewable integration**.
+- **Human-in-the-loop by default.** Nothing merges to your branch without explicit approval — agents propose, you dispose.
+
+**Where it's headed.** The hub already speaks over a tunnel + token, so the natural next step is **cross-machine, cross-team collaboration** — invite a teammate's Claude Code, or a partner's Codex, into the same shared contract. The model is straightforward and honest: the **core stays open-source under AGPL-3.0**, and a **commercial license** is available for teams that need to embed Orbit in a closed-source product. The wedge is simple and real — *the moment anyone runs more than one AI agent, those agents need somewhere to coordinate.* Orbit is that somewhere.
 
 ## ✨ What you get
 
@@ -61,12 +79,14 @@ Both Claude Code and Codex are **MCP clients**. Orbit runs one small **hub serve
 
 ## 🎬 Real collaboration, for real
 
-This isn't a mockup. Below is a **real session** between two independent AI clients from two different vendors, coordinated entirely through Orbit. They built **`orbit-demo`** — a tiny zero-dependency "user list" app — with **every line written by an AI**:
+This isn't a mockup. Below is a **real session** between two independent AI clients from two different vendors, coordinated entirely through Orbit. They built **`orbit-demo`** — a tiny zero-dependency "user list" app — with **every line written by an AI**.
 
-| Role | Client | Vendor | Wrote |
+> **Roles aren't fixed.** Orbit never decrees "Claude does frontend, Codex does backend." Work is split by **task**, and *any* agent can claim *any* task — front-end, back-end, tests, refactors, docs. The split below is simply how *this particular* run happened to shake out:
+
+| In this run | Client | Vendor | Claimed & wrote |
 |---|---|---|---|
-| Frontend | **Claude Code** | Anthropic | `public/` (list page, sorting, XSS-escaping) |
-| Backend | **Codex** (desktop) | OpenAI | `server.js` (API + static host) |
+| Took the UI task | **Claude Code** | Anthropic | `public/` (list page, sorting, XSS-escaping) |
+| Took the API task | **Codex** (desktop) | OpenAI | `server.js` (API + static host) |
 
 **What actually happened, step by step:**
 
