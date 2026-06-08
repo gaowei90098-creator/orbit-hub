@@ -445,6 +445,17 @@ export function mountRoutes(
     if (!result.ok) return res.status(409).json({ error: result.reason, approval: result.approval });
     res.json({ ok: true, approval: result.approval, resultCommit: result.resultCommit });
   });
+  // 集成冲突自动派回修复：起一个 Agent 在集成 worktree 现场解决冲突，完成后自动续跑。
+  app.post("/api/missions/:id/dispatch-conflict-fix", (req, res) => {
+    if (!integration) return res.status(503).json({ error: "integration_unavailable" });
+    const result = integration.dispatchConflictFix(req.params.id);
+    if (!result.ok) {
+      const status = result.reason === "no_integration" ? 404 : result.reason === "runs_unavailable" ? 503 : 409;
+      return res.status(status).json({ error: result.reason });
+    }
+    res.json({ ok: true, runId: result.runId });
+  });
+
   // B08：驳回集成候选。
   app.post("/api/missions/:id/reject", (req, res) => {
     if (!integration) return res.status(503).json({ error: "integration_unavailable" });

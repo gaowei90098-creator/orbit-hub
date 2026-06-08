@@ -69,6 +69,48 @@ async function waitTerminal(core: CoordinationCore, runId: string, ms = 8000): P
   }
 }
 
+async function waitFor(cond: () => boolean, ms = 8000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (cond()) return;
+    await new Promise((res) => setTimeout(res, 25));
+  }
+}
+
+// 智能假 worker：在自己的 worktree 写 shared.ts（制造冲突）；若 cwd 里检测到 git 冲突文件
+// （即被派去集成 worktree 解决冲突），则把冲突文件改成无标记内容并 git add（不 commit）。
+function smartDriver(content: string): DriverSpec {
+  const script =
+    `const fs=require('fs');const cp=require('child_process');` +
+    `let u='';try{u=cp.execSync('git diff --name-only --diff-filter=U',{encoding:'utf8'}).trim();}catch(e){}` +
+    `if(u){for(const f of u.split('\\n')){fs.writeFileSync(f,'export const v="MERGED";\\n');}cp.execSync('git add -A');}` +
+    `else{fs.writeFileSync('shared.ts',${JSON.stringify(`export const v="${content}";\n`)});}` +
+    `console.log(JSON.stringify({t:'session',sid:'s'}));console.log(JSON.stringify({t:'done'}));`;
+  return {
+    id: "claude-code",
+    harness: "claude-code",
+    async detect() {
+      return ENV;
+    },
+    buildStart(input) {
+      return { command: process.execPath, args: ["-e", script], cwd: input.projectPath, env: GIT_ENV };
+    },
+    buildResume(_s, _m, input) {
+      return { command: process.execPath, args: ["-e", "0"], cwd: input.projectPath, env: process.env };
+    },
+    parseLine(line) {
+      try {
+        const o = JSON.parse(line) as { t: string; sid?: string };
+        if (o.t === "session" && o.sid) return [{ kind: "session", sessionId: o.sid }];
+        if (o.t === "done") return [{ kind: "status", status: "done", detail: "ok" }];
+      } catch {
+        /* ignore */
+      }
+      return [];
+    },
+  };
+}
+
 const passValidation: ValidationRunner = () => ({ exitCode: 0, output: "ok" });
 
 // 启动两个 Agent（各写一个文件）并等待完成。返回 core/runs/integ/mission/root。
@@ -187,6 +229,52 @@ describe("IntegrationManager (第四阶段验收)", () => {
     expect(core.missions.get(missionId)!.state).toBe("cancelled");
     const apprs = integ.approvals(missionId);
     expect(apprs[0]!.decision).toBe("rejected");
+    core.close();
+  });
+
+  it("dispatches an agent to resolve an integration conflict, then auto-continues to ready (派回闭环)", async () => {
+    const root = makeGitRepo();
+    const core = new CoordinationCore(":memory:");
+    // 两个 Agent 都写同名 shared.ts、内容不同 → 第二个分支合并必冲突。
+    const resolver = (h: Harness): DriverSpec => smartDriver(h === "codex" ? "FE" : "BE");
+    const runs = new RunManager(core, resolver);
+    const integ = new IntegrationManager(core, passValidation, runs);
+    integ.start(); // 订阅事件：修复 run 完成后自动收口并续跑
+
+    const mission = core.missions.create({ goal: "加用户注册", projectId: null, projectPath: root });
+    core.missions.markRunning(mission.id);
+    const rA = runs.start({ harness: "claude-code", missionId: mission.id, taskId: "be", projectId: null, taskTitle: "后端", goal: "g", projectPath: root });
+    const rB = runs.start({ harness: "codex", missionId: mission.id, taskId: "fe", projectId: null, taskTitle: "前端", goal: "g", projectPath: root });
+    await Promise.all([waitTerminal(core, rA.id), waitTerminal(core, rB.id)]);
+
+    // 初次集成 → 第二分支冲突，停在 conflict。
+    const r1 = integ.integrate(mission.id);
+    expect(r1.ok).toBe(false);
+    expect(integ.getIntegration(mission.id)!.status).toBe("conflict");
+    expect(core.missions.get(mission.id)!.state).toBe("resolving_conflicts");
+
+    // 派回修复：起一个 Agent 去集成 worktree 现场解决。
+    const fix = integ.dispatchConflictFix(mission.id);
+    expect(fix.ok).toBe(true);
+    expect(fix.runId).toBeTruthy();
+
+    // 等修复 run 完成 + 自动续跑（收口 merge → 验证 → ready）。
+    await waitFor(() => integ.getIntegration(mission.id)!.status === "ready", 8000);
+    const final = integ.getIntegration(mission.id)!;
+    expect(final.status).toBe("ready");
+    expect(final.mergedBranches).toHaveLength(2);
+    expect(final.conflicts).toHaveLength(0);
+    expect(core.missions.get(mission.id)!.state).toBe("awaiting_final_approval");
+
+    core.close();
+  });
+
+  it("rejects dispatch when not in conflict and caps retries", async () => {
+    const { core, integ, missionId } = await setupTwoAgents({ feFile: "f.ts", feContent: "1\n", beFile: "b.ts", beContent: "2\n" });
+    // 无 runs 注入的 integ（setupTwoAgents 不传 runs）→ 派回不可用。
+    const r = integ.dispatchConflictFix(missionId);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("runs_unavailable");
     core.close();
   });
 

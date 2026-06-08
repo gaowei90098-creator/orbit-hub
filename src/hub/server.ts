@@ -45,8 +45,9 @@ export function createHubApp(options: HubOptions = {}): {
   // E02/E04：契约更新自动注入另一 Agent 会话。订阅自身事件总线。
   const coordinator = new Coordinator(core, runs);
   coordinator.start();
-  // 第四阶段：集成、验证、最终 Diff、审批编排。
-  const integration = new IntegrationManager(core, options.validationRunner);
+  // 第四阶段：集成、验证、最终 Diff、审批编排。注入 runs 以支持集成冲突自动派回修复。
+  const integration = new IntegrationManager(core, options.validationRunner, runs);
+  integration.start();
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 

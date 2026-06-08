@@ -2155,6 +2155,9 @@ body {
 }
 .integration-conflicts ul { margin: 4px 0 0; padding-left: 18px; }
 .integration-conflicts li { font-family: var(--mono, monospace); font-size: 0.78rem; }
+.integration-conflicts-body { flex: 1; }
+.integration-conflicts-hint { margin: 6px 0 8px; color: var(--muted); font-size: 0.78rem; }
+.integration-conflicts-actions { display: flex; gap: 8px; align-items: center; }
 .integration-validations { font-size: 0.82rem; }
 .validation-row {
   display: flex;

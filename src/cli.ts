@@ -93,7 +93,7 @@ function startHub(flags: Map<string, string>): void {
 
   if (dbPath !== ":memory:") fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-  const { app, core, runs, coordinator } = createHubApp({ dbPath, token });
+  const { app, core, runs, coordinator, integration } = createHubApp({ dbPath, token });
   const server = app.listen(port, host, () => {
     process.stdout.write(startBanner(port, dbPath, token));
   });
@@ -105,6 +105,7 @@ function startHub(flags: Map<string, string>): void {
   const shutdown = (): void => {
     clearInterval(reaper);
     coordinator.stop();
+    integration.stop();
     runs.stopAll();
     server.close();
     core.close();

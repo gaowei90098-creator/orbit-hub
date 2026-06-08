@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
+  Bot,
   CheckCircle2,
   GitMerge,
   Loader2,
@@ -52,6 +53,8 @@ export function IntegrationPanel({
   const allDone = missionWorkers.length > 0 && missionWorkers.every((w) => w.status === "done");
   const hasIntegration = detail !== null;
 
+  const [fixing, setFixing] = useState(false);
+
   const refresh = useCallback(async () => {
     const d = await actions.getIntegration(mission.id);
     setDetail(d);
@@ -97,6 +100,19 @@ export function IntegrationPanel({
       setError((err as Error).message || "驳回失败");
     } finally {
       setActing(false);
+    }
+  };
+
+  const dispatchFix = async () => {
+    setFixing(true);
+    setError("");
+    try {
+      await actions.dispatchConflictFix(mission.id);
+      await refresh();
+    } catch (err) {
+      setError((err as Error).message || "派回修复失败");
+    } finally {
+      setFixing(false);
     }
   };
 
@@ -158,17 +174,32 @@ export function IntegrationPanel({
             </div>
           )}
 
-          {/* Conflicts */}
-          {integ.status === "conflict" && integ.conflicts.length > 0 && (
+          {/* Conflicts — 派 Agent 自动修复 */}
+          {integ.status === "conflict" && (
             <div className="integration-conflicts">
               <AlertTriangle size={15} />
-              <div>
+              <div className="integration-conflicts-body">
                 <b>合并冲突</b>
-                <ul>
-                  {integ.conflicts.map((f) => (
-                    <li key={f}>{f}</li>
-                  ))}
-                </ul>
+                {integ.conflicts.length > 0 && (
+                  <ul>
+                    {integ.conflicts.map((f) => (
+                      <li key={f}>{f}</li>
+                    ))}
+                  </ul>
+                )}
+                <p className="integration-conflicts-hint">
+                  可以派一个 Agent 到集成工作区现场解决冲突，解决后自动继续合并和验证。
+                </p>
+                <div className="integration-conflicts-actions">
+                  <button className="btn btn-primary" disabled={fixing} onClick={() => void dispatchFix()}>
+                    {fixing ? <Loader2 size={15} className="spin" /> : <Bot size={15} />}
+                    派 Agent 修复
+                  </button>
+                  <button className="btn btn-small" disabled={loading} onClick={() => void startIntegration()}>
+                    {loading ? <Loader2 size={14} className="spin" /> : <Play size={14} />}
+                    重新集成
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -237,8 +268,8 @@ export function IntegrationPanel({
             </div>
           )}
 
-          {/* Re-integrate after rejection or conflict */}
-          {(integ.status === "conflict" || integ.status === "failed" || integ.status === "rolled_back") && (
+          {/* Re-integrate after validation failure or rollback */}
+          {(integ.status === "failed" || integ.status === "rolled_back") && (
             <div className="integration-retry">
               <button
                 className="btn btn-small"

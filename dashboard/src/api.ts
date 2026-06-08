@@ -74,6 +74,7 @@ export interface HubActions {
   triggerIntegration: (missionId: string) => Promise<IntegrationRun>;
   approveMission: (missionId: string, note?: string) => Promise<{ approval: Approval; resultCommit: string | null }>;
   rejectMission: (missionId: string, note?: string) => Promise<{ approval: Approval }>;
+  dispatchConflictFix: (missionId: string) => Promise<{ ok: boolean; runId?: string }>;
   getRunDiff: (runId: string) => Promise<WorktreeDiff | null>;
 }
 
@@ -299,6 +300,12 @@ export function useHubState(): HubState {
     });
   }, []);
 
+  const dispatchConflictFix = useCallback(async (missionId: string) => {
+    return api<{ ok: boolean; runId?: string }>(`/api/missions/${missionId}/dispatch-conflict-fix`, {
+      method: "POST", body: "{}",
+    });
+  }, []);
+
   const getRunDiff = useCallback(async (runId: string): Promise<WorktreeDiff | null> => {
     try {
       const r = await api<{ diff: WorktreeDiff }>(`/api/agent-runs/${runId}/diff`);
@@ -349,6 +356,7 @@ export function useHubState(): HubState {
       triggerIntegration,
       approveMission,
       rejectMission,
+      dispatchConflictFix,
       getRunDiff,
     },
   };

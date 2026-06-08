@@ -9,10 +9,14 @@ import {
   branchTip,
   commitAgentWork,
   createIntegrationWorktree,
+  finalizeConflictMerge,
+  listConflictFiles,
   mergeBranchInto,
+  mergeBranchKeepConflicts,
   mergeIntoTarget,
   resetHard,
 } from "../core/integration.js";
+import type { RunManager } from "./run-manager.js";
 
 // 第四阶段：集成、验证、最终 Diff、人工审批的编排（D05/D06/D07/D08/D09 + G02/G03/G04/G06/G07 + B08）。
 // 完成标准：生成可审查的集成候选版本；审批通过后才真实合入目标分支（失败回滚）。
@@ -39,11 +43,54 @@ export type IntegrationResult =
   | { ok: true; integration: IntegrationRun }
   | { ok: false; reason: string; integration: IntegrationRun | null };
 
+// 派给 Agent 的冲突解决指令。让 Agent 只解决标记 + git add，由 Orbit 完成提交（更可控）。
+function buildConflictFixPrompt(conflicts: string[]): string {
+  return [
+    "你正在 Orbit 的集成工作区里解决一次 git 合并冲突。",
+    "当前目录下以下文件带有冲突标记（<<<<<<<、=======、>>>>>>>）：",
+    ...conflicts.map((f) => `  - ${f}`),
+    "",
+    "请完成：",
+    "1) 编辑这些文件，合理融合双方改动，删除所有冲突标记；",
+    "2) 运行 git add -A 把解决后的文件加入暂存区；",
+    "3) 不要执行 git commit，也不要改动其它文件——Orbit 会替你完成提交。",
+  ].join("\n");
+}
+
+// 派回修复的最大尝试次数（防 Agent 改不好导致无限派回）。
+const MAX_FIX_ATTEMPTS = 3;
+const TERMINAL_RUN_STATUSES = new Set(["done", "failed", "stopped"]);
+
+interface FixState {
+  runId: string;
+  branch: string; // 正在派 Agent 解决冲突的那个 Agent 分支
+  attempts: number;
+}
+
 export class IntegrationManager {
+  private unsubscribe: (() => void) | null = null;
+  // missionId -> 当前进行中的冲突修复运行状态。
+  private readonly fixes = new Map<string, FixState>();
+
   constructor(
     private readonly core: CoordinationCore,
     private readonly runValidation: ValidationRunner = defaultRunValidation,
+    private readonly runs?: RunManager,
   ) {}
+
+  // 订阅 worker_updated：派回的修复 run 到达终态后，自动收口并续跑集成。
+  start(): void {
+    if (this.unsubscribe || !this.runs) return;
+    this.unsubscribe = this.core.events.subscribe((e) => {
+      if (this.core.closed) return;
+      if (e.type === "worker_updated") this.onRunUpdated(e.payload as AgentRun);
+    });
+  }
+
+  stop(): void {
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+  }
 
   getIntegration(missionId: string): IntegrationRun | null {
     return this.core.store.getLatestIntegrationByMission(missionId);
@@ -111,35 +158,55 @@ export class IntegrationManager {
     this.emitIntegration(integration);
     this.advance(missionId, ["running", "validating_agents", "integrating"]);
 
+    // D07/D08 + G01/G03/G04：合并各分支 + 验证（抽成 mergeAndValidate 以便派回修复后续跑）。
+    return this.mergeAndValidate(missionId);
+  }
+
+  // 合并所有尚未合并的 Agent 分支 + 跑集成验证。integrate() 和派回修复后的续跑都复用它。
+  private mergeAndValidate(missionId: string): IntegrationResult {
+    const integ = this.getIntegration(missionId);
+    if (!integ) return { ok: false, reason: "no_integration", integration: null };
+    const mission = this.core.missions.get(missionId);
+    const merged = [...integ.mergedBranches];
+
     // D07/D08：按顺序合并各 Agent 分支；冲突即中止并报告（不破坏集成分支）。
-    const merged: string[] = [];
-    for (const r of runs) {
-      const outcome = mergeBranchInto(worktreePath, r.branch!, `[orbit] merge ${r.branch} into ${branch}`);
+    for (const r of this.doneRuns(missionId)) {
+      if (merged.includes(r.branch!)) continue;
+      const outcome = mergeBranchInto(integ.worktreePath, r.branch!, `[orbit] merge ${r.branch} into ${integ.branch}`);
       if (!outcome.ok) {
-        this.core.store.updateIntegrationRunFields(integration.id, { status: "conflict", conflicts: outcome.conflicts, mergedBranches: merged }, Date.now());
+        this.core.store.updateIntegrationRunFields(integ.id, { status: "conflict", conflicts: outcome.conflicts, mergedBranches: merged }, Date.now());
         this.advance(missionId, ["resolving_conflicts"]);
+        this.emitIntegration(this.getIntegration(missionId)!);
         return { ok: false, reason: "merge_conflict", integration: this.getIntegration(missionId) };
       }
       merged.push(r.branch!);
     }
-    this.core.store.updateIntegrationRunFields(integration.id, { status: "validating", mergedBranches: merged }, Date.now());
+    this.core.store.updateIntegrationRunFields(integ.id, { status: "validating", conflicts: [], mergedBranches: merged }, Date.now());
     this.advance(missionId, ["validating_integration"]);
 
     // G01/G03/G04：在集成 worktree 跑项目配置的验证命令，落 ValidationRun 报告。
-    const project = mission.projectId ? this.core.projects.get(mission.projectId) : null;
-    const { allPassed, validationIds } = this.runIntegrationValidation(missionId, worktreePath, project?.commands ?? {});
-
+    const project = mission?.projectId ? this.core.projects.get(mission.projectId) : null;
+    const { allPassed, validationIds } = this.runIntegrationValidation(missionId, integ.worktreePath, project?.commands ?? {});
     if (!allPassed) {
-      this.core.store.updateIntegrationRunFields(integration.id, { status: "failed", validationRunIds: validationIds }, Date.now());
+      this.core.store.updateIntegrationRunFields(integ.id, { status: "failed", validationRunIds: validationIds }, Date.now());
       this.emitIntegration(this.getIntegration(missionId)!);
       return { ok: false, reason: "validation_failed", integration: this.getIntegration(missionId) };
     }
     // 候选就绪，等待人工审批（B08）。
-    this.core.store.updateIntegrationRunFields(integration.id, { status: "ready", validationRunIds: validationIds }, Date.now());
+    this.core.store.updateIntegrationRunFields(integ.id, { status: "ready", validationRunIds: validationIds }, Date.now());
     this.advance(missionId, ["awaiting_final_approval"]);
     const ready = this.getIntegration(missionId)!;
     this.emitIntegration(ready);
     return { ok: true, integration: ready };
+  }
+
+  // 该 mission 下已完成、有独立分支和工作区的 Agent run（按启动先后，决定合并顺序）。
+  // 派回修复 run（isolate:false，branch 为 null）天然被 r.branch 过滤掉。
+  private doneRuns(missionId: string): AgentRun[] {
+    return this.core.store
+      .listAgentRuns()
+      .filter((r) => r.missionId === missionId && r.branch && r.worktreePath && r.status === "done")
+      .sort((a, b) => a.startedAt - b.startedAt);
   }
 
   // B08 + G07：记录批准，并（按用户决策）真实合入目标分支；失败安全回滚（D09）。
@@ -176,6 +243,81 @@ export class IntegrationManager {
     const approval = this.recordApproval(missionId, "rejected", by, note);
     this.advance(missionId, ["cancelled"]); // 用户否决候选 → 取消（非"失败"）
     return { ok: true, approval };
+  }
+
+  // ----- 集成冲突自动派回修复（闭环）-----
+
+  // 把当前冲突分支在集成 worktree 重制冲突（保留标记），起一个 Agent 去现场解决。
+  // Agent 完成后由 onRunUpdated → onFixDone 自动收口并续跑合并 + 验证。
+  dispatchConflictFix(missionId: string): { ok: boolean; reason?: string; runId?: string } {
+    if (!this.runs) return { ok: false, reason: "runs_unavailable" };
+    const integ = this.getIntegration(missionId);
+    if (!integ) return { ok: false, reason: "no_integration" };
+    if (integ.status !== "conflict") return { ok: false, reason: `not_in_conflict: ${integ.status}` };
+
+    const attempts = this.fixes.get(missionId)?.attempts ?? 0;
+    if (attempts >= MAX_FIX_ATTEMPTS) return { ok: false, reason: "max_attempts" };
+
+    // 下一个待合并分支 = 第一个不在 mergedBranches 里的 done 分支。
+    const next = this.doneRuns(missionId).find((r) => !integ.mergedBranches.includes(r.branch!));
+    if (!next) return { ok: false, reason: "no_conflict_branch" };
+
+    // 在集成 worktree 重制冲突，保留标记给 Agent 解决。
+    const outcome = mergeBranchKeepConflicts(integ.worktreePath, next.branch!, `[orbit] merge ${next.branch} into ${integ.branch}`);
+    if (outcome.ok) {
+      // 罕见：此刻不再冲突，直接记入并续跑。
+      this.core.store.updateIntegrationRunFields(integ.id, { status: "merging", mergedBranches: [...integ.mergedBranches, next.branch!] }, Date.now());
+      const r = this.mergeAndValidate(missionId);
+      return { ok: r.ok, reason: r.ok ? undefined : r.reason };
+    }
+
+    const mission = this.core.missions.get(missionId);
+    const run = this.runs.start({
+      harness: next.harness,
+      missionId,
+      taskId: null,
+      projectId: mission?.projectId ?? null,
+      taskTitle: `解决集成冲突：${next.branch}`,
+      goal: buildConflictFixPrompt(outcome.conflicts),
+      projectPath: integ.worktreePath,
+      isolate: false, // 关键：直接在集成 worktree 现场解决，不另建隔离区
+    });
+    this.fixes.set(missionId, { runId: run.id, branch: next.branch!, attempts: attempts + 1 });
+    return { ok: true, runId: run.id };
+  }
+
+  // 修复 run 到达终态 → 收口。done 则尝试完成 merge 并续跑；失败/未解决则留在 conflict。
+  private onRunUpdated(run: AgentRun): void {
+    if (!run.missionId) return;
+    const fix = this.fixes.get(run.missionId);
+    if (!fix || fix.runId !== run.id) return;
+    if (!TERMINAL_RUN_STATUSES.has(run.status)) return;
+    if (this.runs?.isRunning(run.id)) return; // 进程尚未真正退出，等下次终态事件
+    if (run.status !== "done") {
+      // 修复进程失败/被停 → 留在 conflict，保留 attempts，等用户再派或人工裁决。
+      return;
+    }
+    this.onFixDone(run.missionId, fix);
+  }
+
+  private onFixDone(missionId: string, fix: FixState): void {
+    const integ = this.getIntegration(missionId);
+    if (!integ) {
+      this.fixes.delete(missionId);
+      return;
+    }
+    const fin = finalizeConflictMerge(integ.worktreePath, `[orbit] resolve conflict in ${fix.branch}`);
+    if (!fin.ok) {
+      // Agent 没解决干净：留在 conflict（保留 attempts 以受上限约束），等再派或裁决。
+      this.core.store.updateIntegrationRunFields(integ.id, { status: "conflict", conflicts: listConflictFiles(integ.worktreePath) }, Date.now());
+      this.advance(missionId, ["resolving_conflicts"]);
+      this.emitIntegration(this.getIntegration(missionId)!);
+      return;
+    }
+    // 冲突分支已合并：记入 mergedBranches，清理本次 fix，续跑剩余合并 + 验证。
+    this.core.store.updateIntegrationRunFields(integ.id, { status: "merging", conflicts: [], mergedBranches: [...integ.mergedBranches, fix.branch] }, Date.now());
+    this.fixes.delete(missionId);
+    this.mergeAndValidate(missionId);
   }
 
   // ----- 内部 -----

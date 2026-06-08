@@ -27,6 +27,16 @@ function conflictFiles(cwd: string): string[] {
   return out.split("\n").filter((l) => l.trim());
 }
 
+// 当前是否有未解决的冲突文件（含冲突标记，待 Agent 解决）。
+export function listConflictFiles(cwd: string): string[] {
+  return conflictFiles(cwd);
+}
+
+// 是否正处于一次未完成的 merge 中（存在 MERGE_HEAD）。
+export function isMergeInProgress(cwd: string): boolean {
+  return gitSoft(cwd, ["rev-parse", "--verify", "MERGE_HEAD"]) !== null;
+}
+
 export function branchTip(repo: string, ref: string): string | null {
   return gitSoft(repo, ["rev-parse", "--verify", ref]);
 }
@@ -63,6 +73,31 @@ export function mergeBranchInto(integrationWorktree: string, branch: string, mes
     gitSoft(integrationWorktree, ["merge", "--abort"]);
     return { ok: false, conflicts };
   }
+}
+
+// 派回修复用：执行 merge，冲突时【保留冲突标记】（不 abort），让 Agent 在现场解决。
+// 返回冲突文件清单；调用方据此派 Agent 解决标记后 add + commit 完成这次 merge。
+export function mergeBranchKeepConflicts(integrationWorktree: string, branch: string, message: string): MergeOutcome {
+  try {
+    git(integrationWorktree, [...ORBIT_IDENTITY, "merge", "--no-ff", "-m", message, branch]);
+    return { ok: true, commit: gitSoft(integrationWorktree, ["rev-parse", "HEAD"]) ?? "" };
+  } catch {
+    // 不 abort：冲突标记留在工作区，交给 Agent 解决。
+    return { ok: false, conflicts: conflictFiles(integrationWorktree) };
+  }
+}
+
+// 派回修复后收口：Agent 应已解决标记并 commit。若仍有冲突标记或 merge 未完成则失败。
+export function finalizeConflictMerge(integrationWorktree: string, message: string): { ok: boolean; reason?: string; commit?: string } {
+  const remaining = conflictFiles(integrationWorktree);
+  if (remaining.length > 0) return { ok: false, reason: `unresolved_conflicts: ${remaining.join(", ")}` };
+  // Agent 可能解决了标记但忘了 commit；若仍在 merge 中则我们替它完成提交。
+  if (isMergeInProgress(integrationWorktree)) {
+    const dirty = gitSoft(integrationWorktree, ["status", "--porcelain"]);
+    if (dirty) git(integrationWorktree, ["add", "-A"]);
+    git(integrationWorktree, [...ORBIT_IDENTITY, "commit", "--no-edit", "-m", message]);
+  }
+  return { ok: true, commit: gitSoft(integrationWorktree, ["rev-parse", "HEAD"]) ?? "" };
 }
 
 // G07：把集成分支合入目标分支（在主仓库）。失败/冲突时中止合并，目标分支不被破坏。
