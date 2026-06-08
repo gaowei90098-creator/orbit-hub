@@ -40,15 +40,19 @@ const STATUS_CLASS: Record<Task["status"], string> = {
 const WORKER_LABEL: Record<WorkerStatus, string> = {
   starting: "启动中",
   running: "执行中",
+  waiting_for_input: "等待输入",
   done: "已完成",
   failed: "失败",
+  stopped: "已停止",
 };
 
 const WORKER_TONE: Record<WorkerStatus, string> = {
   starting: "neutral",
   running: "info",
+  waiting_for_input: "warning",
   done: "success",
   failed: "danger",
+  stopped: "neutral",
 };
 
 function agentDisplayName(agent: Agent, index: number): string {
