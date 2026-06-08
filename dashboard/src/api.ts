@@ -65,6 +65,7 @@ export interface HubActions {
   resolveConflict: (id: string, resolution: string) => Promise<void>;
   dismissConflict: (id: string, resolution: string) => Promise<void>;
   updateContract: (fields: { apiContract?: string; designSpec?: string; expectedVersion?: number }) => Promise<boolean>;
+  seedDemo: () => Promise<void>;
 }
 
 export interface HubState {
@@ -256,6 +257,10 @@ export function useHubState(): HubState {
     });
   }, []);
 
+  const seedDemo = useCallback(async () => {
+    await api<{ ok: boolean }>("/api/demo/seed", { method: "POST", body: "{}" });
+  }, []);
+
   const updateContract = useCallback(
     async (fields: { apiContract?: string; designSpec?: string; expectedVersion?: number }) => {
       const r = await api<{ ok: boolean }>("/api/contract", {
@@ -292,6 +297,7 @@ export function useHubState(): HubState {
       resolveConflict,
       dismissConflict,
       updateContract,
+      seedDemo,
     },
   };
 }

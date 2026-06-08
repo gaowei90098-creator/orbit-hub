@@ -19,6 +19,7 @@ import type { HubActions } from "../api";
 import type { Agent, Conflict, ConnectInfo, Contract, FileLock, Message, Mission, Task, Worker, WorkerStatus } from "../types";
 import { isOperator, timeAgo } from "../util";
 import { MissionPlanner } from "./MissionPlanner";
+import { OnboardingGuide } from "./OnboardingGuide";
 
 const STATUS_LABEL: Record<Task["status"], string> = {
   todo: "待认领",
@@ -282,6 +283,8 @@ export function WorkflowHome({
 
   return (
     <div className="workspace-home">
+      <OnboardingGuide agents={agents} hasTasks={tasks.length > 0} actions={actions} />
+
       <ConnectionGuide agents={agents} connectInfo={connectInfo} actions={actions} />
 
       <MissionPlanner agents={agents} connected={connected} actions={actions} />

@@ -290,6 +290,32 @@ export function mountRoutes(
     res.json({ ok: true, ...installCodexConfig(info.codexToml) });
   });
 
+  // ----- demo seed -----
+  app.post("/api/demo/seed", (_req, res) => {
+    // Quick check: if agents already exist, skip to avoid duplicating demo data.
+    if (core.agents.list().filter((a) => a.harness !== "other").length > 0) {
+      return res.json({ ok: false, reason: "already_seeded" });
+    }
+    const claude = core.agents.register("Claude", "claude-code");
+    const codex = core.agents.register("Codex", "codex");
+    const api = core.tasks.create({ title: "Design /users API", description: "REST endpoints for users", files: ["src/api/users.ts"], createdBy: claude.id });
+    const ui = core.tasks.create({ title: "Build users UI", description: "List + form components", files: ["src/ui/Users.tsx"], createdBy: claude.id });
+    core.tasks.create({ title: "Write integration tests", description: "Cover the /users endpoints", dependsOn: [api.id], createdBy: claude.id });
+    const ci = core.tasks.create({ title: "Set up CI pipeline", createdBy: codex.id });
+    core.tasks.claim(ci.id, codex.id);
+    core.tasks.update(ci.id, { status: "done" });
+    core.tasks.claim(api.id, claude.id);
+    core.tasks.update(api.id, { status: "in_progress" });
+    core.tasks.claim(ui.id, codex.id);
+    core.tasks.update(ui.id, { status: "in_progress" });
+    core.locks.acquire(claude.id, ["src/api/users.ts"]);
+    core.locks.acquire(codex.id, ["src/ui/Users.tsx"]);
+    core.messages.send(claude.id, codex.id, "I'm adding an `email` field to the User type — update your form.");
+    core.messages.send(codex.id, "all", "UI scaffold pushed to my branch, mocking the API for now.");
+    core.notes.append(claude.id, "API contract: GET /users → { id, name, email }[]");
+    res.json({ ok: true, agents: [claude, codex] });
+  });
+
   // ----- task planning -----
   app.get("/api/templates", (_req, res) => res.json({ templates: listTemplates() }));
   app.post("/api/missions/plan", (req, res) => {

@@ -176,6 +176,25 @@ describe("hub REST", () => {
     expect(res.body.templates[0]).toHaveProperty("label");
   });
 
+  it("seeds demo data and prevents double seeding", async () => {
+    const first = await request(app).post("/api/demo/seed").send();
+    expect(first.status).toBe(200);
+    expect(first.body.ok).toBe(true);
+    expect(first.body.agents).toHaveLength(2);
+
+    // snapshot should have agents, tasks, locks, messages, notes
+    const snap = await request(app).get("/api/snapshot");
+    expect(snap.body.agents.length).toBeGreaterThanOrEqual(2);
+    expect(snap.body.tasks.length).toBeGreaterThanOrEqual(4);
+    expect(snap.body.locks.length).toBeGreaterThanOrEqual(2);
+    expect(snap.body.messages.length).toBeGreaterThanOrEqual(2);
+
+    // second call should be a no-op
+    const second = await request(app).post("/api/demo/seed").send();
+    expect(second.body.ok).toBe(false);
+    expect(second.body.reason).toBe("already_seeded");
+  });
+
   it("installs the Codex config block into HOME", async () => {
     const originalHome = process.env.HOME;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "agenthub-home-"));
