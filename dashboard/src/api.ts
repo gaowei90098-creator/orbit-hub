@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Agent,
+  Approval,
   Conflict,
   ConnectInfo,
   Contract,
   FileLock,
   InstallResult,
+  IntegrationDetail,
+  IntegrationRun,
   Intent,
   Message,
   Mission,
@@ -16,6 +19,7 @@ import type {
   TaskDraft,
   TemplateInfo,
   Worker,
+  WorktreeDiff,
 } from "./types";
 import { OPERATOR_NAME } from "./util";
 
@@ -66,6 +70,11 @@ export interface HubActions {
   dismissConflict: (id: string, resolution: string) => Promise<void>;
   updateContract: (fields: { apiContract?: string; designSpec?: string; expectedVersion?: number }) => Promise<boolean>;
   seedDemo: () => Promise<void>;
+  getIntegration: (missionId: string) => Promise<IntegrationDetail | null>;
+  triggerIntegration: (missionId: string) => Promise<IntegrationRun>;
+  approveMission: (missionId: string, note?: string) => Promise<{ approval: Approval; resultCommit: string | null }>;
+  rejectMission: (missionId: string, note?: string) => Promise<{ approval: Approval }>;
+  getRunDiff: (runId: string) => Promise<WorktreeDiff | null>;
 }
 
 export interface HubState {
@@ -261,6 +270,44 @@ export function useHubState(): HubState {
     await api<{ ok: boolean }>("/api/demo/seed", { method: "POST", body: "{}" });
   }, []);
 
+  const getIntegration = useCallback(async (missionId: string): Promise<IntegrationDetail | null> => {
+    try {
+      return await api<IntegrationDetail>(`/api/missions/${missionId}/integration`);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const triggerIntegration = useCallback(async (missionId: string) => {
+    const r = await api<{ integration: IntegrationRun }>(`/api/missions/${missionId}/integrate`, {
+      method: "POST", body: "{}",
+    });
+    return r.integration;
+  }, []);
+
+  const approveMission = useCallback(async (missionId: string, note?: string) => {
+    return api<{ approval: Approval; resultCommit: string | null }>(`/api/missions/${missionId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ by: operatorRef.current, note: note ?? "" }),
+    });
+  }, []);
+
+  const rejectMission = useCallback(async (missionId: string, note?: string) => {
+    return api<{ approval: Approval }>(`/api/missions/${missionId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ by: operatorRef.current, note: note ?? "" }),
+    });
+  }, []);
+
+  const getRunDiff = useCallback(async (runId: string): Promise<WorktreeDiff | null> => {
+    try {
+      const r = await api<{ diff: WorktreeDiff }>(`/api/agent-runs/${runId}/diff`);
+      return r.diff;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const updateContract = useCallback(
     async (fields: { apiContract?: string; designSpec?: string; expectedVersion?: number }) => {
       const r = await api<{ ok: boolean }>("/api/contract", {
@@ -298,6 +345,11 @@ export function useHubState(): HubState {
       dismissConflict,
       updateContract,
       seedDemo,
+      getIntegration,
+      triggerIntegration,
+      approveMission,
+      rejectMission,
+      getRunDiff,
     },
   };
 }

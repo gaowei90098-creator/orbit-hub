@@ -16,10 +16,12 @@ import {
   Terminal,
 } from "lucide-react";
 import type { HubActions } from "../api";
-import type { Agent, Conflict, ConnectInfo, Contract, FileLock, Message, Mission, Task, Worker, WorkerStatus } from "../types";
+import type { Agent, Conflict, ConnectInfo, Contract, FileLock, Message, Mission, Task, Worker, WorkerStatus, WorktreeDiff } from "../types";
 import { isOperator, timeAgo } from "../util";
 import { MissionPlanner } from "./MissionPlanner";
 import { OnboardingGuide } from "./OnboardingGuide";
+import { IntegrationPanel } from "./IntegrationPanel";
+import { DiffSummary } from "./DiffSummary";
 
 const STATUS_LABEL: Record<Task["status"], string> = {
   todo: "待认领",
@@ -246,7 +248,18 @@ export function WorkflowHome({
   connectInfo: ConnectInfo | null;
   actions: HubActions;
 }) {
-  /* goal/projectPath/launching/error state moved to MissionPlanner */
+  const [expandedDiff, setExpandedDiff] = useState<string | null>(null);
+  const [diffData, setDiffData] = useState<Record<string, WorktreeDiff>>({});
+
+  const loadDiff = async (runId: string) => {
+    if (expandedDiff === runId) { setExpandedDiff(null); return; }
+    if (!diffData[runId]) {
+      const d = await actions.getRunDiff(runId);
+      if (d) setDiffData((prev) => ({ ...prev, [runId]: d }));
+    }
+    setExpandedDiff(runId);
+  };
+
   const peers = agents.filter((agent) => !isOperator(agent));
   const onlineAgents = peers.filter((agent) => agent.status === "online");
   const activeTasks = tasks.filter((task) => task.status !== "done");
@@ -327,28 +340,48 @@ export function WorkflowHome({
           </div>
           <div className="worker-list">
             {workers.slice(0, 5).map((worker) => (
-              <div key={worker.id} className={`worker-row ${worker.status}`}>
-                <span className="worker-icon">
-                  {worker.status === "done" ? (
-                    <CheckCircle2 size={17} />
-                  ) : worker.status === "failed" ? (
-                    <AlertTriangle size={17} />
-                  ) : (
-                    <Loader2 size={17} className="spin" />
-                  )}
-                </span>
-                <div className="worker-main">
-                  <b>{worker.taskTitle}</b>
-                  <small>{worker.status === "failed" ? worker.error : worker.lastActivity}</small>
+              <div key={worker.id}>
+                <div className={`worker-row ${worker.status}`}>
+                  <span className="worker-icon">
+                    {worker.status === "done" ? (
+                      <CheckCircle2 size={17} />
+                    ) : worker.status === "failed" ? (
+                      <AlertTriangle size={17} />
+                    ) : (
+                      <Loader2 size={17} className="spin" />
+                    )}
+                  </span>
+                  <div className="worker-main">
+                    <b>{worker.taskTitle}</b>
+                    <small>{worker.status === "failed" ? worker.error : worker.lastActivity}</small>
+                  </div>
+                  <div className="worker-meta">
+                    {worker.costUsd > 0 && <span className="worker-cost">${worker.costUsd.toFixed(2)}</span>}
+                    {worker.status === "done" && (
+                      <button className="btn btn-small" type="button" onClick={() => void loadDiff(worker.id)}>
+                        {expandedDiff === worker.id ? "收起" : "查看改动"}
+                      </button>
+                    )}
+                    <span className={`state-badge ${WORKER_TONE[worker.status]}`}>{WORKER_LABEL[worker.status]}</span>
+                  </div>
                 </div>
-                <div className="worker-meta">
-                  {worker.costUsd > 0 && <span className="worker-cost">${worker.costUsd.toFixed(2)}</span>}
-                  <span className={`state-badge ${WORKER_TONE[worker.status]}`}>{WORKER_LABEL[worker.status]}</span>
-                </div>
+                {expandedDiff === worker.id && diffData[worker.id] && (
+                  <div className="worker-diff-expand">
+                    <DiffSummary diff={diffData[worker.id]} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
         </section>
+      )}
+
+      {missions.length > 0 && (
+        <IntegrationPanel
+          mission={missions[missions.length - 1]}
+          workers={workers}
+          actions={actions}
+        />
       )}
 
       <section className="home-grid">

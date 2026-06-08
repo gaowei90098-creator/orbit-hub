@@ -171,6 +171,79 @@ export interface TemplateInfo {
   label: string;
 }
 
+// ----- Phase 4: Integration / Validation / Approval -----
+
+export type IntegrationStatus =
+  | "merging"
+  | "conflict"
+  | "validating"
+  | "ready"
+  | "failed"
+  | "merged"
+  | "rolled_back";
+
+export interface IntegrationRun {
+  id: string;
+  missionId: string;
+  branch: string;
+  worktreePath: string;
+  targetBranch: string;
+  baseCommit: string;
+  resultCommit: string | null;
+  mergedBranches: string[];
+  conflicts: string[];
+  status: IntegrationStatus;
+  validationRunIds: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ValidationRun {
+  id: string;
+  missionId: string;
+  taskId: string | null;
+  scope: "agent" | "integration";
+  command: string;
+  exitCode: number | null;
+  output: string;
+  ok: boolean;
+  startedAt: number;
+  finishedAt: number;
+}
+
+export interface Approval {
+  id: string;
+  missionId: string;
+  stage: "plan" | "integration" | "final";
+  decision: "approved" | "rejected";
+  approvedBy: string | null;
+  note: string;
+  createdAt: number;
+}
+
+export interface WorktreeDiffFile {
+  path: string;
+  added: number | null;
+  deleted: number | null;
+  binary: boolean;
+}
+
+export interface WorktreeDiff {
+  base: string;
+  files: WorktreeDiffFile[];
+  untracked: string[];
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
+export interface IntegrationDetail {
+  integration: IntegrationRun;
+  diff: WorktreeDiff | null;
+  validations: ValidationRun[];
+  approvals: Approval[];
+}
+
 export interface ConnectInfo {
   hubUrl: string;
   tokenRequired: boolean;
