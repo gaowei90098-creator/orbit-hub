@@ -1750,3 +1750,276 @@ body {
     width: auto;
   }
 }
+
+/* ============================================================
+   Mission Planner — step-based task decomposition wizard
+   ============================================================ */
+
+.mission-planner .panel-head p {
+  max-width: 480px;
+}
+
+.planner-step-indicator {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line-2);
+}
+.step-dot.active {
+  background: var(--accent);
+}
+
+/* Step 1: input */
+.planner-input-step {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.planner-goal-row {
+  display: flex;
+  gap: 8px;
+}
+.planner-goal-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  background: var(--card);
+  transition: border-color 0.15s;
+}
+.planner-goal-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.template-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.template-label {
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.template-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.template-chip {
+  padding: 4px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 20px;
+  font-size: 0.8rem;
+  background: var(--card);
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--muted-2);
+}
+.template-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.template-chip.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Step 2: plan */
+.planner-plan-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.plan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.plan-template-badge {
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--bg-soft);
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+.plan-goal-display {
+  padding: 8px 14px;
+  background: var(--bg-soft);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+.plan-goal-display b {
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.task-draft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.task-draft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  transition: border-color 0.15s;
+}
+.task-draft:hover {
+  border-color: var(--accent);
+}
+.task-draft.editing {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px;
+  border-color: var(--accent);
+}
+.task-draft-grip {
+  color: var(--muted);
+  cursor: grab;
+  flex-shrink: 0;
+}
+.task-draft-area {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.task-draft-area.frontend {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.task-draft-area.backend {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.task-draft-area.general {
+  background: var(--bg-soft);
+  color: var(--muted-2);
+}
+.task-draft-body {
+  flex: 1;
+  min-width: 0;
+}
+.task-draft-body b {
+  font-size: 0.88rem;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-draft-body small {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.task-draft-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.task-draft-actions button {
+  padding: 4px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+.task-draft-actions button:hover {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.task-draft-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.task-draft-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.task-draft-fields input,
+.task-draft-fields textarea,
+.task-draft-fields select {
+  padding: 6px 10px;
+  border: 1.5px solid var(--line);
+  border-radius: 6px;
+  font-size: 0.88rem;
+  background: var(--card-2);
+}
+.task-draft-fields textarea {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.plan-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+.btn-launch {
+  gap: 6px;
+}
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--muted-2);
+  font-size: 0.85rem;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.btn-ghost:hover {
+  background: var(--bg-soft);
+  color: var(--text);
+}
+
+.launcher-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--amber);
+  margin-top: 4px;
+}
+
+.planner-launching {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 32px 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}

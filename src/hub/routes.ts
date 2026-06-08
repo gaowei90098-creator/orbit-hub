@@ -8,6 +8,7 @@ import type { Agent, Harness, Task } from "../core/types.js";
 import type { RunManager } from "./run-manager.js";
 import type { IntegrationManager } from "./integration-manager.js";
 import { detectEnvironment } from "../drivers/detect.js";
+import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type TaskDraft } from "./task-planner.js";
 
 interface RouteOptions {
   tokenRequired?: boolean;
@@ -49,6 +50,16 @@ const updateContractSchema = z.object({
   designSpec: z.string().optional(),
   expectedVersion: z.number().optional(),
 });
+const taskDraftSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().default(""),
+  area: z.enum(["frontend", "backend", "general"]).default("general"),
+  files: z.array(z.string()).default([]),
+});
+const planMissionSchema = z.object({
+  goal: z.string().min(1),
+  template: z.string().optional(),
+});
 const launchMissionSchema = z.object({
   goal: z.string().min(1),
   projectId: z.string().optional(),
@@ -57,6 +68,8 @@ const launchMissionSchema = z.object({
   // 第二阶段：显式请求并行拉起的 worker（每个独立 worktree 并行修改）。
   // 不传则自动按"分配给可驱动 Agent 的任务"并行；都没有则回退单 worker。
   agents: z.array(z.enum(["claude-code", "codex"])).optional(),
+  // 用户编辑过的任务草案；不传则回退到自动拆分。
+  customTasks: z.array(taskDraftSchema).optional(),
 });
 const commandsSchema = z
   .object({
@@ -155,56 +168,7 @@ function installCodexConfig(snippet: string): { path: string; action: "created" 
   return { path: configPath, action: current ? "updated" : "created", content };
 }
 
-function agentArea(agent: Agent): "frontend" | "backend" | "general" {
-  // 操作员显式设置的 role 优先；只有未设 role 时才回退到 harness 默认归类，
-  // 避免 "把 Codex 设成后端" 这类显式意图被 harness 关键词覆盖。
-  const role = (agent.role ?? "").toLowerCase();
-  if (role) {
-    if (role.includes("前端") || role.includes("ui") || role.includes("front")) return "frontend";
-    if (role.includes("后端") || role.includes("api") || role.includes("back") || role.includes("服务")) return "backend";
-    return "general"; // 测试/设计/自定义角色不抢前后端槽位
-  }
-  if (agent.harness === "codex") return "frontend";
-  if (agent.harness === "claude-code") return "backend";
-  return "general";
-}
-
-// 拆任务的核心原则：始终覆盖"前端 + 后端"两端（这正是并行开发的两条线），
-// 但只把任务 assign 给【在线】的对应 Agent；该领域没有在线 Agent 时任务留在板上
-// （assignee=null → todo 待认领），等对应 Agent 上线后自己 claim，绝不硬派给离线的人。
-function taskPlan(onlineAgents: Agent[], goal: string): { title: string; description: string; assignee: string | null; files: string[] }[] {
-  const peers = onlineAgents.filter((a) => a.harness !== "other" && a.status === "online");
-  const frontendAgent = peers.find((a) => agentArea(a) === "frontend") ?? null;
-  const backendAgent = peers.find((a) => agentArea(a) === "backend") ?? null;
-
-  const plans = [
-    {
-      title: `前端 · ${goal}`,
-      description: `目标：${goal}\n\n你负责前端/UI/交互。开工前先 get_contract，再 declare_intent 并 acquire_file_lock 锁定要改的 UI 文件；接口不确定时先消息后端 Agent，避免改动撞车。`,
-      assignee: frontendAgent ? frontendAgent.id : null,
-      files: ["src/ui/**", "src/components/**", "dashboard/src/**"],
-    },
-    {
-      title: `后端 · ${goal}`,
-      description: `目标：${goal}\n\n你负责接口、数据模型和共享契约。开工前先 update_contract / get_contract，再 declare_intent 并 acquire_file_lock 锁定后端文件；接口有变要广播给前端 Agent。`,
-      assignee: backendAgent ? backendAgent.id : null,
-      files: ["src/api/**", "src/server/**", "src/core/**"],
-    },
-  ];
-
-  // 已被前/后端槽位占用之外的在线 Agent（测试/设计/额外成员）各补一个协作任务。
-  const taken = new Set([frontendAgent?.id, backendAgent?.id].filter(Boolean) as string[]);
-  for (const agent of peers) {
-    if (taken.has(agent.id)) continue;
-    plans.push({
-      title: `协作 · ${goal}（${agent.name}）`,
-      description: `目标：${goal}\n\n领取你最擅长的部分。开工前先读任务板、declare_intent、acquire_file_lock 锁文件，并与其他 Agent 保持消息同步。`,
-      assignee: agent.id,
-      files: [],
-    });
-  }
-  return plans;
-}
+// 旧的 taskPlan 已迁移至 task-planner.ts，通过 assignDraftsToAgents 实现。
 
 // 第二阶段：一次 mission 最多并行拉起的 worker 数（防止拉爆本机；验收场景为 2 个）。
 const MAX_PARALLEL_WORKERS = 4;
@@ -326,6 +290,15 @@ export function mountRoutes(
     res.json({ ok: true, ...installCodexConfig(info.codexToml) });
   });
 
+  // ----- task planning -----
+  app.get("/api/templates", (_req, res) => res.json({ templates: listTemplates() }));
+  app.post("/api/missions/plan", (req, res) => {
+    const body = parse(planMissionSchema, req, res);
+    if (!body) return;
+    const plan = body.template ? planWithTemplate(body.goal, body.template) : planTasks(body.goal);
+    res.json({ plan });
+  });
+
   // ----- missions -----
   app.get("/api/missions", (_req, res) => res.json({ missions: core.missions.list() }));
   app.get("/api/workers", (_req, res) => res.json({ workers: runs ? runs.list() : [] }));
@@ -334,10 +307,8 @@ export function mountRoutes(
     if (!body) return;
     const peers = core.agents.list().filter((a) => a.harness !== "other");
     const onlinePeers = peers.filter((a) => a.status === "online");
-    // 优先用已登记 Project（A04）；其 rootPath 作为 projectPath。否则回退到裸 projectPath。
     const project = body.projectId ? core.projects.get(body.projectId) : null;
     const projectPath = project ? project.rootPath : body.projectPath;
-    // worktree 计划与任务分配都只基于在线 Agent；离线领域的任务会留在板上待认领。
     const mission = core.missions.create({
       goal: body.goal,
       projectId: project?.id ?? null,
@@ -345,7 +316,12 @@ export function mountRoutes(
       createdBy: body.createdBy ?? null,
       agents: onlinePeers,
     });
-    const createdTasks = taskPlan(onlinePeers, body.goal).map((plan) => {
+    // 如果前端传了用户编辑过的任务草案，用它；否则自动规划。
+    const drafts: TaskDraft[] = body.customTasks && body.customTasks.length > 0
+      ? body.customTasks
+      : planTasks(body.goal).tasks;
+    const assignedPlans = assignDraftsToAgents(drafts, onlinePeers);
+    const createdTasks = assignedPlans.map((plan) => {
       const task = core.tasks.create({
         title: plan.title,
         description: plan.description,

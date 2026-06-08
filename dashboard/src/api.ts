@@ -9,9 +9,12 @@ import type {
   Intent,
   Message,
   Mission,
+  MissionPlan,
   Note,
   Snapshot,
   Task,
+  TaskDraft,
+  TemplateInfo,
   Worker,
 } from "./types";
 import { OPERATOR_NAME } from "./util";
@@ -54,7 +57,9 @@ const EMPTY_CONTRACT: Contract = { apiContract: "", designSpec: "", version: 0, 
 export interface HubActions {
   send: (to: string, content: string) => Promise<void>;
   createTask: (input: { title: string; description?: string; assignee?: string }) => Promise<void>;
-  launchMission: (input: { goal: string; projectPath?: string }) => Promise<void>;
+  planMission: (input: { goal: string; template?: string }) => Promise<MissionPlan>;
+  launchMission: (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[] }) => Promise<void>;
+  listTemplates: () => Promise<TemplateInfo[]>;
   installCodexConfig: () => Promise<InstallResult>;
   setRole: (agentId: string, role: string | null) => Promise<void>;
   resolveConflict: (id: string, resolution: string) => Promise<void>;
@@ -202,13 +207,31 @@ export function useHubState(): HubState {
     }
   }, []);
 
-  const launchMission = useCallback(async (input: { goal: string; projectPath?: string }) => {
+  const planMission = useCallback(async (input: { goal: string; template?: string }) => {
+    const { plan } = await api<{ plan: MissionPlan }>("/api/missions/plan", {
+      method: "POST",
+      body: JSON.stringify({ goal: input.goal, template: input.template }),
+    });
+    return plan;
+  }, []);
+
+  const launchMission = useCallback(async (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[] }) => {
     const goal = input.goal.trim();
     if (!goal) return;
     await api("/api/missions/launch", {
       method: "POST",
-      body: JSON.stringify({ goal, projectPath: input.projectPath, createdBy: operatorRef.current }),
+      body: JSON.stringify({
+        goal,
+        projectPath: input.projectPath,
+        createdBy: operatorRef.current,
+        customTasks: input.customTasks,
+      }),
     });
+  }, []);
+
+  const fetchTemplates = useCallback(async () => {
+    const { templates } = await api<{ templates: TemplateInfo[] }>("/api/templates");
+    return templates;
   }, []);
 
   const installCodexConfig = useCallback(async () => {
@@ -261,7 +284,9 @@ export function useHubState(): HubState {
     actions: {
       send,
       createTask,
+      planMission,
       launchMission,
+      listTemplates: fetchTemplates,
       installCodexConfig,
       setRole,
       resolveConflict,

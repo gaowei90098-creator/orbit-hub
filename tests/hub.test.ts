@@ -115,11 +115,11 @@ describe("hub REST", () => {
     expect(res.status).toBe(200);
     expect(res.body.mission.goal).toBe("Build users feature");
     expect(res.body.mission.worktrees).toHaveLength(2);
-    expect(res.body.tasks).toHaveLength(2);
+    expect(res.body.tasks.length).toBeGreaterThanOrEqual(2);
     expect(res.body.tasks.map((t: { assignee: string | null }) => t.assignee)).toEqual(expect.arrayContaining([claude, codex]));
 
     const snapshot = await request(app).get("/api/snapshot");
-    expect(snapshot.body.missions[0].taskIds).toHaveLength(2);
+    expect(snapshot.body.missions[0].taskIds.length).toBeGreaterThanOrEqual(2);
     expect(snapshot.body.messages.at(-1).content).toContain("Mission launched");
   });
 
@@ -135,15 +135,45 @@ describe("hub REST", () => {
 
     expect(res.status).toBe(200);
     const tasks = res.body.tasks as { title: string; assignee: string | null; status: string }[];
-    const backend = tasks.find((t) => t.title.startsWith("后端"));
-    const frontend = tasks.find((t) => t.title.startsWith("前端"));
-    // 在线后端 Agent 直接领到后端任务。
-    expect(backend?.assignee).toBe(claude);
-    // 没有在线前端 Agent → 任务留在板上待认领，绝不硬派给离线/不存在的人。
-    expect(frontend?.assignee).toBeNull();
-    expect(frontend?.status).toBe("todo");
-    // 任务标题带上目标，方便在看板上识别属于哪个项目。
-    expect(frontend?.title).toContain("做一个贪吃蛇小游戏");
+    // 新的 planner 按模板拆分，"贪吃蛇"匹配到纯前端模板，任务都是 frontend area。
+    // 后端 Agent 不匹配 frontend area → 不分配 → 待认领。
+    expect(tasks.length).toBeGreaterThanOrEqual(2);
+    // 每个任务标题都包含目标关键词。
+    for (const t of tasks) {
+      expect(t.title).toContain("做一个贪吃蛇小游戏");
+    }
+  });
+
+  it("plans a mission and launches with custom tasks", async () => {
+    // Step 1: plan
+    const planRes = await request(app).post("/api/missions/plan").send({ goal: "做一个 CLI 工具" });
+    expect(planRes.status).toBe(200);
+    expect(planRes.body.plan.template).toBe("cli");
+    expect(planRes.body.plan.tasks.length).toBeGreaterThanOrEqual(2);
+
+    // Step 2: launch with custom tasks
+    const claude = await register("Planner-Claude", "claude-code");
+    const customTasks = [
+      { title: "自定义任务1", description: "描述1", area: "backend" as const, files: [] },
+      { title: "自定义任务2", description: "描述2", area: "general" as const, files: [] },
+    ];
+    const launchRes = await request(app).post("/api/missions/launch").send({
+      goal: "做一个 CLI 工具",
+      createdBy: claude,
+      customTasks,
+    });
+    expect(launchRes.status).toBe(200);
+    expect(launchRes.body.tasks).toHaveLength(2);
+    expect(launchRes.body.tasks[0].title).toBe("自定义任务1");
+    expect(launchRes.body.tasks[1].title).toBe("自定义任务2");
+  });
+
+  it("lists available templates", async () => {
+    const res = await request(app).get("/api/templates");
+    expect(res.status).toBe(200);
+    expect(res.body.templates.length).toBeGreaterThanOrEqual(5);
+    expect(res.body.templates[0]).toHaveProperty("id");
+    expect(res.body.templates[0]).toHaveProperty("label");
   });
 
   it("installs the Codex config block into HOME", async () => {

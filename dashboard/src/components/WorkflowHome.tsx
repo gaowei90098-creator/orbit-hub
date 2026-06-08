@@ -12,13 +12,13 @@ import {
   Loader2,
   MessageSquare,
   PlugZap,
-  Rocket,
   Settings,
   Terminal,
 } from "lucide-react";
 import type { HubActions } from "../api";
 import type { Agent, Conflict, ConnectInfo, Contract, FileLock, Message, Mission, Task, Worker, WorkerStatus } from "../types";
 import { isOperator, timeAgo } from "../util";
+import { MissionPlanner } from "./MissionPlanner";
 
 const STATUS_LABEL: Record<Task["status"], string> = {
   todo: "待认领",
@@ -245,10 +245,7 @@ export function WorkflowHome({
   connectInfo: ConnectInfo | null;
   actions: HubActions;
 }) {
-  const [goal, setGoal] = useState("");
-  const [projectPath, setProjectPath] = useState("");
-  const [launching, setLaunching] = useState(false);
-  const [error, setError] = useState("");
+  /* goal/projectPath/launching/error state moved to MissionPlanner */
   const peers = agents.filter((agent) => !isOperator(agent));
   const onlineAgents = peers.filter((agent) => agent.status === "online");
   const activeTasks = tasks.filter((task) => task.status !== "done");
@@ -256,7 +253,6 @@ export function WorkflowHome({
   const agentLabels = new Map(peers.map((agent, index) => [agent.id, agentDisplayName(agent, index)]));
   const agentById = new Map(agents.map((agent) => [agent.id, agent]));
   const openConflicts = conflicts.filter((conflict) => conflict.status === "open");
-  const activeMission = missions.find((mission) => mission.status === "active") ?? missions[0];
   const noAgentConnected = connected && peers.length === 0;
   const allAgentsOffline = connected && peers.length > 0 && onlineAgents.length === 0;
   const offlineAssignedTasks = activeTasks.filter((task) => {
@@ -284,67 +280,11 @@ export function WorkflowHome({
       .slice(0, 5);
   }, [agentLabels, messages, tasks]);
 
-  const launch = async () => {
-    const trimmed = goal.trim();
-    if (launching || !trimmed) return;
-    // 键盘回车和按钮共用同一道守卫：没有在线智能体时一律不发起，避免任务派给无人接收。
-    if (!connected || onlineAgents.length === 0) {
-      setError("请先连接至少一个在线智能体，再启动任务。");
-      return;
-    }
-    setError("");
-    setLaunching(true);
-    try {
-      await actions.launchMission({ goal: trimmed, projectPath: projectPath.trim() || undefined });
-      setGoal("");
-    } catch {
-      setError("启动失败，请确认 Hub 服务仍在运行后重试。");
-    } finally {
-      setLaunching(false);
-    }
-  };
-
-  const canLaunch = connected && onlineAgents.length > 0 && goal.trim().length > 0 && !launching;
-
   return (
     <div className="workspace-home">
       <ConnectionGuide agents={agents} connectInfo={connectInfo} actions={actions} />
 
-      <section className="page-hero" id="launch-mission">
-        <div>
-          <h1>协作控制台</h1>
-          <p>连接两个智能体后，在这里输入目标；枢纽会拆任务、分配负责人，并把任务广播给智能体。</p>
-          {activeMission && <span className="current-goal">当前任务：{activeMission.goal}</span>}
-        </div>
-        <div className="mission-launcher-wrap">
-          <div className="mission-launcher">
-            <input
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              placeholder="输入这次要完成的目标"
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void launch();
-              }}
-            />
-            <button className="btn btn-primary" disabled={!canLaunch} onClick={() => void launch()}>
-              {launching ? <Loader2 size={16} className="spin" /> : <Rocket size={16} />}
-              启动任务
-            </button>
-          </div>
-          <input
-            className="project-path-input"
-            value={projectPath}
-            onChange={(event) => setProjectPath(event.target.value)}
-            placeholder="项目目录（可选，填了就自动派 Claude Code 去做，例：/Users/you/proj）"
-          />
-          {error && (
-            <p className="launcher-error" role="alert">
-              <AlertTriangle size={14} />
-              {error}
-            </p>
-          )}
-        </div>
-      </section>
+      <MissionPlanner agents={agents} connected={connected} actions={actions} />
 
       <section className="summary-grid" aria-label="关键状态">
         <SummaryCard

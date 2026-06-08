@@ -153,6 +153,24 @@ export interface Snapshot {
   missions: Mission[];
 }
 
+export interface TaskDraft {
+  title: string;
+  description: string;
+  area: "frontend" | "backend" | "general";
+  files: string[];
+}
+
+export interface MissionPlan {
+  template: string;
+  templateLabel: string;
+  tasks: TaskDraft[];
+}
+
+export interface TemplateInfo {
+  id: string;
+  label: string;
+}
+
 export interface ConnectInfo {
   hubUrl: string;
   tokenRequired: boolean;
