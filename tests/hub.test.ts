@@ -168,6 +168,25 @@ describe("hub REST", () => {
     expect(launchRes.body.tasks[1].title).toBe("自定义任务2");
   });
 
+  it("plan falls back to fullstack for unknown template id", async () => {
+    const res = await request(app).post("/api/missions/plan").send({ goal: "build something", template: "nonexistent" });
+    expect(res.status).toBe(200);
+    // falls back to TEMPLATES[0] = fullstack
+    expect(res.body.plan.template).toBe("fullstack");
+  });
+
+  it("launch with empty customTasks array falls back to auto planning", async () => {
+    const claude = await register("FallbackClaude", "claude-code");
+    const res = await request(app).post("/api/missions/launch").send({
+      goal: "做一个 API 服务",
+      createdBy: claude,
+      customTasks: [],
+    });
+    expect(res.status).toBe(200);
+    // empty array → fallback to planTasks()
+    expect(res.body.tasks.length).toBeGreaterThanOrEqual(2);
+  });
+
   it("lists available templates", async () => {
     const res = await request(app).get("/api/templates");
     expect(res.status).toBe(200);
