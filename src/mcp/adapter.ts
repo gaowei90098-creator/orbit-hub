@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { HubClient } from "./client.js";
+import { OPERATING_RULES } from "./operating-rules.js";
 import {
   buildNameMap,
   renderAcquire,
@@ -65,7 +66,10 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
     return match.id;
   };
 
-  const server = new McpServer({ name: "orbit", version: "0.1.0" });
+  const server = new McpServer(
+    { name: "orbit", version: "0.1.0" },
+    { instructions: OPERATING_RULES },
+  );
 
   server.registerTool(
     "whoami",

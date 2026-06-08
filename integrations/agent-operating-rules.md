@@ -1,11 +1,12 @@
-# Agent Operating Rules (paste into each agent)
+# Agent Operating Rules
+
+> **Auto-injected**: These rules are automatically delivered to every agent via MCP server
+> `instructions` when it connects to Orbit. You do NOT need to paste them manually.
+> This file is kept as a reference and for advanced customization.
 
 You are collaborating with **other AI agents** on the same project through **Orbit**.
 The hub gives you MCP tools to coordinate. Tools only help if you actually use them — follow
 this protocol so two agents never duplicate work or clobber each other's files.
-
-> Paste this whole section into the agent's standing instructions:
-> Claude Code → `CLAUDE.md`; Codex → `AGENTS.md` (or the system/instruction prompt).
 
 ## On startup (every session)
 1. `whoami` — confirm your identity on the hub.

@@ -12,7 +12,7 @@
 <a href="https://github.com/gaowei90098-creator/orbit-hub/network/members"><img src="https://img.shields.io/github/forks/gaowei90098-creator/orbit-hub?color=yellow" alt="Forks"></a>
 <img src="https://img.shields.io/badge/Node-%E2%89%A522-339933?logo=node.js&logoColor=white" alt="Node >= 22">
 <img src="https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
-<img src="https://img.shields.io/badge/tests-125%20passing-brightgreen" alt="Tests">
+<img src="https://img.shields.io/badge/tests-126%20passing-brightgreen" alt="Tests">
 <img src="https://img.shields.io/badge/MCP-stdio-7C3AED" alt="Model Context Protocol">
 <img src="https://img.shields.io/badge/local--first-no%20API%20keys-0EA5E9" alt="Local-first, no API keys">
 
@@ -143,7 +143,7 @@ The start banner prints the exact commands to connect each agent (with correct a
 
 - **Claude Code** — see [`integrations/claude-code.md`](integrations/claude-code.md)
 - **Codex** — see [`integrations/codex.md`](integrations/codex.md)
-- Paste [`integrations/agent-operating-rules.md`](integrations/agent-operating-rules.md) into each agent's `CLAUDE.md` / `AGENTS.md` so they follow the protocol.
+- The [agent operating rules](integrations/agent-operating-rules.md) are **automatically injected** via MCP instructions — no manual pasting needed. See the file if you want to customize.
 
 Open **http://localhost:4100** to watch the dashboard. To see it populated without real agents:
 

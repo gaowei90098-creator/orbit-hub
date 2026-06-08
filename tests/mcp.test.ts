@@ -46,6 +46,21 @@ const call = (c: Client, name: string, args: Record<string, unknown> = {}) =>
   c.callTool({ name, arguments: args }) as Promise<ToolCallResult>;
 
 describe("MCP adapter end-to-end", () => {
+  it("injects operating rules as server instructions", async () => {
+    const { server } = await createAgentServer({ hubUrl, agentName: "RuleTest", harness: "claude-code" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    const client = new Client({ name: "rule-test-client", version: "1.0.0" });
+    await client.connect(clientTransport);
+    clients.push(client);
+    const instructions = client.getInstructions();
+    expect(instructions).toBeDefined();
+    expect(instructions).toContain("claim_task");
+    expect(instructions).toContain("acquire_file_lock");
+    expect(instructions).toContain("update_contract");
+    expect(instructions).toContain("anti-clobber");
+  });
+
   it("exposes the full toolset", async () => {
     const claude = await connectAgent("Claude", "claude-code");
     const tools = await claude.listTools();
