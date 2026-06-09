@@ -566,10 +566,12 @@ export class Store {
     const row = this.db.prepare(`SELECT * FROM agents WHERE id = ?`).get(id) as AgentRow | undefined;
     return row ? toAgent(row) : null;
   }
-  findAgentByName(name: string): Agent | null {
+  // 按 (name, principal) 定位 Agent：团队场景下两个人各自的同名 Agent（如都叫 "Claude"）
+  // 归属不同 principal，不会互相复用 id。COALESCE 兼容早期 principal 为 NULL 的旧数据。
+  findAgentByNameAndPrincipal(name: string, principal: string): Agent | null {
     const row = this.db
-      .prepare(`SELECT * FROM agents WHERE name = ? ORDER BY registered_at DESC LIMIT 1`)
-      .get(name) as AgentRow | undefined;
+      .prepare(`SELECT * FROM agents WHERE name = ? AND COALESCE(principal, '本机') = ? ORDER BY registered_at DESC LIMIT 1`)
+      .get(name, principal) as AgentRow | undefined;
     return row ? toAgent(row) : null;
   }
   listAgents(): Agent[] {

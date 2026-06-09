@@ -10,11 +10,13 @@ export class Agents {
     private readonly events: EventBus,
   ) {}
 
-  // Idempotent by name: re-registering an existing name re-uses its id (reconnect-friendly).
-  // Re-register preserves an already-assigned role; principal follows the latest connection.
+  // Idempotent by (name, principal): re-registering the same name under the same principal
+  // re-uses its id (reconnect-friendly). Different principals with the same name are distinct
+  // agents — so two teammates can both run an agent named "Claude" without colliding.
+  // Re-register preserves an already-assigned role.
   register(name: string, harness: Harness, principal = "本机"): Agent {
     const now = Date.now();
-    const existing = this.store.findAgentByName(name);
+    const existing = this.store.findAgentByNameAndPrincipal(name, principal);
     if (existing) {
       const updated: Agent = { ...existing, harness, status: "online", lastSeen: now, principal };
       this.store.upsertAgent(updated);

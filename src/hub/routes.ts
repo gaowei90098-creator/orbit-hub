@@ -117,7 +117,7 @@ function cliLaunchParts(): { command: string; baseArgs: string[] } {
   return launchParts(cliPath);
 }
 
-function mcpArgs(name: string, harness: string, url: string, tokenRequired: boolean): string[] {
+function mcpArgs(name: string, harness: string, url: string, tokenRequired: boolean, principal?: string): string[] {
   return [
     ...cliLaunchParts().baseArgs,
     "mcp",
@@ -127,18 +127,24 @@ function mcpArgs(name: string, harness: string, url: string, tokenRequired: bool
     harness,
     "--hub",
     url,
+    ...(principal ? ["--principal", principal] : []),
     ...(tokenRequired ? ["--token", "<TOKEN>"] : []),
   ];
 }
 
-function connectInfo(req: Request, tokenRequired: boolean) {
+// principal：团队成员归属方。带上时，连接命令会注入 --principal 并给 Agent 名加前缀
+// （如 Bob-Claude），这样同名 Agent 按 principal 隔离、面板也能区分是谁的。
+function connectInfo(req: Request, tokenRequired: boolean, principal?: string) {
   const url = hubUrl(req);
   const { command } = cliLaunchParts();
-  const claudeArgs = mcpArgs("Claude", "claude-code", url, tokenRequired);
-  const codexArgs = mcpArgs("Codex", "codex", url, tokenRequired);
+  const claudeName = principal ? `${principal}-Claude` : "Claude";
+  const codexName = principal ? `${principal}-Codex` : "Codex";
+  const claudeArgs = mcpArgs(claudeName, "claude-code", url, tokenRequired, principal);
+  const codexArgs = mcpArgs(codexName, "codex", url, tokenRequired, principal);
   return {
     hubUrl: url,
     tokenRequired,
+    principal: principal ?? null,
     claudeCommand: `claude mcp add ${MCP_SERVER_ID} -- ${command} ${claudeArgs.map(shellQuote).join(" ")}`,
     codexToml: [
       `[mcp_servers.${MCP_SERVER_ID}]`,
@@ -146,6 +152,12 @@ function connectInfo(req: Request, tokenRequired: boolean) {
       `args = [${codexArgs.map((a) => JSON.stringify(a)).join(", ")}]`,
     ].join("\n"),
   };
+}
+
+// 从请求 query 取可选 principal（团队成员名），空白视为未提供。
+function principalFromQuery(req: Request): string | undefined {
+  const p = req.query.principal;
+  return typeof p === "string" && p.trim() ? p.trim() : undefined;
 }
 
 function installCodexConfig(snippet: string): { path: string; action: "created" | "updated"; content: string } {
@@ -286,9 +298,9 @@ export function mountRoutes(
     }
     res.json({ run: result.run });
   });
-  app.get("/api/connect", (req, res) => res.json(connectInfo(req, Boolean(options.tokenRequired))));
+  app.get("/api/connect", (req, res) => res.json(connectInfo(req, Boolean(options.tokenRequired), principalFromQuery(req))));
   app.post("/api/connect/install/codex", (req, res) => {
-    const info = connectInfo(req, Boolean(options.tokenRequired));
+    const info = connectInfo(req, Boolean(options.tokenRequired), principalFromQuery(req));
     res.json({ ok: true, ...installCodexConfig(info.codexToml) });
   });
 

@@ -32,6 +32,23 @@ describe("hub REST", () => {
     expect(list.body.agents).toHaveLength(2);
   });
 
+  it("isolates same-named agents by principal but reuses id on reconnect (团队隔离)", async () => {
+    const alice = await request(app).post("/api/agents").send({ name: "Claude", harness: "claude-code", principal: "Alice" });
+    const bob = await request(app).post("/api/agents").send({ name: "Claude", harness: "claude-code", principal: "Bob" });
+    // 同名不同 principal → 两个不同 Agent（不互相覆盖）。
+    expect(alice.body.agent.id).not.toBe(bob.body.agent.id);
+
+    // 同名同 principal 再连 → 复用同一 id（重连友好）。
+    const aliceReconnect = await request(app).post("/api/agents").send({ name: "Claude", harness: "claude-code", principal: "Alice" });
+    expect(aliceReconnect.body.agent.id).toBe(alice.body.agent.id);
+    expect((await request(app).get("/api/agents")).body.agents).toHaveLength(2);
+
+    // 默认 principal（本机）与具名 principal 也互不复用。
+    const local = await request(app).post("/api/agents").send({ name: "Claude", harness: "claude-code" });
+    expect(local.body.agent.id).not.toBe(alice.body.agent.id);
+    expect((await request(app).get("/api/agents")).body.agents).toHaveLength(3);
+  });
+
   it("returns connection snippets for agent setup", async () => {
     const res = await request(app).get("/api/connect").set("Host", "localhost:4100");
     expect(res.status).toBe(200);
@@ -40,6 +57,20 @@ describe("hub REST", () => {
     expect(res.body.codexToml).toContain("[mcp_servers.orbit]");
     expect(res.body.codexToml).toContain("--harness");
     expect(res.body.tokenRequired).toBe(false);
+    // 默认无 principal（本地场景）。
+    expect(res.body.principal).toBeNull();
+    expect(res.body.claudeCommand).not.toContain("--principal");
+  });
+
+  it("injects principal into connect snippets for team members", async () => {
+    const res = await request(app).get("/api/connect").query({ principal: "Bob" }).set("Host", "localhost:4100");
+    expect(res.status).toBe(200);
+    expect(res.body.principal).toBe("Bob");
+    // 命令带 --principal，且 Agent 名加前缀以便面板区分是谁的。
+    expect(res.body.claudeCommand).toContain("--principal Bob");
+    expect(res.body.claudeCommand).toContain("Bob-Claude");
+    expect(res.body.codexToml).toContain("Bob");
+    expect(res.body.codexToml).toContain("--principal");
   });
 
   it("rejects an invalid register body with 400", async () => {
