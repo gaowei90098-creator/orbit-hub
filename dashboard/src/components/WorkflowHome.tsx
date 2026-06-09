@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -9,11 +9,14 @@ import {
   Copy,
   FileLock2,
   FileText,
+  Globe,
+  KeyRound,
   Loader2,
   MessageSquare,
   PlugZap,
   Settings,
   Terminal,
+  Users,
 } from "lucide-react";
 import type { HubActions } from "../api";
 import type { Agent, Conflict, ConnectInfo, Contract, FileLock, Message, Mission, Task, Worker, WorkerStatus, WorktreeDiff } from "../types";
@@ -110,15 +113,35 @@ function ConnectionGuide({
   const [installing, setInstalling] = useState(false);
   const [installedPath, setInstalledPath] = useState("");
   const [copiedCodex, setCopiedCodex] = useState(false);
+  const [member, setMember] = useState("");
+  const [teamConnect, setTeamConnect] = useState<ConnectInfo | null>(null);
+  const [teamOpen, setTeamOpen] = useState(false);
   const peers = agents.filter((agent) => !isOperator(agent));
   const online = peers.filter((agent) => agent.status === "online");
   const claudeOnline = peers.some((agent) => agent.harness === "claude-code" && agent.status === "online");
   const codexOnline = peers.some((agent) => agent.harness === "codex" && agent.status === "online");
 
+  // 填了成员名 → 拉取带 principal 的连接命令（防抖）；清空则回到默认（本机）版本。
+  useEffect(() => {
+    const name = member.trim();
+    if (!name) {
+      setTeamConnect(null);
+      return;
+    }
+    const id = setTimeout(() => {
+      void actions.fetchConnect(name).then(setTeamConnect).catch(() => {});
+    }, 400);
+    return () => clearTimeout(id);
+  }, [member, actions]);
+
+  // 当前展示的连接信息：填了成员名用其专属版本，否则用默认。
+  const active = teamConnect ?? connectInfo;
+  const isLocalHub = active ? /localhost|127\.0\.0\.1/.test(active.hubUrl) : true;
+
   const installCodex = async () => {
     setInstalling(true);
     try {
-      const result = await actions.installCodexConfig();
+      const result = await actions.installCodexConfig(member.trim() || undefined);
       setInstalledPath(result.path);
     } finally {
       setInstalling(false);
@@ -126,8 +149,8 @@ function ConnectionGuide({
   };
 
   const copyCodex = async () => {
-    if (!connectInfo) return;
-    await copyText(connectInfo.codexToml);
+    if (!active) return;
+    await copyText(active.codexToml);
     setCopiedCodex(true);
     setTimeout(() => setCopiedCodex(false), 1300);
   };
@@ -161,12 +184,12 @@ function ConnectionGuide({
         </div>
       </div>
 
-      {connectInfo ? (
+      {active ? (
         <div className="connect-grid">
           <CopyCommand
             title="连接 Claude Code"
             description="在 Claude Code 项目目录里运行这条命令，然后重启/继续 Claude Code 会话。"
-            value={connectInfo.claudeCommand}
+            value={active.claudeCommand}
           />
           <div className="command-box">
             <div className="command-head">
@@ -187,12 +210,53 @@ function ConnectionGuide({
             </div>
             <p>推荐点击“一键写入”，然后重启 Codex 线程或让 Codex 重新读取配置。</p>
             {installedPath && <div className="installed-line">已写入：{installedPath}</div>}
-            <pre>{connectInfo.codexToml}</pre>
+            <pre>{active.codexToml}</pre>
           </div>
         </div>
       ) : (
         <div className="empty-soft">正在读取连接信息。如果一直为空，请确认 Hub 服务仍在运行。</div>
       )}
+
+      <div className="team-connect">
+        <button className="team-connect-toggle" type="button" onClick={() => setTeamOpen((v) => !v)}>
+          <Users size={15} />
+          团队 / 远程协作
+          <span className="team-connect-caret">{teamOpen ? "收起" : "展开"}</span>
+        </button>
+        {teamOpen && (
+          <div className="team-connect-body">
+            <label className="team-member-field">
+              <span>你的名字（团队协作时填，用于区分这是谁的 Agent）</span>
+              <input value={member} onChange={(e) => setMember(e.target.value)} placeholder="例如：Bob" />
+            </label>
+            {member.trim() && (
+              <p className="team-hint">
+                <Check size={13} />
+                上方命令已切换为 <b>{member.trim()}</b> 的专属版本（Agent 名带前缀、按归属隔离，不会与队友撞车）。
+              </p>
+            )}
+            <div className="remote-connect">
+              <div className="remote-row">
+                <Globe size={14} />
+                <span>
+                  枢纽地址：<code>{active?.hubUrl ?? "—"}</code>
+                </span>
+              </div>
+              <div className="remote-row">
+                <KeyRound size={14} />
+                <span>{active?.tokenRequired ? "需要令牌（已启用 HUB_TOKEN）" : "无令牌（本地开放模式）"}</span>
+              </div>
+              {isLocalHub && (
+                <p className="remote-tip">
+                  要让远程队友连入：用 <code>HUB_TOKEN=$(openssl rand -hex 16) node dist/cli.js start</code> 启动，
+                  再用 <code>tailscale serve 4100</code> 或 <code>ngrok http 4100</code> 暴露端口，把得到的地址和令牌发给队友。
+                  队友打开该地址、填上自己的名字，就能拿到专属连接命令。
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="connect-next">
         <PlugZap size={16} />

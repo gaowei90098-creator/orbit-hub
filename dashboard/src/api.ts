@@ -64,7 +64,8 @@ export interface HubActions {
   planMission: (input: { goal: string; template?: string }) => Promise<MissionPlan>;
   launchMission: (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[] }) => Promise<void>;
   listTemplates: () => Promise<TemplateInfo[]>;
-  installCodexConfig: () => Promise<InstallResult>;
+  fetchConnect: (principal?: string) => Promise<ConnectInfo>;
+  installCodexConfig: (principal?: string) => Promise<InstallResult>;
   setRole: (agentId: string, role: string | null) => Promise<void>;
   resolveConflict: (id: string, resolution: string) => Promise<void>;
   dismissConflict: (id: string, resolution: string) => Promise<void>;
@@ -245,8 +246,22 @@ export function useHubState(): HubState {
     return templates;
   }, []);
 
-  const installCodexConfig = useCallback(async () => {
-    return api<InstallResult>(`/api/connect/install/codex${qs()}`, { method: "POST" });
+  // 拼接 token + 可选 principal 的查询串（团队/远程连接共用）。
+  const connectQuery = (principal?: string): string => {
+    const params = new URLSearchParams();
+    const t = getToken();
+    if (t) params.set("token", t);
+    if (principal?.trim()) params.set("principal", principal.trim());
+    const q = params.toString();
+    return q ? `?${q}` : "";
+  };
+
+  const fetchConnect = useCallback(async (principal?: string) => {
+    return api<ConnectInfo>(`/api/connect${connectQuery(principal)}`);
+  }, []);
+
+  const installCodexConfig = useCallback(async (principal?: string) => {
+    return api<InstallResult>(`/api/connect/install/codex${connectQuery(principal)}`, { method: "POST" });
   }, []);
 
   const setRole = useCallback(async (agentId: string, role: string | null) => {
@@ -346,6 +361,7 @@ export function useHubState(): HubState {
       planMission,
       launchMission,
       listTemplates: fetchTemplates,
+      fetchConnect,
       installCodexConfig,
       setRole,
       resolveConflict,

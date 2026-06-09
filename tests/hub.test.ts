@@ -62,6 +62,18 @@ describe("hub REST", () => {
     expect(res.body.claudeCommand).not.toContain("--principal");
   });
 
+  it("uses x-forwarded-host for connect url behind a tunnel/proxy (跨机)", async () => {
+    const res = await request(app)
+      .get("/api/connect")
+      .set("Host", "localhost:4100")
+      .set("X-Forwarded-Host", "team.example.ts.net")
+      .set("X-Forwarded-Proto", "https");
+    // 隧道场景：连接命令必须指向公网地址，而非本机 localhost。
+    expect(res.body.hubUrl).toBe("https://team.example.ts.net");
+    expect(res.body.claudeCommand).toContain("https://team.example.ts.net");
+    expect(res.body.claudeCommand).not.toContain("localhost");
+  });
+
   it("injects principal into connect snippets for team members", async () => {
     const res = await request(app).get("/api/connect").query({ principal: "Bob" }).set("Host", "localhost:4100");
     expect(res.status).toBe(200);

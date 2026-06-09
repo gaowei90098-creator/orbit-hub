@@ -247,6 +247,7 @@ export interface IntegrationDetail {
 export interface ConnectInfo {
   hubUrl: string;
   tokenRequired: boolean;
+  principal?: string | null;
   claudeCommand: string;
   codexToml: string;
 }

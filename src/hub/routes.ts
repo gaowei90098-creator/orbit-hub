@@ -108,8 +108,13 @@ function shellQuote(s: string): string {
 
 function hubUrl(req: Request): string {
   const forwardedProto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0]?.trim();
+  // 跨机协作关键：隧道/反代（tailscale serve、ngrok）会把请求转发到 localhost，
+  // 真实公网 host 在 x-forwarded-host 里。优先用它，否则生成的连接命令会指向 localhost，
+  // 队友复制后根本连不上。
+  const forwardedHost = String(req.headers["x-forwarded-host"] ?? "").split(",")[0]?.trim();
   const proto = forwardedProto || req.protocol || "http";
-  return `${proto}://${req.get("host")}`;
+  const host = forwardedHost || req.get("host") || "localhost";
+  return `${proto}://${host}`;
 }
 
 function cliLaunchParts(): { command: string; baseArgs: string[] } {
