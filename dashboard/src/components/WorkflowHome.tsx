@@ -22,6 +22,7 @@ import type { HubActions } from "../api";
 import type { Agent, Conflict, ConnectInfo, Contract, FileLock, Message, Mission, Task, Worker, WorkerStatus, WorktreeDiff } from "../types";
 import { isOperator, timeAgo } from "../util";
 import { MissionPlanner } from "./MissionPlanner";
+import { TeamMembers } from "./TeamMembers";
 import { OnboardingGuide } from "./OnboardingGuide";
 import { IntegrationPanel } from "./IntegrationPanel";
 import { DiffSummary } from "./DiffSummary";
@@ -116,6 +117,8 @@ function ConnectionGuide({
   const [member, setMember] = useState("");
   const [teamConnect, setTeamConnect] = useState<ConnectInfo | null>(null);
   const [teamOpen, setTeamOpen] = useState(false);
+  const [genToken, setGenToken] = useState("");
+  const [copiedToken, setCopiedToken] = useState(false);
   const peers = agents.filter((agent) => !isOperator(agent));
   const online = peers.filter((agent) => agent.status === "online");
   const claudeOnline = peers.some((agent) => agent.harness === "claude-code" && agent.status === "online");
@@ -244,13 +247,57 @@ function ConnectionGuide({
               </div>
               <div className="remote-row">
                 <KeyRound size={14} />
-                <span>{active?.tokenRequired ? "需要令牌（已启用 HUB_TOKEN）" : "无令牌（本地开放模式）"}</span>
+                <span>
+                  {active?.tokenRequired ? "✓ 已启用令牌保护，远程访问需要令牌" : "无令牌（本地开放模式）"}
+                </span>
               </div>
+
+              {!active?.tokenRequired && (
+                <div className="token-gen">
+                  {!genToken ? (
+                    <button
+                      className="btn btn-small"
+                      type="button"
+                      onClick={() => {
+                        const bytes = new Uint8Array(16);
+                        crypto.getRandomValues(bytes);
+                        setGenToken(Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""));
+                      }}
+                    >
+                      <KeyRound size={14} />
+                      生成访问令牌
+                    </button>
+                  ) : (
+                    <div className="token-gen-result">
+                      <p>用下面这条命令重启枢纽以启用令牌保护（替代手动 openssl）：</p>
+                      <div className="token-cmd">
+                        <code>HUB_TOKEN={genToken} node dist/cli.js start</code>
+                        <button
+                          className="btn btn-small"
+                          type="button"
+                          onClick={async () => {
+                            await copyText(`HUB_TOKEN=${genToken} node dist/cli.js start`);
+                            setCopiedToken(true);
+                            setTimeout(() => setCopiedToken(false), 1300);
+                          }}
+                        >
+                          {copiedToken ? <Check size={14} /> : <Copy size={14} />}
+                          {copiedToken ? "已复制" : "复制"}
+                        </button>
+                      </div>
+                      <p className="token-share">
+                        令牌：<code>{genToken}</code> — 把它和枢纽地址发给队友，他们打开
+                        <code>{active?.hubUrl ?? "<地址>"}?token={genToken}</code> 即可，连接命令会自动带上令牌。
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {isLocalHub && (
                 <p className="remote-tip">
-                  要让远程队友连入：用 <code>HUB_TOKEN=$(openssl rand -hex 16) node dist/cli.js start</code> 启动，
-                  再用 <code>tailscale serve 4100</code> 或 <code>ngrok http 4100</code> 暴露端口，把得到的地址和令牌发给队友。
-                  队友打开该地址、填上自己的名字，就能拿到专属连接命令。
+                  跨机协作：启用令牌后，用 <code>tailscale serve 4100</code> 或 <code>ngrok http 4100</code> 暴露端口，
+                  把得到的公网地址发给队友。队友打开该地址、填上自己的名字，就能拿到专属连接命令。
                 </p>
               )}
             </div>
@@ -369,6 +416,8 @@ export function WorkflowHome({
       <ConnectionGuide agents={agents} connectInfo={connectInfo} actions={actions} />
 
       <MissionPlanner agents={agents} connected={connected} actions={actions} />
+
+      <TeamMembers agents={agents} tasks={tasks} />
 
       <section className="summary-grid" aria-label="关键状态">
         <SummaryCard
