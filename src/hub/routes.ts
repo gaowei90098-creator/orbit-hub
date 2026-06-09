@@ -8,6 +8,7 @@ import type { Agent, Harness, Task } from "../core/types.js";
 import type { RunManager } from "./run-manager.js";
 import type { IntegrationManager } from "./integration-manager.js";
 import { detectEnvironment } from "../drivers/detect.js";
+import { detectCommands } from "../core/projects.js";
 import { launchParts } from "../launch.js";
 import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type TaskDraft } from "./task-planner.js";
 
@@ -334,7 +335,16 @@ export function mountRoutes(
     if (!body) return;
     const peers = core.agents.list().filter((a) => a.harness !== "other");
     const onlinePeers = peers.filter((a) => a.status === "online");
-    const project = body.projectId ? core.projects.get(body.projectId) : null;
+    let project = body.projectId ? core.projects.get(body.projectId) : null;
+    // 只传了 projectPath（dashboard 快捷启动）→ 自动 find-or-create 项目并探测验证命令，
+    // 让"集成前自动验证"在默认路径下也生效（否则集成阶段无命令可跑，安全卖点落空）。
+    if (!project && body.projectPath) {
+      const resolved = path.resolve(body.projectPath);
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+        const existing = core.store.findProjectByRoot(resolved);
+        project = existing ?? core.projects.create({ rootPath: resolved, commands: detectCommands(resolved) });
+      }
+    }
     const projectPath = project ? project.rootPath : body.projectPath;
     const mission = core.missions.create({
       goal: body.goal,

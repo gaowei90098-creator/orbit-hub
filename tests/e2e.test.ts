@@ -36,6 +36,11 @@ function makeGitRepo(): string {
   tmpDirs.push(dir);
   git(dir, ["init", "-b", "main"]);
   fs.writeFileSync(path.join(dir, "README.md"), "base\n");
+  // 带 scripts 的 package.json：验证 launch 会自动探测出 build/test 验证命令。
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: "e2e-proj", scripts: { build: "tsc", test: "vitest run" } }, null, 2),
+  );
   git(dir, ["add", "."]);
   git(dir, ["commit", "-m", "init"]);
   return dir;
@@ -129,6 +134,10 @@ describe("端到端 (REST 全链路验收)", () => {
     const files = (detail.body.diff?.files ?? []).map((f: { path: string }) => f.path);
     expect(files).toContain("frontend.ts");
     expect(files).toContain("backend.ts");
+    // ① 自动探测验证命令生效：集成阶段真的跑了 build/test（不再是"0 条验证报告"）。
+    const commands = detail.body.validations.map((v: { command: string }) => v.command);
+    expect(commands).toContain("npm run build");
+    expect(commands).toContain("npm test");
 
     // 审批 → 真实合入目标分支
     const appr = await request(app).post(`/api/missions/${missionId}/approve`).send({ by: "operator", note: "验收通过" });

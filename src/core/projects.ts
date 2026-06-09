@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import type { Store } from "./store.js";
@@ -31,6 +32,43 @@ export function inspectProject(rootPath: string): ProjectInspection {
   const branch = gitCapture(rootPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
   const url = gitCapture(rootPath, ["config", "--get", "remote.origin.url"]);
   return { isGitRepo: true, targetBranch: branch || null, repositoryUrl: url || null };
+}
+
+// 按 lockfile 推断包管理器（默认 npm）。
+function detectPackageManager(rootPath: string): "npm" | "pnpm" | "yarn" | "bun" {
+  if (fs.existsSync(path.join(rootPath, "pnpm-lock.yaml"))) return "pnpm";
+  if (fs.existsSync(path.join(rootPath, "yarn.lock"))) return "yarn";
+  if (fs.existsSync(path.join(rootPath, "bun.lockb"))) return "bun";
+  return "npm";
+}
+
+// `npm init` 默认占位 test 脚本（不是真正的测试，不能拿来当验证）。
+function isPlaceholderTest(script: string): boolean {
+  return /no test specified/i.test(script);
+}
+
+// 探测目录的默认验证命令（install/build/lint/test），供集成前自动验证使用。
+// 只读取项目清单文件、不执行任何命令。探测不到则返回空（调用方据此跳过验证）。
+export function detectCommands(rootPath: string): ProjectCommands {
+  const pkgPath = path.join(rootPath, "package.json");
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
+      const scripts = pkg.scripts ?? {};
+      const pm = detectPackageManager(rootPath);
+      const cmds: ProjectCommands = { install: `${pm} install` };
+      if (scripts.build) cmds.build = `${pm} run build`;
+      if (scripts.lint) cmds.lint = `${pm} run lint`;
+      if (scripts.test && !isPlaceholderTest(scripts.test)) cmds.test = pm === "npm" ? "npm test" : `${pm} test`;
+      return cmds;
+    } catch {
+      return {};
+    }
+  }
+  if (fs.existsSync(path.join(rootPath, "Cargo.toml"))) return { build: "cargo build", test: "cargo test" };
+  if (fs.existsSync(path.join(rootPath, "go.mod"))) return { build: "go build ./...", test: "go test ./..." };
+  if (fs.existsSync(path.join(rootPath, "pyproject.toml")) || fs.existsSync(path.join(rootPath, "setup.py"))) return { test: "pytest" };
+  return {};
 }
 
 // 对非 git 目录执行 `git init`（决策：仅在用户显式触发时）。返回新的探测结果。

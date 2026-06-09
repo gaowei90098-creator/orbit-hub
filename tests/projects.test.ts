@@ -7,6 +7,7 @@ import request from "supertest";
 import type { Express } from "express";
 import { createHubApp } from "../src/hub/server.js";
 import { CoordinationCore } from "../src/core/core.js";
+import { detectCommands } from "../src/core/projects.js";
 
 let app: Express;
 const tmpDirs: string[] = [];
@@ -118,6 +119,54 @@ describe("environment REST (A01/A02)", () => {
     expect(Array.isArray(res.body.agents)).toBe(true);
     expect(res.body.agents).toHaveLength(2);
     expect(res.body).toHaveProperty("ok");
+  });
+});
+
+describe("detectCommands (集成前自动验证命令探测)", () => {
+  it("从 package.json scripts 探测 build/lint/test，并带 install", () => {
+    const dir = mkTmp("orbit-cmds-");
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ scripts: { build: "tsc", lint: "eslint .", test: "vitest run" } }),
+    );
+    expect(detectCommands(dir)).toEqual({ install: "npm install", build: "npm run build", lint: "npm run lint", test: "npm test" });
+  });
+
+  it("排除 npm init 的占位 test 脚本", () => {
+    const dir = mkTmp("orbit-cmds-");
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1' } }),
+    );
+    expect(detectCommands(dir).test).toBeUndefined();
+  });
+
+  it("按 lockfile 识别 pnpm", () => {
+    const dir = mkTmp("orbit-cmds-");
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ scripts: { build: "tsc" } }));
+    fs.writeFileSync(path.join(dir, "pnpm-lock.yaml"), "");
+    const cmds = detectCommands(dir);
+    expect(cmds.install).toBe("pnpm install");
+    expect(cmds.build).toBe("pnpm run build");
+  });
+
+  it("Cargo / Go / Python 项目给默认命令", () => {
+    const rust = mkTmp("orbit-cmds-");
+    fs.writeFileSync(path.join(rust, "Cargo.toml"), "");
+    expect(detectCommands(rust)).toEqual({ build: "cargo build", test: "cargo test" });
+
+    const go = mkTmp("orbit-cmds-");
+    fs.writeFileSync(path.join(go, "go.mod"), "module x");
+    expect(detectCommands(go)).toEqual({ build: "go build ./...", test: "go test ./..." });
+
+    const py = mkTmp("orbit-cmds-");
+    fs.writeFileSync(path.join(py, "pyproject.toml"), "");
+    expect(detectCommands(py)).toEqual({ test: "pytest" });
+  });
+
+  it("无法识别的项目返回空（集成阶段据此跳过验证）", () => {
+    const dir = mkTmp("orbit-cmds-");
+    expect(detectCommands(dir)).toEqual({});
   });
 });
 
