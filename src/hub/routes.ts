@@ -8,6 +8,7 @@ import type { Agent, Harness, Task } from "../core/types.js";
 import type { RunManager } from "./run-manager.js";
 import type { IntegrationManager } from "./integration-manager.js";
 import { detectEnvironment } from "../drivers/detect.js";
+import { launchParts } from "../launch.js";
 import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type TaskDraft } from "./task-planner.js";
 
 interface RouteOptions {
@@ -112,7 +113,7 @@ function hubUrl(req: Request): string {
 
 function cliLaunchParts(): { command: string; baseArgs: string[] } {
   const cliPath = process.argv.find((a) => /[/\\]cli\.(js|ts)$/.test(a)) ?? process.argv[1] ?? "dist/cli.js";
-  return cliPath.endsWith(".ts") ? { command: "npx", baseArgs: ["tsx", cliPath] } : { command: process.execPath, baseArgs: [cliPath] };
+  return launchParts(cliPath);
 }
 
 function mcpArgs(name: string, harness: string, url: string, tokenRequired: boolean): string[] {

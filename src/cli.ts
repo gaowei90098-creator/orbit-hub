@@ -5,6 +5,7 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHubApp } from "./hub/server.js";
 import { startAdapter } from "./mcp/adapter.js";
+import { launchParts } from "./launch.js";
 import type { Harness } from "./core/types.js";
 
 const HARNESSES: Harness[] = ["claude-code", "codex", "gemini", "opencode", "other"];
@@ -33,16 +34,9 @@ function parseFlags(argv: string[]): Map<string, string> {
   return flags;
 }
 
-// Structured launch parts so file paths containing spaces survive into the generated
-// config (never join+split a path string).
-function launchParts(): { command: string; baseArgs: string[] } {
-  const self = fileURLToPath(import.meta.url);
-  return self.endsWith(".ts") ? { command: "npx", baseArgs: ["tsx", self] } : { command: "node", baseArgs: [self] };
-}
-
 function startBanner(port: number, dbPath: string, token: string | undefined): string {
   const url = `http://localhost:${port}`;
-  const { command, baseArgs } = launchParts();
+  const { command, baseArgs } = launchParts(fileURLToPath(import.meta.url));
   const mcpArgs = (name: string, harness: string): string[] => [
     ...baseArgs,
     "mcp",
