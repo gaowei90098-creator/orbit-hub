@@ -353,7 +353,7 @@ export function MissionPlanner({
             }
           />
 
-          {planning && projectPath.trim() && (
+          {planning && (projectPath.trim() || workspace) && (
             <p className="planner-lead-hint">
               <Brain size={13} />
               Lead 正在读取仓库结构并拆分任务，可能需要一两分钟……失败会自动回退到模板拆分。
