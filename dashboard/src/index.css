@@ -989,6 +989,24 @@ body {
   color: var(--danger);
   font-size: 13px;
 }
+.launcher-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.launcher-tip svg {
+  margin-top: 2px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
 .project-path-input {
   width: 100%;
   height: 38px;
@@ -1712,6 +1730,18 @@ body {
   margin-top: 3px;
   color: var(--muted);
   font-size: 11px;
+}
+.task-title .task-note {
+  overflow-wrap: anywhere;
+  color: var(--accent);
+  line-height: 1.4;
+}
+.task-title .task-note.muted {
+  color: var(--muted);
+  font-style: italic;
+}
+.stall-badge {
+  margin-left: 6px;
 }
 .state-badge.neutral {
   background: var(--bg-soft);

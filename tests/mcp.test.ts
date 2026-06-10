@@ -59,6 +59,25 @@ describe("MCP adapter end-to-end", () => {
     expect(instructions).toContain("acquire_file_lock");
     expect(instructions).toContain("update_contract");
     expect(instructions).toContain("anti-clobber");
+    expect(instructions).toContain("Report progress");
+  });
+
+  it("propagates progress notes to the shared board", async () => {
+    const claude = await connectAgent("Claude", "claude-code");
+    const codex = await connectAgent("Codex", "codex");
+    const created = textOf(await call(claude, "create_task", { title: "Build API" }));
+    const taskId = created.match(/t_[0-9a-f]+/)?.[0];
+    expect(taskId).toBeTruthy();
+    await call(claude, "claim_task", { task_id: taskId });
+
+    const ack = textOf(
+      await call(claude, "update_task", { task_id: taskId, status: "in_progress", note: "路由完成，开始写测试" }),
+    );
+    expect(ack).toContain("Progress note recorded");
+
+    // 队友（和操作员面板走的是同一份数据）能在任务板上看到最新进展。
+    const board = textOf(await call(codex, "list_tasks"));
+    expect(board).toContain("路由完成，开始写测试");
   });
 
   it("exposes the full toolset", async () => {

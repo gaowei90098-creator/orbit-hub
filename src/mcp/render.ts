@@ -35,7 +35,8 @@ export function renderTasks(tasks: Task[], names: NameMap): string {
     const who = t.assignee ? ` → ${nameOf(t.assignee, names)}` : "";
     const files = t.files.length ? `  files: ${t.files.join(", ")}` : "";
     const deps = t.dependsOn.length ? `  deps: ${t.dependsOn.join(", ")}` : "";
-    return `• [${t.status}] ${t.id} — ${t.title}${who}${deps}${files}`;
+    const note = t.note ? `  note: ${t.note}` : "";
+    return `• [${t.status}] ${t.id} — ${t.title}${who}${deps}${files}${note}`;
   });
   return `Task board (${tasks.length}):\n${lines.join("\n")}`;
 }

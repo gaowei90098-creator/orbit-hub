@@ -127,6 +127,7 @@ export function MissionPlanner({
   const [planning, setPlanning] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState("");
+  const [postLaunchTip, setPostLaunchTip] = useState("");
 
   const peers = agents.filter((a) => !isOperator(a));
   const onlineAgents = peers.filter((a) => a.status === "online");
@@ -139,6 +140,7 @@ export function MissionPlanner({
     const trimmed = goal.trim();
     if (!trimmed) return;
     setError("");
+    setPostLaunchTip("");
     setPlanning(true);
     try {
       const result = await actions.planMission({
@@ -165,14 +167,22 @@ export function MissionPlanner({
       return;
     }
     setError("");
+    setPostLaunchTip("");
     setLaunching(true);
     setStep("launching");
     try {
-      await actions.launchMission({
+      const { launchedRuns } = await actions.launchMission({
         goal: goal.trim(),
         projectPath: projectPath.trim() || undefined,
         customTasks: drafts,
       });
+      // 没有项目目录 → 枢纽不会自动拉起 worker，外部 Agent 也不会自己醒来干活。
+      // 不提示的话任务会一直停在"已领取"，用户以为系统坏了。
+      setPostLaunchTip(
+        launchedRuns.length > 0
+          ? `已自动拉起 ${launchedRuns.length} 个执行助手，进度会实时显示在下方"自动执行"面板。`
+          : "任务已创建并指派，但外部接入的智能体不会自动开工——回到 Claude Code / Codex 各自的会话里说一句『查看 Orbit 任务板，开始执行你的任务』。想全自动执行，下次启动时填写项目目录。",
+      );
       setGoal("");
       setProjectPath("");
       setPlan(null);
@@ -339,6 +349,13 @@ export function MissionPlanner({
         <p className="launcher-error" role="alert">
           <AlertTriangle size={14} />
           {error}
+        </p>
+      )}
+
+      {postLaunchTip && (
+        <p className="launcher-tip" role="status">
+          <Rocket size={14} />
+          {postLaunchTip}
         </p>
       )}
     </section>

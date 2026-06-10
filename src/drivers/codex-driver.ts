@@ -53,6 +53,7 @@ function buildPrompt(goal: string, taskTitle: string, taskId: string | null): st
     ``,
     `请通过 orbit MCP 工具协作：先 whoami 确认接入，再 ${taskId ? `claim_task 领取任务 ${taskId}` : "list_tasks 认领你该做的任务"}，`,
     `update_task 置为 in_progress，get_contract 读共享约定；改文件前先 acquire_file_lock，撞锁就 send_message 协调，绝不覆盖他人改动；`,
+    `每完成一个关键步骤就 update_task 带一句 note 汇报进展（操作员靠它了解进度，长时间不汇报会被视为停滞）；`,
     `接口/数据结构有变就广播 "all" 并 append_shared_note 记录；完成后释放锁并 update_task done，最后用简短中文说明你做了什么。`,
     ``,
     `改动保持聚焦、可独立运行。`,

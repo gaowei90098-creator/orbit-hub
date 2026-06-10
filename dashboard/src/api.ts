@@ -62,7 +62,7 @@ export interface HubActions {
   send: (to: string, content: string) => Promise<void>;
   createTask: (input: { title: string; description?: string; assignee?: string }) => Promise<void>;
   planMission: (input: { goal: string; template?: string }) => Promise<MissionPlan>;
-  launchMission: (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[] }) => Promise<void>;
+  launchMission: (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[] }) => Promise<{ launchedRuns: string[] }>;
   listTemplates: () => Promise<TemplateInfo[]>;
   fetchConnect: (principal?: string) => Promise<ConnectInfo>;
   installCodexConfig: (principal?: string) => Promise<InstallResult>;
@@ -229,8 +229,8 @@ export function useHubState(): HubState {
 
   const launchMission = useCallback(async (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[] }) => {
     const goal = input.goal.trim();
-    if (!goal) return;
-    await api("/api/missions/launch", {
+    if (!goal) return { launchedRuns: [] as string[] };
+    const { launchedRuns } = await api<{ launchedRuns: string[] }>("/api/missions/launch", {
       method: "POST",
       body: JSON.stringify({
         goal,
@@ -239,6 +239,7 @@ export function useHubState(): HubState {
         customTasks: input.customTasks,
       }),
     });
+    return { launchedRuns };
   }, []);
 
   const fetchTemplates = useCallback(async () => {

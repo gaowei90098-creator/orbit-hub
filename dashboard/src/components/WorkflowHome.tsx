@@ -365,6 +365,12 @@ export function WorkflowHome({
 }) {
   const [expandedDiff, setExpandedDiff] = useState<string | null>(null);
   const [diffData, setDiffData] = useState<Record<string, WorktreeDiff>>({});
+  // 数据靠 SSE 推送，任务停滞时恰恰没有事件——本地时钟保证"停滞告警"能自己浮现。
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const loadDiff = async (runId: string) => {
     if (expandedDiff === runId) { setExpandedDiff(null); return; }
@@ -387,6 +393,22 @@ export function WorkflowHome({
   const offlineAssignedTasks = activeTasks.filter((task) => {
     const assignee = task.assignee ? agentById.get(task.assignee) : null;
     return assignee?.status === "offline";
+  });
+  // 已领取/进行中却长时间没有任何更新的任务。外部接入的 Agent 是拉模式，被指派后
+  // 不会自己醒来干活——这是"任务卡在已领取"最常见的原因，必须主动提醒操作员去催。
+  const STALL_AFTER_MS = 5 * 60_000;
+  const tasksWithActiveWorker = new Set(
+    workers
+      .filter((w) => w.status === "starting" || w.status === "running" || w.status === "waiting_for_input")
+      .map((w) => w.taskId)
+      .filter((id): id is string => Boolean(id)),
+  );
+  const stalledTasks = activeTasks.filter((task) => {
+    if (task.status !== "claimed" && task.status !== "in_progress") return false;
+    if (!task.assignee || tasksWithActiveWorker.has(task.id)) return false;
+    const assignee = agentById.get(task.assignee);
+    if (assignee?.status === "offline") return false; // 已由"负责人离线"提示覆盖
+    return now - task.updatedAt > STALL_AFTER_MS;
   });
 
   const recentEvents = useMemo(() => {
@@ -543,6 +565,7 @@ export function WorkflowHome({
           <div className="attention-list">
             {openConflicts.length === 0 &&
             offlineAssignedTasks.length === 0 &&
+            stalledTasks.length === 0 &&
             locks.length === 0 &&
             !noAgentConnected &&
             !allAgentsOffline ? (
@@ -582,6 +605,21 @@ export function WorkflowHome({
                     <div>
                       <b>负责人离线</b>
                       <span>{task.title}</span>
+                    </div>
+                  </div>
+                ))}
+                {stalledTasks.slice(0, 2).map((task) => (
+                  <div key={`stall-${task.id}`} className="attention-row warning">
+                    <AlertTriangle size={16} />
+                    <div>
+                      <b>
+                        任务停滞：{task.status === "claimed" ? "已领取" : "进行中"}超过{" "}
+                        {Math.max(1, Math.floor((now - task.updatedAt) / 60_000))} 分钟没有进展
+                      </b>
+                      <span>
+                        {task.title} · 负责人 {task.assignee ? (agentLabels.get(task.assignee) ?? "智能体") : "未知"}。
+                        外部接入的智能体不会自动开工——回到它的会话里说『继续 Orbit 任务』催一下；或释放任务重新分配。
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -629,21 +667,30 @@ export function WorkflowHome({
                     </td>
                   </tr>
                 ) : (
-                  visibleTasks.map((task) => (
-                    <tr key={task.id}>
-                      <td>
-                        <div className="task-title">
-                          <span>{task.title}</span>
-                          {task.files.length > 0 && <small>{task.files.length} 个文件</small>}
-                        </div>
-                      </td>
-                      <td>{task.assignee ? (agentLabels.get(task.assignee) ?? "智能体") : "未分配"}</td>
-                      <td>
-                        <span className={`state-badge ${STATUS_CLASS[task.status]}`}>{STATUS_LABEL[task.status]}</span>
-                      </td>
-                      <td>{timeAgo(task.updatedAt)}</td>
-                    </tr>
-                  ))
+                  visibleTasks.map((task) => {
+                    const stalled = stalledTasks.some((t) => t.id === task.id);
+                    return (
+                      <tr key={task.id}>
+                        <td>
+                          <div className="task-title">
+                            <span>{task.title}</span>
+                            {task.note ? (
+                              <small className="task-note">最新进展：{task.note}</small>
+                            ) : task.status === "claimed" || task.status === "in_progress" ? (
+                              <small className="task-note muted">暂无进展汇报</small>
+                            ) : null}
+                            {task.files.length > 0 && <small>{task.files.length} 个文件</small>}
+                          </div>
+                        </td>
+                        <td>{task.assignee ? (agentLabels.get(task.assignee) ?? "智能体") : "未分配"}</td>
+                        <td>
+                          <span className={`state-badge ${STATUS_CLASS[task.status]}`}>{STATUS_LABEL[task.status]}</span>
+                          {stalled && <span className="state-badge danger stall-badge">停滞</span>}
+                        </td>
+                        <td>{timeAgo(task.updatedAt)}</td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>

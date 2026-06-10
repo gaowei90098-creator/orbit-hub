@@ -39,9 +39,10 @@ function buildPrompt(goal: string, taskTitle: string, taskId: string | null): st
     `3. 调用 mcp__orbit__update_task 把任务标记为 in_progress。`,
     `4. 调用 mcp__orbit__get_contract 读取共享约定（若有就遵循）。`,
     `5. 在当前项目目录里【完整实现这个目标】，写出可直接运行的代码。改任何文件前先调用 mcp__orbit__acquire_file_lock 锁定该文件；若某文件已被他人锁定，改用 mcp__orbit__send_message 与对方协调，绝不覆盖别人的修改。`,
-    `6. 若你定义或改动了会影响他人的接口/数据结构，用 mcp__orbit__send_message 广播给 "all"，并用 mcp__orbit__append_shared_note 记录。`,
-    `7. 完成后调用 mcp__orbit__release_file_lock 释放所有锁，再调用 mcp__orbit__update_task 把任务标记为 done。`,
-    `8. 最后用简短中文说明你做了什么、生成了哪些文件、如何运行。`,
+    `6. 每完成一个关键步骤（如：数据模型完成 / 接口跑通 / 测试通过），调用 mcp__orbit__update_task 带一句 note 汇报进展（status 保持 in_progress）。操作员靠这些 note 了解你的进度，长时间不汇报会被视为停滞。`,
+    `7. 若你定义或改动了会影响他人的接口/数据结构，用 mcp__orbit__send_message 广播给 "all"，并用 mcp__orbit__append_shared_note 记录。`,
+    `8. 完成后调用 mcp__orbit__release_file_lock 释放所有锁，再调用 mcp__orbit__update_task 把任务标记为 done。`,
+    `9. 最后用简短中文说明你做了什么、生成了哪些文件、如何运行。`,
     ``,
     `改动保持聚焦、可独立运行。`,
   ].join("\n");

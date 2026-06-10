@@ -20,6 +20,7 @@ export interface Task {
   assignee: string | null;
   dependsOn: string[];
   files: string[];
+  note: string;
   updatedAt: number;
 }
 

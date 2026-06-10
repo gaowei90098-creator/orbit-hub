@@ -186,17 +186,22 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
   server.registerTool(
     "update_task",
     {
-      description: 'Update a task you own: set status to "in_progress" when you start, "done" when finished.',
+      description:
+        'Update a task you own: set status to "in_progress" when you start, "done" when finished. While working, call this with a short note after each meaningful step — the human operator watches these notes on the dashboard; a task without notes looks stalled.',
       inputSchema: {
         task_id: z.string(),
         status: z.enum(["todo", "claimed", "in_progress", "done"]).optional(),
-        note: z.string().optional().describe("Optional progress note."),
+        note: z
+          .string()
+          .optional()
+          .describe('One-line progress note shown on the operator dashboard, e.g. "API routes done, writing tests".'),
       },
     },
     async (args) =>
       guard(async () => {
         const { task } = await client.updateTask(args.task_id, { status: args.status, note: args.note });
-        return text(`✏️ ${task.id} is now "${task.status}".`);
+        const noteAck = args.note ? " Progress note recorded — keep reporting after each step." : "";
+        return text(`✏️ ${task.id} is now "${task.status}".${noteAck}`);
       }),
   );
 
