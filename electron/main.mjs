@@ -10,7 +10,8 @@ const APP_ROOT = path.join(__dirname, ".."); // dev: project root; packaged: Res
 const HUB_CLI = path.join(APP_ROOT, "dist", "cli.js");
 const PORT = 4100;
 const DISPLAY_NAME = "协作枢纽";
-const LEGACY_NAME = "AgentHub";
+// 历届应用名（userData 目录随应用名走）：AgentHub → Orbit → 协作枢纽。
+const LEGACY_NAMES = ["Orbit", "AgentHub"];
 
 app.setName(DISPLAY_NAME);
 
@@ -19,15 +20,17 @@ let win = null;
 
 function migrateLegacyUserData() {
   const appData = app.getPath("appData");
-  const oldDir = path.join(appData, LEGACY_NAME);
   const newDir = app.getPath("userData");
   const files = ["hub.sqlite", "hub.log"];
-  if (oldDir === newDir || !fs.existsSync(oldDir)) return;
-  fs.mkdirSync(newDir, { recursive: true });
-  for (const file of files) {
-    const oldPath = path.join(oldDir, file);
-    const newPath = path.join(newDir, file);
-    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) fs.copyFileSync(oldPath, newPath);
+  for (const legacy of LEGACY_NAMES) {
+    const oldDir = path.join(appData, legacy);
+    if (oldDir === newDir || !fs.existsSync(oldDir)) continue;
+    fs.mkdirSync(newDir, { recursive: true });
+    for (const file of files) {
+      const oldPath = path.join(oldDir, file);
+      const newPath = path.join(newDir, file);
+      if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) fs.copyFileSync(oldPath, newPath);
+    }
   }
 }
 
