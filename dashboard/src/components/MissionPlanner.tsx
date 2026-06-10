@@ -167,10 +167,12 @@ function TaskEditor({
 export function MissionPlanner({
   agents,
   connected,
+  workspace,
   actions,
 }: {
   agents: Agent[];
   connected: boolean;
+  workspace: string | null;
   actions: HubActions;
 }) {
   const [step, setStep] = useState<Step>("input");
@@ -183,6 +185,7 @@ export function MissionPlanner({
   const [planning, setPlanning] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState("");
+  const [postLaunchTip, setPostLaunchTip] = useState("");
   // 1.3 worker 规格（留空 = 用服务端默认值）。
   const [specOpen, setSpecOpen] = useState(false);
   const [model, setModel] = useState("");
@@ -200,13 +203,15 @@ export function MissionPlanner({
     const trimmed = goal.trim();
     if (!trimmed) return;
     setError("");
+    setPostLaunchTip("");
     setPlanning(true);
     try {
       const result = await actions.planMission({
         goal: trimmed,
         template: selectedTemplate || undefined,
-        // 1.1：带上项目目录才会启用 lead 拆分（lead 要能读到真实仓库）。
-        projectPath: projectPath.trim() || undefined,
+        // 1.1：带上项目目录才会启用 lead 拆分（lead 要能读到真实仓库）；
+        // 与 launch 一致，目录留空时回退统一工作区。
+        projectPath: projectPath.trim() || workspace || undefined,
       });
       setPlan(result);
       setDrafts(result.tasks);
@@ -228,9 +233,14 @@ export function MissionPlanner({
     return Object.keys(spec).length > 0 ? spec : undefined;
   };
 
+  const canAutoExec = Boolean(projectPath.trim() || workspace);
   const doLaunch = async () => {
-    if (!connected || onlineAgents.length === 0) {
-      setError("请先连接至少一个在线智能体。");
+    if (!connected) {
+      setError("未连接到枢纽服务。");
+      return;
+    }
+    if (onlineAgents.length === 0 && !canAutoExec) {
+      setError("请先连接智能体，或设置统一工作区让枢纽自动拉起执行助手。");
       return;
     }
     if (drafts.length === 0) {
@@ -238,15 +248,23 @@ export function MissionPlanner({
       return;
     }
     setError("");
+    setPostLaunchTip("");
     setLaunching(true);
     setStep("launching");
     try {
-      await actions.launchMission({
+      const { launchedRuns } = await actions.launchMission({
         goal: goal.trim(),
         projectPath: projectPath.trim() || undefined,
         customTasks: drafts,
         workerSpec: buildWorkerSpec(),
       });
+      // 没有项目目录/工作区 → 枢纽不会自动拉起 worker，外部 Agent 也不会自己醒来干活。
+      // 不提示的话任务会一直停在"已领取"，用户以为系统坏了。
+      setPostLaunchTip(
+        launchedRuns.length > 0
+          ? `已自动拉起 ${launchedRuns.length} 个执行助手，进度会实时显示在下方"自动执行"面板。`
+          : "任务已创建并指派，但外部接入的智能体不会自动开工——回到 Claude Code / Codex 各自的会话里说一句『查看 Orbit 任务板，开始执行你的任务』。想全自动执行，请先在上方设置统一工作区。",
+      );
       setGoal("");
       setProjectPath("");
       setPlan(null);
@@ -285,7 +303,7 @@ export function MissionPlanner({
   };
 
   const canPlan = goal.trim().length > 0 && !planning;
-  const canLaunch = connected && onlineAgents.length > 0 && drafts.length > 0 && !launching;
+  const canLaunch = connected && (onlineAgents.length > 0 || canAutoExec) && drafts.length > 0 && !launching;
 
   return (
     <section className="panel-card mission-planner" id="launch-mission">
@@ -328,7 +346,11 @@ export function MissionPlanner({
             className="project-path-input"
             value={projectPath}
             onChange={(e) => setProjectPath(e.target.value)}
-            placeholder="项目目录（可选，填了就自动派 Agent 去做，例：/Users/you/proj）"
+            placeholder={
+              workspace
+                ? `项目目录（默认用统一工作区：${workspace}）`
+                : "项目目录（可选，填了就自动派 Agent 去做，例：/Users/you/proj）"
+            }
           />
 
           {planning && projectPath.trim() && (
@@ -450,10 +472,20 @@ export function MissionPlanner({
             </button>
           </div>
 
-          {!connected || onlineAgents.length === 0 ? (
+          {!connected ? (
             <p className="launcher-warning">
               <AlertTriangle size={14} />
-              还没有在线智能体，请先连接后再启动。
+              未连接到枢纽服务。
+            </p>
+          ) : onlineAgents.length === 0 && !canAutoExec ? (
+            <p className="launcher-warning">
+              <AlertTriangle size={14} />
+              还没有在线智能体，也没设置统一工作区——请先二选一，否则任务没人执行。
+            </p>
+          ) : onlineAgents.length === 0 ? (
+            <p className="launcher-warning info">
+              <AlertTriangle size={14} />
+              没有在线智能体：启动后将由枢纽在工作区自动拉起执行助手。
             </p>
           ) : null}
         </div>
@@ -470,6 +502,13 @@ export function MissionPlanner({
         <p className="launcher-error" role="alert">
           <AlertTriangle size={14} />
           {error}
+        </p>
+      )}
+
+      {postLaunchTip && (
+        <p className="launcher-tip" role="status">
+          <Rocket size={14} />
+          {postLaunchTip}
         </p>
       )}
     </section>

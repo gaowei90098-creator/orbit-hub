@@ -45,6 +45,7 @@ export function resolveCodexCommand(probe: CodexBinProbe = defaultProbe): string
 }
 
 // 1.2 同源双渲染：prompt 由共享 HarnessProfile 渲染（与 Claude 完全对称，工具名为裸名）。
+// 进度汇报协议（每个关键步骤 update_task 带 note）已并入 harness.ts 的 protocol 渲染。
 function buildPrompt(input: StartRunInput): string {
   return renderWorkerPrompt(
     buildHarnessProfile({

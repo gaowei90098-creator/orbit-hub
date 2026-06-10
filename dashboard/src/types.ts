@@ -20,6 +20,7 @@ export interface Task {
   assignee: string | null;
   dependsOn: string[];
   files: string[];
+  note: string;
   updatedAt: number;
 }
 
@@ -151,6 +152,7 @@ export interface Snapshot {
   conflicts: Conflict[];
   contract: Contract;
   missions: Mission[];
+  workspace: string | null;
 }
 
 export interface TaskDraft {

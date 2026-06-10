@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, nativeTheme, screen, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
@@ -10,7 +10,8 @@ const APP_ROOT = path.join(__dirname, ".."); // dev: project root; packaged: Res
 const HUB_CLI = path.join(APP_ROOT, "dist", "cli.js");
 const PORT = 4100;
 const DISPLAY_NAME = "协作枢纽";
-const LEGACY_NAME = "AgentHub";
+// 历届应用名（userData 目录随应用名走）：AgentHub → Orbit → 协作枢纽。
+const LEGACY_NAMES = ["Orbit", "AgentHub"];
 
 app.setName(DISPLAY_NAME);
 
@@ -19,15 +20,17 @@ let win = null;
 
 function migrateLegacyUserData() {
   const appData = app.getPath("appData");
-  const oldDir = path.join(appData, LEGACY_NAME);
   const newDir = app.getPath("userData");
   const files = ["hub.sqlite", "hub.log"];
-  if (oldDir === newDir || !fs.existsSync(oldDir)) return;
-  fs.mkdirSync(newDir, { recursive: true });
-  for (const file of files) {
-    const oldPath = path.join(oldDir, file);
-    const newPath = path.join(newDir, file);
-    if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) fs.copyFileSync(oldPath, newPath);
+  for (const legacy of LEGACY_NAMES) {
+    const oldDir = path.join(appData, legacy);
+    if (oldDir === newDir || !fs.existsSync(oldDir)) continue;
+    fs.mkdirSync(newDir, { recursive: true });
+    for (const file of files) {
+      const oldPath = path.join(oldDir, file);
+      const newPath = path.join(newDir, file);
+      if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) fs.copyFileSync(oldPath, newPath);
+    }
   }
 }
 
@@ -78,14 +81,19 @@ function waitForHub(timeoutMs = 15000) {
 }
 
 function createWindow() {
+  // 面板是深色主题：锁定深色外观，标题栏与内容一致（不跟随系统浅色模式）。
+  nativeTheme.themeSource = "dark";
+  // 默认窗口不超过屏幕可用区域，否则小屏上一打开就"铺满全屏"。
+  const { width: screenW, height: screenH } = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
-    width: 1480,
-    height: 920,
-    minWidth: 1080,
-    minHeight: 680,
-    backgroundColor: "#f7f8fa",
+    width: Math.min(1480, Math.round(screenW * 0.92)),
+    height: Math.min(920, Math.round(screenH * 0.92)),
+    minWidth: Math.min(1080, screenW),
+    minHeight: Math.min(680, screenH),
+    backgroundColor: "#262624",
     title: DISPLAY_NAME,
     show: false,
+    center: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   });
   win.once("ready-to-show", () => win.show());

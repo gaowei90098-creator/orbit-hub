@@ -24,6 +24,7 @@ The hub gives you MCP tools to coordinate. Follow this protocol so two agents ne
 ## While working
 - Work on your own git branch / worktree — that's what makes parallelism safe.
 - Respect the task contract: only modify files inside the task's fileScope. If you must touch files outside it, send_message first and coordinate.
+- Report progress: every time you finish a meaningful step (model done, endpoint working, tests passing), call update_task with a one-line note. The human operator watches the task board — a task with no notes looks stalled and may be reassigned.
 - Check get_messages between subtasks — a teammate may have changed something you depend on.
 - When you change a shared interface (an API route, a shared type, a DB schema, a function signature others call): immediately send_message to the affected agent AND update_contract with the new spec. This is the single most important rule.
 
@@ -34,4 +35,4 @@ The hub gives you MCP tools to coordinate. Follow this protocol so two agents ne
 - Leave the board accurate so others see real state.
 
 ## TL;DR loop
-list_tasks -> claim_task -> acquire_file_lock -> build -> (message on interface changes) -> run verifyCommand until it passes -> release_file_lock -> update_task done (verified=true) -> repeat.`;
+list_tasks -> claim_task -> update_task in_progress -> acquire_file_lock -> build (update_task note=... after each step) -> (message on interface changes) -> run verifyCommand until it passes -> release_file_lock -> update_task done (verified=true) -> repeat.`;

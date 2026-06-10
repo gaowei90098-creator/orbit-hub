@@ -28,6 +28,7 @@ const DEFAULT_MODEL = process.env.ORBIT_WORKER_MODEL ?? "sonnet";
 const DEFAULT_BUDGET_USD = Number(process.env.ORBIT_WORKER_BUDGET_USD ?? "10");
 
 // 1.2 同源双渲染：prompt 由共享 HarnessProfile 渲染（与 Codex 完全对称）。
+// 进度汇报协议（每个关键步骤 update_task 带 note）已并入 harness.ts 的 protocol 渲染。
 function buildPrompt(input: StartRunInput): string {
   return renderWorkerPrompt(
     buildHarnessProfile({

@@ -69,6 +69,7 @@ export function buildHarnessProfile(input: BuildProfileInput): HarnessProfile {
     protocol: [
       "改任何文件前先 {acquire_file_lock} 锁定该文件；若已被他人锁定，用 {send_message} 协调，绝不覆盖别人的修改。",
       "定义或改动会影响他人的接口/数据结构时：立即 {update_contract} 写入新约定，并用 {send_message} 广播给 \"all\"。这是最重要的一条协作规则。",
+      "每完成一个关键步骤（如：数据模型完成 / 接口跑通 / 测试通过），调用 {update_task} 带一句 note 汇报进展（status 保持 in_progress）。操作员靠这些 note 了解你的进度，长时间不汇报会被视为停滞。",
       "子任务之间用 {get_messages} 查收消息——队友可能改了你依赖的接口。",
       "完成后 {release_file_lock} 释放所有锁。",
       verifyCommand
