@@ -35,7 +35,10 @@ export function renderTasks(tasks: Task[], names: NameMap): string {
     const who = t.assignee ? ` → ${nameOf(t.assignee, names)}` : "";
     const files = t.files.length ? `  files: ${t.files.join(", ")}` : "";
     const deps = t.dependsOn.length ? `  deps: ${t.dependsOn.join(", ")}` : "";
-    return `• [${t.status}] ${t.id} — ${t.title}${who}${deps}${files}`;
+    const scope = t.fileScope.length ? `  fileScope: ${t.fileScope.join(", ")}` : "";
+    const verify = t.verifyCommand ? `  verify: \`${t.verifyCommand}\`` : "";
+    const done = t.doneWhen ? `  doneWhen: ${t.doneWhen}` : "";
+    return `• [${t.status}] ${t.id} — ${t.title}${who}${deps}${files}${scope}${verify}${done}`;
   });
   return `Task board (${tasks.length}):\n${lines.join("\n")}`;
 }

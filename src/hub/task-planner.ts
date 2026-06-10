@@ -5,19 +5,31 @@ export interface TaskDraft {
   description: string;
   area: "frontend" | "backend" | "general";
   files: string[];
+  // 1.2 Task contract（lead planner 必填；模板回退时尽量给出合理默认）。
+  fileScope: string[];
+  doneWhen: string;
+  verifyCommand: string;
+  interfaceRef: string;
 }
 
 export interface MissionPlan {
   template: string;
   templateLabel: string;
   tasks: TaskDraft[];
+  // 1.1 拆分来源：lead = claude headless 真实读仓库拆的；template = 关键词模板回退。
+  source: "lead" | "template";
+  note?: string; // 回退原因等给用户看的说明
 }
+
+// 模板内的任务草稿：契约字段可省（由 applyGoalToTasks 填默认值）。
+type TemplateTaskDraft = Omit<TaskDraft, "fileScope" | "doneWhen" | "verifyCommand" | "interfaceRef"> &
+  Partial<Pick<TaskDraft, "fileScope" | "doneWhen" | "verifyCommand" | "interfaceRef">>;
 
 interface Template {
   id: string;
   label: string;
   keywords: string[];
-  tasks: TaskDraft[];
+  tasks: TemplateTaskDraft[];
 }
 
 const TEMPLATES: Template[] = [
@@ -159,11 +171,16 @@ function detectTemplate(goal: string): Template {
   return best ?? TEMPLATES[0]!;
 }
 
-function applyGoalToTasks(tasks: TaskDraft[], goal: string): TaskDraft[] {
+function applyGoalToTasks(tasks: TemplateTaskDraft[], goal: string): TaskDraft[] {
   return tasks.map((t) => ({
     ...t,
     title: `${t.title} · ${goal}`,
     description: `目标：${goal}\n\n${t.description}`,
+    // 模板没有仓库知识：fileScope 退化为 files 的 advisory 范围，其余契约字段留待用户在预览里补。
+    fileScope: t.fileScope ?? t.files,
+    doneWhen: t.doneWhen ?? "",
+    verifyCommand: t.verifyCommand ?? "",
+    interfaceRef: t.interfaceRef ?? "",
   }));
 }
 
@@ -173,6 +190,7 @@ export function planTasks(goal: string): MissionPlan {
     template: tpl.id,
     templateLabel: tpl.label,
     tasks: applyGoalToTasks(tpl.tasks, goal),
+    source: "template",
   };
 }
 
@@ -186,13 +204,15 @@ export function planWithTemplate(goal: string, templateId: string): MissionPlan 
     template: tpl.id,
     templateLabel: tpl.label,
     tasks: applyGoalToTasks(tpl.tasks, goal),
+    source: "template",
   };
 }
 
-export function assignDraftsToAgents(
-  drafts: TaskDraft[],
-  onlineAgents: Agent[],
-): { title: string; description: string; assignee: string | null; files: string[] }[] {
+export interface AssignedDraft extends TaskDraft {
+  assignee: string | null;
+}
+
+export function assignDraftsToAgents(drafts: TaskDraft[], onlineAgents: Agent[]): AssignedDraft[] {
   const peers = onlineAgents.filter((a) => a.harness !== "other" && a.status === "online");
 
   function agentArea(agent: Agent): "frontend" | "backend" | "general" {
@@ -221,11 +241,6 @@ export function assignDraftsToAgents(
       assignee = generalAgents[generalIdx % generalAgents.length]!.id;
       generalIdx++;
     }
-    return {
-      title: draft.title,
-      description: draft.description,
-      assignee,
-      files: draft.files,
-    };
+    return { ...draft, assignee };
   });
 }

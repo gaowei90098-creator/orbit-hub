@@ -19,6 +19,7 @@ import type {
   TaskDraft,
   TemplateInfo,
   Worker,
+  WorkerSpec,
   WorktreeDiff,
 } from "./types";
 import { OPERATOR_NAME } from "./util";
@@ -61,8 +62,9 @@ const EMPTY_CONTRACT: Contract = { apiContract: "", designSpec: "", version: 0, 
 export interface HubActions {
   send: (to: string, content: string) => Promise<void>;
   createTask: (input: { title: string; description?: string; assignee?: string }) => Promise<void>;
-  planMission: (input: { goal: string; template?: string }) => Promise<MissionPlan>;
-  launchMission: (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[] }) => Promise<void>;
+  planMission: (input: { goal: string; template?: string; projectPath?: string }) => Promise<MissionPlan>;
+  launchMission: (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[]; workerSpec?: WorkerSpec }) => Promise<void>;
+  injectWorkerInput: (runId: string, message: string) => Promise<{ ok: boolean; error?: string }>;
   listTemplates: () => Promise<TemplateInfo[]>;
   fetchConnect: (principal?: string) => Promise<ConnectInfo>;
   installCodexConfig: (principal?: string) => Promise<InstallResult>;
@@ -219,26 +221,40 @@ export function useHubState(): HubState {
     }
   }, []);
 
-  const planMission = useCallback(async (input: { goal: string; template?: string }) => {
+  const planMission = useCallback(async (input: { goal: string; template?: string; projectPath?: string }) => {
     const { plan } = await api<{ plan: MissionPlan }>("/api/missions/plan", {
       method: "POST",
-      body: JSON.stringify({ goal: input.goal, template: input.template }),
+      body: JSON.stringify({ goal: input.goal, template: input.template, projectPath: input.projectPath }),
     });
     return plan;
   }, []);
 
-  const launchMission = useCallback(async (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[] }) => {
-    const goal = input.goal.trim();
-    if (!goal) return;
-    await api("/api/missions/launch", {
-      method: "POST",
-      body: JSON.stringify({
-        goal,
-        projectPath: input.projectPath,
-        createdBy: operatorRef.current,
-        customTasks: input.customTasks,
-      }),
-    });
+  const launchMission = useCallback(
+    async (input: { goal: string; projectPath?: string; customTasks?: TaskDraft[]; workerSpec?: WorkerSpec }) => {
+      const goal = input.goal.trim();
+      if (!goal) return;
+      await api("/api/missions/launch", {
+        method: "POST",
+        body: JSON.stringify({
+          goal,
+          projectPath: input.projectPath,
+          createdBy: operatorRef.current,
+          customTasks: input.customTasks,
+          workerSpec: input.workerSpec,
+        }),
+      });
+    },
+    [],
+  );
+
+  // 1.3 waiting_for_input 一键注入回复（复用 resume 通道）。
+  const injectWorkerInput = useCallback(async (runId: string, message: string) => {
+    try {
+      await api(`/api/agent-runs/${runId}/input`, { method: "POST", body: JSON.stringify({ message }) });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   }, []);
 
   const fetchTemplates = useCallback(async () => {
@@ -360,6 +376,7 @@ export function useHubState(): HubState {
       createTask,
       planMission,
       launchMission,
+      injectWorkerInput,
       listTemplates: fetchTemplates,
       fetchConnect,
       installCodexConfig,

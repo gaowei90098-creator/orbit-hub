@@ -10,10 +10,13 @@ import type { IntegrationManager } from "./integration-manager.js";
 import { detectEnvironment } from "../drivers/detect.js";
 import { detectCommands } from "../core/projects.js";
 import { launchParts } from "../launch.js";
-import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type TaskDraft } from "./task-planner.js";
+import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type MissionPlan, type TaskDraft } from "./task-planner.js";
+import type { LeadPlannerFn } from "./lead-planner.js";
 
 interface RouteOptions {
   tokenRequired?: boolean;
+  // 1.1 Lead Planner（claude headless 拆分）。不注入则一律走模板（测试/无 CLI 环境）。
+  leadPlanner?: LeadPlannerFn;
 }
 
 const HARNESS = z.enum(["claude-code", "codex", "gemini", "opencode", "other"]);
@@ -31,6 +34,10 @@ const createTaskSchema = z.object({
   description: z.string().optional(),
   dependsOn: z.array(z.string()).optional(),
   files: z.array(z.string()).optional(),
+  fileScope: z.array(z.string()).optional(),
+  doneWhen: z.string().optional(),
+  verifyCommand: z.string().optional(),
+  interfaceRef: z.string().optional(),
   createdBy: z.string().nullish(),
 });
 const claimSchema = z.object({ agent: z.string().min(1) });
@@ -57,11 +64,32 @@ const taskDraftSchema = z.object({
   description: z.string().default(""),
   area: z.enum(["frontend", "backend", "general"]).default("general"),
   files: z.array(z.string()).default([]),
+  // 1.2 Task contract（旧客户端不传 → 默认空，行为不变）。
+  fileScope: z.array(z.string()).default([]),
+  doneWhen: z.string().default(""),
+  verifyCommand: z.string().default(""),
+  interfaceRef: z.string().default(""),
 });
 const planMissionSchema = z.object({
   goal: z.string().min(1),
   template: z.string().optional(),
+  // 1.1：带上项目信息才会启用 lead planner（lead 必须能读到真实仓库）。
+  projectId: z.string().optional(),
+  projectPath: z.string().optional(),
 });
+// 1.3 worker 规格：模型 / 预算 / 超时从 dashboard 可配。
+const workerSpecSchema = z
+  .object({
+    model: z.string().min(1).optional(),
+    budgetUsd: z.number().positive().max(200).optional(),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(60_000)
+      .max(6 * 60 * 60_000)
+      .optional(),
+  })
+  .optional();
 const launchMissionSchema = z.object({
   goal: z.string().min(1),
   projectId: z.string().optional(),
@@ -70,8 +98,9 @@ const launchMissionSchema = z.object({
   // 第二阶段：显式请求并行拉起的 worker（每个独立 worktree 并行修改）。
   // 不传则自动按"分配给可驱动 Agent 的任务"并行；都没有则回退单 worker。
   agents: z.array(z.enum(["claude-code", "codex"])).optional(),
-  // 用户编辑过的任务草案；不传则回退到自动拆分。
+  // 用户编辑过的任务草案；不传则回退到自动拆分（lead 优先，模板兜底）。
   customTasks: z.array(taskDraftSchema).optional(),
+  workerSpec: workerSpecSchema,
 });
 const commandsSchema = z
   .object({
@@ -293,6 +322,19 @@ export function mountRoutes(
     if (!result.ok) return res.status(result.reason === "not_found" ? 404 : 400).json({ error: result.reason });
     res.json({ diff: result.diff });
   });
+  // 1.3 waiting_for_input 一键注入回复：复用 C05 resume 通道往会话追加一条用户输入。
+  app.post("/api/agent-runs/:id/input", (req, res) => {
+    if (!runs) return res.status(503).json({ error: "runs_unavailable" });
+    const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+    if (!message) return res.status(400).json({ error: "missing_message" });
+    const result = runs.resume(req.params.id, message);
+    if (!result.ok) {
+      const status = result.reason === "not_found" ? 404 : result.reason === "still_running" ? 409 : 400;
+      return res.status(status).json({ error: result.reason });
+    }
+    res.json({ ok: true, run: runs.get(req.params.id) });
+  });
+
   // D01 显式清理 run 的工作区+分支（保留 run 记录）。
   app.post("/api/agent-runs/:id/worktree/remove", (req, res) => {
     if (!runs) return res.status(503).json({ error: "runs_unavailable" });
@@ -336,18 +378,50 @@ export function mountRoutes(
   });
 
   // ----- task planning -----
+
+  // 解析 projectId/projectPath → 真实存在的项目目录（lead planner 的前提）。
+  function resolvePlanningDir(projectId?: string, projectPath?: string): string | null {
+    const project = projectId ? core.projects.get(projectId) : null;
+    const candidate = project?.rootPath ?? projectPath;
+    if (!candidate) return null;
+    const resolved = path.resolve(candidate);
+    return fs.existsSync(resolved) && fs.statSync(resolved).isDirectory() ? resolved : null;
+  }
+
+  // 1.1：优先 lead planner（真实读仓库拆分），无 CLI/失败/超时回退模板并附注原因。
+  async function planMission(goal: string, template?: string, projectId?: string, projectPath?: string): Promise<MissionPlan> {
+    const fallback = (note?: string): MissionPlan => {
+      const plan = template ? planWithTemplate(goal, template) : planTasks(goal);
+      return note ? { ...plan, note } : plan;
+    };
+    // 用户显式选了模板 → 尊重选择，不跑 lead。
+    if (template) return fallback();
+    const dir = resolvePlanningDir(projectId, projectPath);
+    if (!options.leadPlanner || !dir) return fallback();
+    const onlinePeers = core.agents.list().filter((a) => a.harness !== "other" && a.status === "online");
+    const commands = detectCommands(dir);
+    const verifyCommandHint = commands.test ?? commands.build ?? commands.lint;
+    try {
+      const result = await options.leadPlanner({ goal, projectPath: dir, agents: onlinePeers, verifyCommandHint });
+      if (result.ok) return result.plan;
+      return fallback(`lead 拆分失败，已回退模板：${result.reason}`);
+    } catch (err) {
+      return fallback(`lead 拆分异常，已回退模板：${(err as Error).message}`);
+    }
+  }
+
   app.get("/api/templates", (_req, res) => res.json({ templates: listTemplates() }));
-  app.post("/api/missions/plan", (req, res) => {
+  app.post("/api/missions/plan", async (req, res) => {
     const body = parse(planMissionSchema, req, res);
     if (!body) return;
-    const plan = body.template ? planWithTemplate(body.goal, body.template) : planTasks(body.goal);
+    const plan = await planMission(body.goal, body.template, body.projectId, body.projectPath);
     res.json({ plan });
   });
 
   // ----- missions -----
   app.get("/api/missions", (_req, res) => res.json({ missions: core.missions.list() }));
   app.get("/api/workers", (_req, res) => res.json({ workers: runs ? runs.list() : [] }));
-  app.post("/api/missions/launch", (req, res) => {
+  app.post("/api/missions/launch", async (req, res) => {
     const body = parse(launchMissionSchema, req, res);
     if (!body) return;
     const peers = core.agents.list().filter((a) => a.harness !== "other");
@@ -370,16 +444,21 @@ export function mountRoutes(
       createdBy: body.createdBy ?? null,
       agents: onlinePeers,
     });
-    // 如果前端传了用户编辑过的任务草案，用它；否则自动规划。
-    const drafts: TaskDraft[] = body.customTasks && body.customTasks.length > 0
-      ? body.customTasks
-      : planTasks(body.goal).tasks;
+    // 任务草案来源：用户编辑过的（dashboard 预览确认）优先；否则自动规划（lead 优先，模板兜底）。
+    const drafts: TaskDraft[] =
+      body.customTasks && body.customTasks.length > 0
+        ? body.customTasks
+        : (await planMission(body.goal, undefined, project?.id, projectPath)).tasks;
     const assignedPlans = assignDraftsToAgents(drafts, onlinePeers);
     const createdTasks = assignedPlans.map((plan) => {
       const task = core.tasks.create({
         title: plan.title,
         description: plan.description,
-        files: plan.files,
+        files: plan.files.length > 0 ? plan.files : plan.fileScope,
+        fileScope: plan.fileScope,
+        doneWhen: plan.doneWhen,
+        verifyCommand: plan.verifyCommand,
+        interfaceRef: plan.interfaceRef,
         createdBy: body.createdBy ?? null,
       });
       return plan.assignee ? core.tasks.assign(task.id, plan.assignee) ?? task : task;
@@ -411,7 +490,7 @@ export function mountRoutes(
       const { command } = cliLaunchParts();
       const missionId = (updated ?? mission).id;
 
-      // 一次运行的描述：harness + 绑定任务（任务用于命名、领域提示与 taskId）。
+      // 一次运行的描述：harness + 绑定任务（任务的契约字段渲染进 worker 的 prompt/harness 文件）。
       const targets = planLaunchTargets(core, createdTasks, body.agents);
       for (const { harness, task } of targets.slice(0, MAX_PARALLEL_WORKERS)) {
         const workerName = `自动助手·${task ? task.id.slice(-4) : harness}`;
@@ -422,8 +501,17 @@ export function mountRoutes(
           projectId: project?.id ?? null,
           taskTitle: task?.title ?? `${harness} · ${body.goal}`,
           goal: body.goal,
+          taskDescription: task?.description,
+          fileScope: task?.fileScope,
+          doneWhen: task?.doneWhen,
+          verifyCommand: task?.verifyCommand,
+          interfaceRef: task?.interfaceRef,
           projectPath: resolvedPath,
           mcp: { command, args: mcpArgs(workerName, harness, url, Boolean(options.tokenRequired)) },
+          // 1.3 worker 规格（dashboard 可配）；不传用 Driver/环境默认值。
+          model: body.workerSpec?.model,
+          budgetUsd: body.workerSpec?.budgetUsd,
+          timeoutMs: body.workerSpec?.timeoutMs,
         });
         launchedRuns.push(harness);
       }

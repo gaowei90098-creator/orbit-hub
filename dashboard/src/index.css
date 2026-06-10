@@ -2405,3 +2405,123 @@ body {
   padding: 8px 12px 12px 42px;
   border-top: 1px dashed var(--border);
 }
+
+/* ===== 阶段一：Lead 拆分预览 + 任务契约 + worker 规格 + 等待输入回复 ===== */
+
+/* 1.1 拆分来源标识：Lead 拆分（区别于模板回退） */
+.plan-template-badge.lead {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+/* lead 规划进行中的提示（可能要一两分钟） */
+.planner-lead-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--accent-strong);
+}
+
+/* 任务卡片上的验证命令摘要 */
+.task-draft-verify {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ok);
+}
+
+/* 1.3 worker 执行规格（模型/预算/超时）折叠面板 */
+.worker-spec {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.worker-spec-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: var(--bg-soft);
+  padding: 9px 13px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.worker-spec-caret {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.worker-spec-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding: 12px 13px;
+}
+.worker-spec-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.worker-spec-fields input {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--card);
+}
+.worker-spec-fields input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+
+/* 1.3 waiting_for_input 一键注入回复 */
+.worker-row.waiting_for_input {
+  background: var(--amber-soft);
+}
+.worker-row.waiting_for_input .worker-icon {
+  color: var(--amber);
+}
+.worker-input-box {
+  padding: 8px 12px 12px 42px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.worker-input-row {
+  display: flex;
+  gap: 8px;
+}
+.worker-input-row input {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--card);
+}
+.worker-input-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.worker-input-error {
+  color: var(--danger);
+  font-size: 12px;
+}

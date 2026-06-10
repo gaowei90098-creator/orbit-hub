@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { createHubApp } from "./hub/server.js";
+import { planWithLead } from "./hub/lead-planner.js";
 import { startAdapter } from "./mcp/adapter.js";
 import { launchParts } from "./launch.js";
 import type { Harness } from "./core/types.js";
@@ -87,7 +88,9 @@ function startHub(flags: Map<string, string>): void {
 
   if (dbPath !== ":memory:") fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-  const { app, core, runs, coordinator, integration } = createHubApp({ dbPath, token });
+  // 生产路径启用 lead planner（claude headless 拆分）；ORBIT_LEAD_PLANNER=0 可关闭。
+  const leadPlanner = process.env.ORBIT_LEAD_PLANNER === "0" ? undefined : planWithLead;
+  const { app, core, runs, coordinator, integration } = createHubApp({ dbPath, token, leadPlanner });
   const server = app.listen(port, host, () => {
     process.stdout.write(startBanner(port, dbPath, token));
   });

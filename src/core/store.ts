@@ -56,6 +56,10 @@ CREATE TABLE IF NOT EXISTS tasks (
   depends_on TEXT NOT NULL,
   files TEXT NOT NULL,
   note TEXT NOT NULL,
+  file_scope TEXT NOT NULL DEFAULT '[]',
+  done_when TEXT NOT NULL DEFAULT '',
+  verify_command TEXT NOT NULL DEFAULT '',
+  interface_ref TEXT NOT NULL DEFAULT '',
   created_by TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -206,6 +210,10 @@ interface TaskRow {
   depends_on: string;
   files: string;
   note: string;
+  file_scope: string | null;
+  done_when: string | null;
+  verify_command: string | null;
+  interface_ref: string | null;
   created_by: string | null;
   created_at: number;
   updated_at: number;
@@ -250,6 +258,10 @@ const toTask = (r: TaskRow): Task => ({
   dependsOn: JSON.parse(r.depends_on) as string[],
   files: JSON.parse(r.files) as string[],
   note: r.note,
+  fileScope: JSON.parse(r.file_scope ?? "[]") as string[],
+  doneWhen: r.done_when ?? "",
+  verifyCommand: r.verify_command ?? "",
+  interfaceRef: r.interface_ref ?? "",
   createdBy: r.created_by,
   createdAt: Number(r.created_at),
   updatedAt: Number(r.updated_at),
@@ -537,6 +549,19 @@ export class Store {
     } catch {
       /* column already exists */
     }
+    // 旧库平滑升级到 1.2 Task contract：tasks 加 file_scope/done_when/verify_command/interface_ref。
+    for (const col of [
+      "file_scope TEXT NOT NULL DEFAULT '[]'",
+      "done_when TEXT NOT NULL DEFAULT ''",
+      "verify_command TEXT NOT NULL DEFAULT ''",
+      "interface_ref TEXT NOT NULL DEFAULT ''",
+    ]) {
+      try {
+        this.db.exec(`ALTER TABLE tasks ADD COLUMN ${col}`);
+      } catch {
+        /* column already exists */
+      }
+    }
     this.db
       .prepare(
         `INSERT OR IGNORE INTO contract (id, api_contract, design_spec, version, updated_by, updated_at)
@@ -629,8 +654,9 @@ export class Store {
   insertTask(t: Task): void {
     this.db
       .prepare(
-        `INSERT INTO tasks (id, title, description, status, assignee, depends_on, files, note, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tasks (id, title, description, status, assignee, depends_on, files, note,
+            file_scope, done_when, verify_command, interface_ref, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         t.id,
@@ -641,6 +667,10 @@ export class Store {
         JSON.stringify(t.dependsOn),
         JSON.stringify(t.files),
         t.note,
+        JSON.stringify(t.fileScope),
+        t.doneWhen,
+        t.verifyCommand,
+        t.interfaceRef,
         t.createdBy,
         t.createdAt,
         t.updatedAt,

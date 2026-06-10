@@ -127,12 +127,18 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
   server.registerTool(
     "create_task",
     {
-      description: "Add a task to the shared board so work can be divided. Others can then claim it.",
+      description:
+        "Add a task to the shared board so work can be divided. Others can then claim it. " +
+        "Fill the task contract (file_scope / done_when / verify_command / interface_ref) so parallel work doesn't collide.",
       inputSchema: {
         title: z.string().describe("Short task title."),
         description: z.string().optional().describe("Optional details / acceptance criteria."),
         depends_on: z.array(z.string()).optional().describe("Task ids that must be done first."),
         files: z.array(z.string()).optional().describe("Files this task is expected to touch (advisory)."),
+        file_scope: z.array(z.string()).optional().describe("Files/globs this task is ALLOWED to modify (hard boundary)."),
+        done_when: z.string().optional().describe("Human-checkable completion criteria."),
+        verify_command: z.string().optional().describe("Command that must pass (exit 0) before the task can be marked done."),
+        interface_ref: z.string().optional().describe("Shared interfaces/data structures this task touches."),
       },
     },
     async (args) =>
@@ -142,6 +148,10 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
           description: args.description,
           dependsOn: args.depends_on,
           files: args.files,
+          fileScope: args.file_scope,
+          doneWhen: args.done_when,
+          verifyCommand: args.verify_command,
+          interfaceRef: args.interface_ref,
           createdBy: selfId,
         });
         return text(`🆕 Created ${task.id} "${task.title}" (todo). Anyone can now claim it with claim_task.`);
@@ -186,15 +196,35 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
   server.registerTool(
     "update_task",
     {
-      description: 'Update a task you own: set status to "in_progress" when you start, "done" when finished.',
+      description:
+        'Update a task you own: set status to "in_progress" when you start, "done" when finished. ' +
+        "HARD RULE: if the task has a verifyCommand, you must run it and see it pass (exit 0) BEFORE marking done; " +
+        "then call this with verified=true and put the verification result in note.",
       inputSchema: {
         task_id: z.string(),
         status: z.enum(["todo", "claimed", "in_progress", "done"]).optional(),
-        note: z.string().optional().describe("Optional progress note."),
+        note: z.string().optional().describe("Optional progress note. When marking done, include the verifyCommand output summary."),
+        verified: z
+          .boolean()
+          .optional()
+          .describe("Set true ONLY after you ran the task's verifyCommand and it passed (exit 0)."),
       },
     },
     async (args) =>
       guard(async () => {
+        // 1.2 硬规则：有 verifyCommand 的任务，跑通验证之前不许标 done。
+        if (args.status === "done") {
+          const { tasks } = await client.listTasks();
+          const target = tasks.find((t) => t.id === args.task_id);
+          if (target?.verifyCommand && args.verified !== true) {
+            return text(
+              `⛔ 不能标记 done：任务 ${target.id} 配置了验证命令 \`${target.verifyCommand}\`。\n` +
+                `先在项目目录里运行它并确认通过（退出码 0），再调用 update_task 时带上 verified=true，并把验证结果写进 note。` +
+                `验证不通过就继续修复，不要绕过验证。`,
+              true,
+            );
+          }
+        }
         const { task } = await client.updateTask(args.task_id, { status: args.status, note: args.note });
         return text(`✏️ ${task.id} is now "${task.status}".`);
       }),

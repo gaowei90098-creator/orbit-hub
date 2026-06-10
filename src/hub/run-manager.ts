@@ -12,6 +12,7 @@ import {
   removeWorktree as gitRemoveWorktree,
   worktreeDiff,
 } from "../core/worktrees.js";
+import { buildHarnessProfile, installHarnessFile, renderHarnessFile } from "../core/harness.js";
 import { ProcessManager, type ExitInfo } from "../drivers/process-manager.js";
 import { getDriver, isDrivableHarness } from "../drivers/registry.js";
 import type { AgentRunEvent, DriverSpec, StartRunInput } from "../drivers/types.js";
@@ -20,7 +21,8 @@ import type { AgentRunEvent, DriverSpec, StartRunInput } from "../drivers/types.
 // 用 DriverSpec（构造命令 + 解析输出）+ ProcessManager（进程生命周期）把一次运行落库为
 // agent_run，并把统一事件经 EventBus 回流面板（沿用 dashboard 已监听的 worker_updated）。
 
-const DEFAULT_TIMEOUT_MS = Number(process.env.ORBIT_WORKER_TIMEOUT_MS ?? String(15 * 60_000));
+// 1.3 默认值上调：15 分钟跑不完真实任务，默认 45 分钟（dashboard / env 可覆盖）。
+const DEFAULT_TIMEOUT_MS = Number(process.env.ORBIT_WORKER_TIMEOUT_MS ?? String(45 * 60_000));
 
 interface ActiveRun {
   input: StartRunInput; // 供 resume 重建命令（其 projectPath 已指向 worktree）
@@ -89,6 +91,27 @@ export class RunManager {
 
     // 子进程在 worktree 里跑（隔离）或主仓库（降级）：把 projectPath 指向实际 cwd。
     const spawnInput: StartRunInput = { ...resolved, projectPath: worktreePath ?? projectRoot, worktreePath, branch };
+
+    // 1.2 Harness 全程生效：spawn 前往隔离 worktree 写入渲染好的 CLAUDE.md / AGENTS.md
+    // （配 git 排除，不会进提交/集成 diff）。降级直跑（主仓库）不写，避免污染用户工作区。
+    if (worktreePath) {
+      try {
+        const profile = buildHarnessProfile({
+          goal: resolved.goal,
+          taskTitle: resolved.taskTitle,
+          taskId: resolved.taskId,
+          taskDescription: resolved.taskDescription,
+          fileScope: resolved.fileScope,
+          doneWhen: resolved.doneWhen,
+          verifyCommand: resolved.verifyCommand,
+          interfaceRef: resolved.interfaceRef,
+          withOrbitProtocol: resolved.harness === "codex" || Boolean(resolved.mcp),
+        });
+        installHarnessFile(worktreePath, resolved.harness, renderHarnessFile(profile, resolved.harness));
+      } catch {
+        // harness 文件写入失败不阻断启动：worker 仍有首条 prompt 兜底。
+      }
+    }
 
     const run = this.persistInitial(runId, resolved, projectRoot, worktreePath, branch, baseCommit, "starting", null, "");
     this.active.set(runId, { input: spawnInput, driver, terminal: false, projectRoot, worktreePath, branch });

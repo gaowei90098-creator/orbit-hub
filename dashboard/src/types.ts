@@ -158,12 +158,27 @@ export interface TaskDraft {
   description: string;
   area: "frontend" | "backend" | "general";
   files: string[];
+  // 1.2 Task contract（lead 拆分必填；模板回退时可在预览里补）。
+  fileScope: string[];
+  doneWhen: string;
+  verifyCommand: string;
+  interfaceRef: string;
 }
 
 export interface MissionPlan {
   template: string;
   templateLabel: string;
   tasks: TaskDraft[];
+  // 1.1 拆分来源：lead = claude 真实读仓库拆的；template = 关键词模板回退。
+  source: "lead" | "template";
+  note?: string;
+}
+
+// 1.3 worker 规格（模型/预算/超时），launch 时可选传入。
+export interface WorkerSpec {
+  model?: string;
+  budgetUsd?: number;
+  timeoutMs?: number;
 }
 
 export interface TemplateInfo {

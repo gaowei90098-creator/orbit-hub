@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   AlertTriangle,
+  Brain,
   ChevronLeft,
   GripVertical,
   Loader2,
@@ -10,11 +11,13 @@ import {
   Rocket,
   Server,
   Settings2,
+  ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   Wrench,
 } from "lucide-react";
 import type { HubActions } from "../api";
-import type { Agent, MissionPlan, TaskDraft, TemplateInfo } from "../types";
+import type { Agent, MissionPlan, TaskDraft, TemplateInfo, WorkerSpec } from "../types";
 import { isOperator } from "../util";
 
 type Step = "input" | "plan" | "launching";
@@ -31,6 +34,14 @@ const AREA_ICON: Record<TaskDraft["area"], typeof Monitor> = {
   general: Wrench,
 };
 
+// 逗号/换行分隔的字符串 ↔ string[]（fileScope 编辑用）。
+function parseScopeList(value: string): string[] {
+  return value
+    .split(/[,，\n]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 function TaskEditor({
   draft,
   index,
@@ -43,6 +54,8 @@ function TaskEditor({
   onRemove: (index: number) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  // fileScope 输入框的原始文本（失焦/提交时才 parse，避免输入逗号时跳动）。
+  const [scopeText, setScopeText] = useState(draft.fileScope.join(", "));
   const Icon = AREA_ICON[draft.area];
 
   if (editing) {
@@ -75,6 +88,41 @@ function TaskEditor({
               <option value="general">通用</option>
             </select>
           </label>
+          <label>
+            文件范围 fileScope（逗号分隔，worker 只许改这些）
+            <input
+              value={scopeText}
+              placeholder="例：src/api/**, src/core/users.ts"
+              onChange={(e) => {
+                setScopeText(e.target.value);
+                onChange(index, { ...draft, fileScope: parseScopeList(e.target.value) });
+              }}
+            />
+          </label>
+          <label>
+            完成标准 doneWhen
+            <input
+              value={draft.doneWhen}
+              placeholder="例：注册接口返回 201 且写入数据库"
+              onChange={(e) => onChange(index, { ...draft, doneWhen: e.target.value })}
+            />
+          </label>
+          <label>
+            验证命令 verifyCommand（跑通才允许标记完成）
+            <input
+              value={draft.verifyCommand}
+              placeholder="例：npm test"
+              onChange={(e) => onChange(index, { ...draft, verifyCommand: e.target.value })}
+            />
+          </label>
+          <label>
+            共享接口 interfaceRef（与其他任务对接的部分）
+            <input
+              value={draft.interfaceRef}
+              placeholder="例：POST /users 返回 { id, name }"
+              onChange={(e) => onChange(index, { ...draft, interfaceRef: e.target.value })}
+            />
+          </label>
         </div>
         <button className="btn btn-small" type="button" onClick={() => setEditing(false)}>
           完成编辑
@@ -83,6 +131,7 @@ function TaskEditor({
     );
   }
 
+  const scopeSummary = draft.fileScope.length > 0 ? draft.fileScope.join(", ") : draft.files.join(", ");
   return (
     <div className="task-draft">
       <span className="task-draft-grip">
@@ -94,7 +143,14 @@ function TaskEditor({
       </span>
       <div className="task-draft-body">
         <b>{draft.title}</b>
-        {draft.files.length > 0 && <small>{draft.files.join(", ")}</small>}
+        {scopeSummary && <small>范围：{scopeSummary}</small>}
+        {draft.verifyCommand && (
+          <small className="task-draft-verify">
+            <ShieldCheck size={12} />
+            验证：{draft.verifyCommand}
+          </small>
+        )}
+        {draft.doneWhen && <small>完成标准：{draft.doneWhen}</small>}
       </div>
       <div className="task-draft-actions">
         <button type="button" title="编辑" onClick={() => setEditing(true)}>
@@ -127,6 +183,11 @@ export function MissionPlanner({
   const [planning, setPlanning] = useState(false);
   const [launching, setLaunching] = useState(false);
   const [error, setError] = useState("");
+  // 1.3 worker 规格（留空 = 用服务端默认值）。
+  const [specOpen, setSpecOpen] = useState(false);
+  const [model, setModel] = useState("");
+  const [budgetUsd, setBudgetUsd] = useState("");
+  const [timeoutMin, setTimeoutMin] = useState("");
 
   const peers = agents.filter((a) => !isOperator(a));
   const onlineAgents = peers.filter((a) => a.status === "online");
@@ -144,6 +205,8 @@ export function MissionPlanner({
       const result = await actions.planMission({
         goal: trimmed,
         template: selectedTemplate || undefined,
+        // 1.1：带上项目目录才会启用 lead 拆分（lead 要能读到真实仓库）。
+        projectPath: projectPath.trim() || undefined,
       });
       setPlan(result);
       setDrafts(result.tasks);
@@ -153,6 +216,16 @@ export function MissionPlanner({
     } finally {
       setPlanning(false);
     }
+  };
+
+  const buildWorkerSpec = (): WorkerSpec | undefined => {
+    const spec: WorkerSpec = {};
+    if (model.trim()) spec.model = model.trim();
+    const budget = Number(budgetUsd);
+    if (budgetUsd.trim() && Number.isFinite(budget) && budget > 0) spec.budgetUsd = budget;
+    const minutes = Number(timeoutMin);
+    if (timeoutMin.trim() && Number.isFinite(minutes) && minutes >= 1) spec.timeoutMs = Math.round(minutes * 60_000);
+    return Object.keys(spec).length > 0 ? spec : undefined;
   };
 
   const doLaunch = async () => {
@@ -172,6 +245,7 @@ export function MissionPlanner({
         goal: goal.trim(),
         projectPath: projectPath.trim() || undefined,
         customTasks: drafts,
+        workerSpec: buildWorkerSpec(),
       });
       setGoal("");
       setProjectPath("");
@@ -202,6 +276,10 @@ export function MissionPlanner({
         description: `目标：${goal.trim()}`,
         area: "general",
         files: [],
+        fileScope: [],
+        doneWhen: "",
+        verifyCommand: "",
+        interfaceRef: "",
       },
     ]);
   };
@@ -216,9 +294,9 @@ export function MissionPlanner({
           <h2>协作控制台</h2>
           <p>
             {step === "input"
-              ? "描述目标，选择拆分模板，系统会生成任务草案供你编辑。"
+              ? "描述目标。填了项目目录会由 Lead 读取真实仓库结构来拆分；否则按模板拆。草案生成后可编辑。"
               : step === "plan"
-                ? "检查并编辑任务拆分，确认后启动协作。"
+                ? "启动前的关键一步：检查并修正任务拆分（文件范围、完成标准、验证命令），比事后返工便宜得多。"
                 : "正在启动..."}
           </p>
         </div>
@@ -252,6 +330,13 @@ export function MissionPlanner({
             onChange={(e) => setProjectPath(e.target.value)}
             placeholder="项目目录（可选，填了就自动派 Agent 去做，例：/Users/you/proj）"
           />
+
+          {planning && projectPath.trim() && (
+            <p className="planner-lead-hint">
+              <Brain size={13} />
+              Lead 正在读取仓库结构并拆分任务，可能需要一两分钟……失败会自动回退到模板拆分。
+            </p>
+          )}
 
           {templates.length > 0 && (
             <div className="template-selector">
@@ -287,10 +372,22 @@ export function MissionPlanner({
               <ChevronLeft size={16} />
               返回修改目标
             </button>
-            <span className="plan-template-badge">
-              模板：{plan.templateLabel}
-            </span>
+            {plan.source === "lead" ? (
+              <span className="plan-template-badge lead">
+                <Brain size={13} />
+                Lead 拆分（已读取仓库结构）
+              </span>
+            ) : (
+              <span className="plan-template-badge">模板：{plan.templateLabel}</span>
+            )}
           </div>
+
+          {plan.note && (
+            <p className="launcher-warning">
+              <AlertTriangle size={14} />
+              {plan.note}
+            </p>
+          )}
 
           <div className="plan-goal-display">
             <b>目标：</b>{goal}
@@ -306,6 +403,40 @@ export function MissionPlanner({
                 onRemove={removeDraft}
               />
             ))}
+          </div>
+
+          <div className="worker-spec">
+            <button className="worker-spec-toggle" type="button" onClick={() => setSpecOpen((v) => !v)}>
+              <SlidersHorizontal size={14} />
+              执行规格（模型 / 预算 / 超时）
+              <span className="worker-spec-caret">{specOpen ? "收起" : "展开"}</span>
+            </button>
+            {specOpen && (
+              <div className="worker-spec-fields">
+                <label>
+                  模型
+                  <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="默认 sonnet，可填 opus" />
+                </label>
+                <label>
+                  预算（美元 / worker）
+                  <input
+                    value={budgetUsd}
+                    onChange={(e) => setBudgetUsd(e.target.value)}
+                    placeholder="默认 10"
+                    inputMode="decimal"
+                  />
+                </label>
+                <label>
+                  超时（分钟）
+                  <input
+                    value={timeoutMin}
+                    onChange={(e) => setTimeoutMin(e.target.value)}
+                    placeholder="默认 45"
+                    inputMode="numeric"
+                  />
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="plan-actions">

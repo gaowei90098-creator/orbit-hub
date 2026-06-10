@@ -64,6 +64,10 @@ export class HubClient {
     description?: string;
     dependsOn?: string[];
     files?: string[];
+    fileScope?: string[];
+    doneWhen?: string;
+    verifyCommand?: string;
+    interfaceRef?: string;
     createdBy?: string;
   }): Promise<{ task: Task }> {
     return this.req("POST", "/api/tasks", input);

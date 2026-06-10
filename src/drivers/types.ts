@@ -48,6 +48,12 @@ export interface StartRunInput {
   projectId: string | null;
   taskTitle: string;
   goal: string;
+  // 1.2 Task contract：从任务带入，渲染进 worker 的 prompt 与 harness 文件。
+  taskDescription?: string;
+  fileScope?: string[];
+  doneWhen?: string;
+  verifyCommand?: string;
+  interfaceRef?: string;
   projectPath: string; // 主仓库根目录；隔离开启时子进程实际 cwd 为自动创建的 worktree
   branch?: string | null;
   worktreePath?: string | null;

@@ -1,3 +1,4 @@
+import { buildHarnessProfile, renderWorkerPrompt } from "../core/harness.js";
 import type { AgentRunEvent, DriverSpec, RunErrorCode, SpawnSpec, StartRunInput } from "./types.js";
 
 // C01 ClaudeDriver —— 从旧 workers.ts 拆出来的"纯适配器"：只构造启动/恢复命令 + 解析
@@ -23,28 +24,25 @@ const DEFAULT_ALLOWED_TOOLS = [
 ];
 
 const DEFAULT_MODEL = process.env.ORBIT_WORKER_MODEL ?? "sonnet";
-const DEFAULT_BUDGET_USD = Number(process.env.ORBIT_WORKER_BUDGET_USD ?? "2");
+// 1.3 默认值上调：$2 干不了真活，真实任务的合理预算默认 $10（可被 dashboard / env 覆盖）。
+const DEFAULT_BUDGET_USD = Number(process.env.ORBIT_WORKER_BUDGET_USD ?? "10");
 
-function buildPrompt(goal: string, taskTitle: string, taskId: string | null): string {
-  const idLine = taskId ? `你在 Orbit 任务板上对应的任务：${taskTitle}（任务 id：${taskId}）` : `你要完成的任务：${taskTitle}`;
-  return [
-    `你是通过 Orbit 协作枢纽接入的开发 Agent，要在当前项目目录里把一个目标完整实现出来。`,
-    ``,
-    `要实现的目标：${goal}`,
-    idLine,
-    ``,
-    `请按以下步骤执行：`,
-    `1. 调用 mcp__orbit__whoami 确认已接入 Orbit。`,
-    taskId ? `2. 调用 mcp__orbit__claim_task 领取任务 ${taskId}；若返回 already_claimed，说明已有人接手，直接结束。` : `2. 调用 mcp__orbit__list_tasks 查看任务板，认领你该做的任务。`,
-    `3. 调用 mcp__orbit__update_task 把任务标记为 in_progress。`,
-    `4. 调用 mcp__orbit__get_contract 读取共享约定（若有就遵循）。`,
-    `5. 在当前项目目录里【完整实现这个目标】，写出可直接运行的代码。改任何文件前先调用 mcp__orbit__acquire_file_lock 锁定该文件；若某文件已被他人锁定，改用 mcp__orbit__send_message 与对方协调，绝不覆盖别人的修改。`,
-    `6. 若你定义或改动了会影响他人的接口/数据结构，用 mcp__orbit__send_message 广播给 "all"，并用 mcp__orbit__append_shared_note 记录。`,
-    `7. 完成后调用 mcp__orbit__release_file_lock 释放所有锁，再调用 mcp__orbit__update_task 把任务标记为 done。`,
-    `8. 最后用简短中文说明你做了什么、生成了哪些文件、如何运行。`,
-    ``,
-    `改动保持聚焦、可独立运行。`,
-  ].join("\n");
+// 1.2 同源双渲染：prompt 由共享 HarnessProfile 渲染（与 Codex 完全对称）。
+function buildPrompt(input: StartRunInput): string {
+  return renderWorkerPrompt(
+    buildHarnessProfile({
+      goal: input.goal,
+      taskTitle: input.taskTitle,
+      taskId: input.taskId,
+      taskDescription: input.taskDescription,
+      fileScope: input.fileScope,
+      doneWhen: input.doneWhen,
+      verifyCommand: input.verifyCommand,
+      interfaceRef: input.interfaceRef,
+      withOrbitProtocol: Boolean(input.mcp),
+    }),
+    "claude-code",
+  );
 }
 
 // worker 是独立子进程，认证有一个反直觉的坑（已实测）：不能继承"会话级的认证刷新标记"。
@@ -158,7 +156,7 @@ export const claudeDriver: DriverSpec = {
   harness: "claude-code",
   detect: () => import("./detect.js").then((m) => m.detectClaude()),
   buildStart(input: StartRunInput): SpawnSpec {
-    const prompt = input.prompt ?? buildPrompt(input.goal, input.taskTitle, input.taskId);
+    const prompt = input.prompt ?? buildPrompt(input);
     return {
       command: "claude",
       args: ["-p", prompt, ...commonArgs(input)],

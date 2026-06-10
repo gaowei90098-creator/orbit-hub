@@ -272,13 +272,17 @@ export class IntegrationManager {
     }
 
     const mission = this.core.missions.get(missionId);
+    const fixPrompt = buildConflictFixPrompt(outcome.conflicts);
     const run = this.runs.start({
       harness: next.harness,
       missionId,
       taskId: null,
       projectId: mission?.projectId ?? null,
       taskTitle: `解决集成冲突：${next.branch}`,
-      goal: buildConflictFixPrompt(outcome.conflicts),
+      goal: fixPrompt,
+      // 显式 prompt：绕过 HarnessProfile 的协作协议渲染——冲突修复在集成 worktree 现场进行，
+      // 不走任务板/锁协议，照协议渲染会让 Agent 去 claim 不存在的任务。
+      prompt: fixPrompt,
       projectPath: integ.worktreePath,
       isolate: false, // 关键：直接在集成 worktree 现场解决，不另建隔离区
     });

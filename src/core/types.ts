@@ -42,6 +42,11 @@ export interface Task {
   dependsOn: string[]; // task ids
   files: string[]; // files this task is expected to touch (advisory)
   note: string;
+  // ----- 1.2 Task contract（任务契约）：lead 拆分时填满，worker 据此自我约束 -----
+  fileScope: string[]; // 允许修改的文件/目录范围（glob），改动必须落在范围内
+  doneWhen: string; // 完成标准（可人工核对的自然语言）
+  verifyCommand: string; // 验证命令；跑通之前不许 update_task done（空 = 无强制验证）
+  interfaceRef: string; // 涉及的共享接口/契约说明（与他人对接的部分）
   createdBy: string | null; // agent id
   createdAt: number;
   updatedAt: number;

@@ -8,6 +8,11 @@ export interface CreateTaskInput {
   description?: string;
   dependsOn?: string[];
   files?: string[];
+  // 1.2 Task contract（lead 拆分时填满；手工创建可留空）
+  fileScope?: string[];
+  doneWhen?: string;
+  verifyCommand?: string;
+  interfaceRef?: string;
   createdBy?: string | null;
 }
 
@@ -29,6 +34,10 @@ export class Tasks {
       dependsOn: input.dependsOn ?? [],
       files: input.files ?? [],
       note: "",
+      fileScope: input.fileScope ?? [],
+      doneWhen: input.doneWhen ?? "",
+      verifyCommand: input.verifyCommand ?? "",
+      interfaceRef: input.interfaceRef ?? "",
       createdBy: input.createdBy ?? null,
       createdAt: now,
       updatedAt: now,

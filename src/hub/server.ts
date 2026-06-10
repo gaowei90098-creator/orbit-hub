@@ -7,6 +7,7 @@ import { mountSse } from "./sse.js";
 import { RunManager, type DriverResolver } from "./run-manager.js";
 import { Coordinator } from "./coordinator.js";
 import { IntegrationManager, type ValidationRunner } from "./integration-manager.js";
+import type { LeadPlannerFn } from "./lead-planner.js";
 
 export interface HubOptions {
   dbPath?: string;
@@ -18,6 +19,8 @@ export interface HubOptions {
   driverResolver?: DriverResolver;
   /** 注入验证命令执行器（测试用确定性假命令，无需真实 build/test）。 */
   validationRunner?: ValidationRunner;
+  /** 1.1 Lead Planner（claude headless 拆分）。CLI 启动时注入真实实现；不注入则一律走模板。 */
+  leadPlanner?: LeadPlannerFn;
 }
 
 // Optional bearer-token gate. Off by default (local use); enabled for networked mode.
@@ -53,7 +56,7 @@ export function createHubApp(options: HubOptions = {}): {
 
   if (options.token) app.use(authMiddleware(options.token));
 
-  mountRoutes(app, core, { tokenRequired: Boolean(options.token) }, runs, integration);
+  mountRoutes(app, core, { tokenRequired: Boolean(options.token), leadPlanner: options.leadPlanner }, runs, integration);
   mountSse(app, core);
 
   // Serve the built dashboard if present, with SPA fallback for client-side routing.

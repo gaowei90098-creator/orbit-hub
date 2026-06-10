@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { buildHarnessProfile, renderWorkerPrompt } from "../core/harness.js";
 import type { AgentRunEvent, DriverSpec, RunErrorCode, SpawnSpec, StartRunInput } from "./types.js";
 
 // C02 CodexDriver —— 纯适配器：构造 `codex exec --json` 启动/恢复命令 + 解析 codex 的 JSONL 事件。
@@ -43,20 +44,24 @@ export function resolveCodexCommand(probe: CodexBinProbe = defaultProbe): string
   return probe.onPath() ?? probe.appBin() ?? "codex";
 }
 
-function buildPrompt(goal: string, taskTitle: string, taskId: string | null): string {
-  const idLine = taskId ? `你在 Orbit 任务板上对应的任务：${taskTitle}（任务 id：${taskId}）` : `你要完成的任务：${taskTitle}`;
-  return [
-    `你是通过 Orbit 协作枢纽接入的开发 Agent（Codex），要在当前项目目录里把一个目标完整实现出来。`,
-    ``,
-    `要实现的目标：${goal}`,
-    idLine,
-    ``,
-    `请通过 orbit MCP 工具协作：先 whoami 确认接入，再 ${taskId ? `claim_task 领取任务 ${taskId}` : "list_tasks 认领你该做的任务"}，`,
-    `update_task 置为 in_progress，get_contract 读共享约定；改文件前先 acquire_file_lock，撞锁就 send_message 协调，绝不覆盖他人改动；`,
-    `接口/数据结构有变就广播 "all" 并 append_shared_note 记录；完成后释放锁并 update_task done，最后用简短中文说明你做了什么。`,
-    ``,
-    `改动保持聚焦、可独立运行。`,
-  ].join("\n");
+// 1.2 同源双渲染：prompt 由共享 HarnessProfile 渲染（与 Claude 完全对称，工具名为裸名）。
+function buildPrompt(input: StartRunInput): string {
+  return renderWorkerPrompt(
+    buildHarnessProfile({
+      goal: input.goal,
+      taskTitle: input.taskTitle,
+      taskId: input.taskId,
+      taskDescription: input.taskDescription,
+      fileScope: input.fileScope,
+      doneWhen: input.doneWhen,
+      verifyCommand: input.verifyCommand,
+      interfaceRef: input.interfaceRef,
+      // Codex 的 MCP 配置来自 ~/.codex/config.toml（installCodexConfig 写入），命令行不传
+      // mcp，因此不能据 input.mcp 判断；Codex worker 一律按已接入协作协议渲染。
+      withOrbitProtocol: true,
+    }),
+    "codex",
+  );
 }
 
 // codex exec 的 JSONL 事件（不同版本字段略有差异，这里做容错解析）。
@@ -164,7 +169,7 @@ export const codexDriver: DriverSpec = {
   harness: "codex",
   detect: () => import("./detect.js").then((m) => m.detectCodex()),
   buildStart(input: StartRunInput): SpawnSpec {
-    const prompt = input.prompt ?? buildPrompt(input.goal, input.taskTitle, input.taskId);
+    const prompt = input.prompt ?? buildPrompt(input);
     return {
       command: resolveCodexCommand(),
       args: ["exec", ...commonArgs(input), prompt],

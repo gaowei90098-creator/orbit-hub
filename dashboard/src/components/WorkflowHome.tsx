@@ -12,8 +12,10 @@ import {
   Globe,
   KeyRound,
   Loader2,
+  MessageCircleQuestion,
   MessageSquare,
   PlugZap,
+  Send,
   Settings,
   Terminal,
   Users,
@@ -313,6 +315,47 @@ function ConnectionGuide({
   );
 }
 
+// 1.3 waiting_for_input 一键注入回复（复用 resume 通道）。
+function WorkerInputBox({ runId, actions }: { runId: string; actions: HubActions }) {
+  const [message, setMessage] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
+
+  const send = async () => {
+    const trimmed = message.trim();
+    if (!trimmed || sending) return;
+    setSending(true);
+    setError("");
+    const result = await actions.injectWorkerInput(runId, trimmed);
+    setSending(false);
+    if (result.ok) {
+      setMessage("");
+    } else {
+      setError("注入失败：worker 可能还在运行或没有可恢复的会话，稍后再试。");
+    }
+  };
+
+  return (
+    <div className="worker-input-box">
+      <div className="worker-input-row">
+        <input
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="回复 worker 的提问，回车发送（会注入它的会话并继续执行）"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void send();
+          }}
+        />
+        <button className="btn btn-small btn-primary" type="button" disabled={!message.trim() || sending} onClick={() => void send()}>
+          {sending ? <Loader2 size={14} className="spin" /> : <Send size={14} />}
+          发送
+        </button>
+      </div>
+      {error && <small className="worker-input-error">{error}</small>}
+    </div>
+  );
+}
+
 function SummaryCard({
   icon,
   title,
@@ -382,6 +425,7 @@ export function WorkflowHome({
   const agentLabels = new Map(peers.map((agent, index) => [agent.id, agentDisplayName(agent, index)]));
   const agentById = new Map(agents.map((agent) => [agent.id, agent]));
   const openConflicts = conflicts.filter((conflict) => conflict.status === "open");
+  const waitingWorkers = workers.filter((worker) => worker.status === "waiting_for_input");
   const noAgentConnected = connected && peers.length === 0;
   const allAgentsOffline = connected && peers.length > 0 && onlineAgents.length === 0;
   const offlineAssignedTasks = activeTasks.filter((task) => {
@@ -464,6 +508,8 @@ export function WorkflowHome({
                       <CheckCircle2 size={17} />
                     ) : worker.status === "failed" ? (
                       <AlertTriangle size={17} />
+                    ) : worker.status === "waiting_for_input" ? (
+                      <MessageCircleQuestion size={17} />
                     ) : (
                       <Loader2 size={17} className="spin" />
                     )}
@@ -482,6 +528,7 @@ export function WorkflowHome({
                     <span className={`state-badge ${WORKER_TONE[worker.status]}`}>{WORKER_LABEL[worker.status]}</span>
                   </div>
                 </div>
+                {worker.status === "waiting_for_input" && <WorkerInputBox runId={worker.id} actions={actions} />}
                 {expandedDiff === worker.id && diffData[worker.id] && (
                   <div className="worker-diff-expand">
                     <DiffSummary diff={diffData[worker.id]} />
@@ -544,11 +591,21 @@ export function WorkflowHome({
             {openConflicts.length === 0 &&
             offlineAssignedTasks.length === 0 &&
             locks.length === 0 &&
+            waitingWorkers.length === 0 &&
             !noAgentConnected &&
             !allAgentsOffline ? (
               <div className="empty-soft success">当前没有明显风险，可以继续推进。</div>
             ) : (
               <>
+                {waitingWorkers.slice(0, 2).map((worker) => (
+                  <div key={worker.id} className="attention-row warning">
+                    <MessageCircleQuestion size={16} />
+                    <div>
+                      <b>worker 在等你回复</b>
+                      <span>{worker.taskTitle} · 在上方“自动执行”面板里直接回复即可继续。</span>
+                    </div>
+                  </div>
+                ))}
                 {noAgentConnected && (
                   <div className="attention-row warning">
                     <Bot size={16} />
