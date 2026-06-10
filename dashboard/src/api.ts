@@ -77,6 +77,8 @@ export interface HubActions {
   rejectMission: (missionId: string, note?: string) => Promise<{ approval: Approval }>;
   dispatchConflictFix: (missionId: string) => Promise<{ ok: boolean; runId?: string }>;
   getRunDiff: (runId: string) => Promise<WorktreeDiff | null>;
+  setWorkspace: (path: string) => Promise<{ path: string }>;
+  dispatchTask: (taskId: string, harness?: "claude-code" | "codex") => Promise<void>;
 }
 
 export interface HubState {
@@ -90,6 +92,7 @@ export interface HubState {
   contract: Contract;
   missions: Mission[];
   workers: Worker[];
+  workspace: string | null;
   connected: boolean;
   operatorId: string;
   connectInfo: ConnectInfo | null;
@@ -107,6 +110,7 @@ export function useHubState(): HubState {
   const [contract, setContract] = useState<Contract>(EMPTY_CONTRACT);
   const [missions, setMissions] = useState<Mission[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
+  const [workspace, setWorkspaceState] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [operatorId, setOperatorId] = useState("");
   const [connectInfo, setConnectInfo] = useState<ConnectInfo | null>(null);
@@ -158,6 +162,7 @@ export function useHubState(): HubState {
       setConflicts(s.conflicts ?? []);
       setContract(s.contract ?? EMPTY_CONTRACT);
       setMissions(s.missions ?? []);
+      setWorkspaceState(s.workspace ?? null);
     });
 
     const onAgent = (e: Event) => setAgents((a) => upsert(a, payloadOf(e) as Agent));
@@ -188,6 +193,11 @@ export function useHubState(): HubState {
 
     const onWorker = (e: Event) => setWorkers((arr) => upsert(arr, payloadOf(e) as Worker));
     es.addEventListener("worker_updated", onWorker);
+
+    es.addEventListener("workspace_updated", (e) => {
+      const p = payloadOf(e) as { path: string | null };
+      setWorkspaceState(p.path ?? null);
+    });
 
     es.addEventListener("lock_changed", () => {
       void api<{ locks: FileLock[] }>(`/api/locks${qs()}`)
@@ -331,6 +341,19 @@ export function useHubState(): HubState {
     }
   }, []);
 
+  const setWorkspace = useCallback(async (wsPath: string) => {
+    const r = await api<{ path: string }>("/api/workspace", {
+      method: "POST",
+      body: JSON.stringify({ path: wsPath }),
+    });
+    setWorkspaceState(r.path);
+    return r;
+  }, []);
+
+  const dispatchTask = useCallback(async (taskId: string, harness?: "claude-code" | "codex") => {
+    await api(`/api/tasks/${taskId}/dispatch`, { method: "POST", body: JSON.stringify({ harness }) });
+  }, []);
+
   const updateContract = useCallback(
     async (fields: { apiContract?: string; designSpec?: string; expectedVersion?: number }) => {
       const r = await api<{ ok: boolean }>("/api/contract", {
@@ -353,6 +376,7 @@ export function useHubState(): HubState {
     contract,
     missions,
     workers,
+    workspace,
     connected,
     operatorId,
     connectInfo,
@@ -375,6 +399,8 @@ export function useHubState(): HubState {
       rejectMission,
       dispatchConflictFix,
       getRunDiff,
+      setWorkspace,
+      dispatchTask,
     },
   };
 }

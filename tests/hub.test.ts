@@ -159,7 +159,10 @@ describe("hub REST", () => {
     expect(res.body.mission.goal).toBe("Build users feature");
     expect(res.body.mission.worktrees).toHaveLength(2);
     expect(res.body.tasks.length).toBeGreaterThanOrEqual(2);
-    expect(res.body.tasks.map((t: { assignee: string | null }) => t.assignee)).toEqual(expect.arrayContaining([claude, codex]));
+    // 有项目目录 → 为任务拉起自动 worker；任务释放回待认领，由 worker claim_task 原子接管
+    // （预指派会让 worker 撞 already_claimed 直接退出）。
+    expect(res.body.launchedRuns).toHaveLength(2);
+    expect(res.body.tasks.map((t: { assignee: string | null }) => t.assignee)).toEqual([null, null]);
 
     const snapshot = await request(app).get("/api/snapshot");
     expect(snapshot.body.missions[0].taskIds.length).toBeGreaterThanOrEqual(2);

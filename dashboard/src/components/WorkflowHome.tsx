@@ -9,10 +9,12 @@ import {
   Copy,
   FileLock2,
   FileText,
+  FolderOpen,
   Globe,
   KeyRound,
   Loader2,
   MessageSquare,
+  Play,
   PlugZap,
   Settings,
   Terminal,
@@ -313,6 +315,94 @@ function ConnectionGuide({
   );
 }
 
+// 统一工作区：所有任务默认在这个目录里自动执行。没有它，枢纽无处拉起 worker，
+// 任务只能停在任务板上等外部会话——这是"没人开工"的头号原因，所以放在显眼位置。
+function WorkspaceCard({ workspace, actions }: { workspace: string | null; actions: HubActions }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async () => {
+    const next = value.trim();
+    if (!next) return;
+    setSaving(true);
+    setError("");
+    try {
+      await actions.setWorkspace(next);
+      setEditing(false);
+      setValue("");
+    } catch {
+      setError("设置失败：目录不存在或无法访问，请检查路径。");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const showEditor = editing || !workspace;
+
+  return (
+    <section className="panel-card workspace-card" id="workspace">
+      <div className="panel-head">
+        <div>
+          <h2>统一工作区</h2>
+          <p>设置一次项目文件夹，之后启动任务、一键派单都会在这里自动拉起 Claude Code / Codex 执行（每个任务独立 git 分支，互不干扰）。</p>
+        </div>
+        <span className={workspace ? "mini-badge success" : "mini-badge warning"}>{workspace ? "已设置" : "未设置"}</span>
+      </div>
+
+      {!showEditor ? (
+        <div className="workspace-current">
+          <FolderOpen size={16} />
+          <code>{workspace}</code>
+          <button
+            className="btn btn-small"
+            type="button"
+            onClick={() => {
+              setValue(workspace ?? "");
+              setEditing(true);
+            }}
+          >
+            修改
+          </button>
+        </div>
+      ) : (
+        <div className="workspace-edit">
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="项目文件夹的完整路径，例：/Users/you/my-project"
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void save();
+            }}
+          />
+          <button className="btn btn-primary btn-small" type="button" disabled={!value.trim() || saving} onClick={() => void save()}>
+            {saving ? "保存中…" : "保存"}
+          </button>
+          {workspace && (
+            <button className="btn btn-small" type="button" onClick={() => setEditing(false)}>
+              取消
+            </button>
+          )}
+        </div>
+      )}
+
+      {!workspace && (
+        <p className="workspace-hint">
+          <AlertTriangle size={13} />
+          未设置工作区时，任务只会挂在任务板上等外部接入的智能体来认领——这通常就是"任务一直没人开工"的原因。
+        </p>
+      )}
+      {error && (
+        <p className="launcher-error" role="alert">
+          <AlertTriangle size={14} />
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function SummaryCard({
   icon,
   title,
@@ -347,6 +437,7 @@ export function WorkflowHome({
   contract,
   missions,
   workers,
+  workspace,
   connected,
   connectInfo,
   actions,
@@ -359,12 +450,15 @@ export function WorkflowHome({
   contract: Contract;
   missions: Mission[];
   workers: Worker[];
+  workspace: string | null;
   connected: boolean;
   connectInfo: ConnectInfo | null;
   actions: HubActions;
 }) {
   const [expandedDiff, setExpandedDiff] = useState<string | null>(null);
   const [diffData, setDiffData] = useState<Record<string, WorktreeDiff>>({});
+  const [dispatchingTask, setDispatchingTask] = useState<string | null>(null);
+  const [dispatchError, setDispatchError] = useState("");
   // 数据靠 SSE 推送，任务停滞时恰恰没有事件——本地时钟保证"停滞告警"能自己浮现。
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -379,6 +473,19 @@ export function WorkflowHome({
       if (d) setDiffData((prev) => ({ ...prev, [runId]: d }));
     }
     setExpandedDiff(runId);
+  };
+
+  // 一键派单：让枢纽直接拉起一个自动 worker 接管这个任务。
+  const dispatchTask = async (taskId: string) => {
+    setDispatchingTask(taskId);
+    setDispatchError("");
+    try {
+      await actions.dispatchTask(taskId);
+    } catch {
+      setDispatchError("派单失败：请先在上方设置统一工作区，并确认目录存在。");
+    } finally {
+      setDispatchingTask(null);
+    }
   };
 
   const peers = agents.filter((agent) => !isOperator(agent));
@@ -437,7 +544,9 @@ export function WorkflowHome({
 
       <ConnectionGuide agents={agents} connectInfo={connectInfo} actions={actions} />
 
-      <MissionPlanner agents={agents} connected={connected} actions={actions} />
+      <WorkspaceCard workspace={workspace} actions={actions} />
+
+      <MissionPlanner agents={agents} connected={connected} workspace={workspace} actions={actions} />
 
       <TeamMembers agents={agents} tasks={tasks} />
 
@@ -618,7 +727,7 @@ export function WorkflowHome({
                       </b>
                       <span>
                         {task.title} · 负责人 {task.assignee ? (agentLabels.get(task.assignee) ?? "智能体") : "未知"}。
-                        外部接入的智能体不会自动开工——回到它的会话里说『继续 Orbit 任务』催一下；或释放任务重新分配。
+                        外部接入的智能体不会自动开工——点任务列表里的『派 Agent 执行』让枢纽自动接管，或回到它的会话里说『继续 Orbit 任务』催一下。
                       </span>
                     </div>
                   </div>
@@ -649,6 +758,12 @@ export function WorkflowHome({
             </div>
             <span className="mini-badge">{tasks.length} 个任务</span>
           </div>
+          {dispatchError && (
+            <p className="launcher-error" role="alert">
+              <AlertTriangle size={14} />
+              {dispatchError}
+            </p>
+          )}
           <div className="simple-table-wrap">
             <table className="simple-table">
               <thead>
@@ -657,18 +772,21 @@ export function WorkflowHome({
                   <th>负责人</th>
                   <th>状态</th>
                   <th>更新时间</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleTasks.length === 0 ? (
                   <tr>
-                    <td colSpan={4}>
+                    <td colSpan={5}>
                       <div className="empty-soft">还没有任务。输入目标后点击“启动任务”。</div>
                     </td>
                   </tr>
                 ) : (
                   visibleTasks.map((task) => {
                     const stalled = stalledTasks.some((t) => t.id === task.id);
+                    const hasActiveWorker = tasksWithActiveWorker.has(task.id);
+                    const dispatchable = task.status !== "done" && !hasActiveWorker;
                     return (
                       <tr key={task.id}>
                         <td>
@@ -688,6 +806,27 @@ export function WorkflowHome({
                           {stalled && <span className="state-badge danger stall-badge">停滞</span>}
                         </td>
                         <td>{timeAgo(task.updatedAt)}</td>
+                        <td>
+                          {hasActiveWorker ? (
+                            <span className="dispatch-running">
+                              <Loader2 size={13} className="spin" />
+                              执行中
+                            </span>
+                          ) : dispatchable ? (
+                            <button
+                              className="btn btn-small"
+                              type="button"
+                              disabled={dispatchingTask === task.id}
+                              onClick={() => void dispatchTask(task.id)}
+                              title="由枢纽在统一工作区里拉起一个自动执行助手接管这个任务"
+                            >
+                              {dispatchingTask === task.id ? <Loader2 size={13} className="spin" /> : <Play size={13} />}
+                              派 Agent 执行
+                            </button>
+                          ) : (
+                            <span className="dispatch-done">—</span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })

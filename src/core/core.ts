@@ -57,6 +57,7 @@ export class CoordinationCore {
       missions: this.missions.list(),
       projects: this.projects.list(),
       agentRuns: this.store.listAgentRuns(),
+      workspace: this.store.getSetting("workspace_path"),
     };
   }
 

@@ -200,8 +200,14 @@ interface LaunchTarget {
 // 决定本次 mission 要并行拉起哪些 worker（每个独立 worktree）。
 // 1) 显式 agents：为每个 harness 拉一个，按顺序绑定任务；
 // 2) 否则：为每个分配给可驱动 Agent（claude-code/codex）的任务各拉一个（并行）；
-// 3) 都没有：回退第一个任务 + 默认 Claude（保留单 worker 行为）。
-function planLaunchTargets(core: CoordinationCore, tasks: Task[], explicitAgents?: ("claude-code" | "codex")[]): LaunchTarget[] {
+// 3) 都没有（如还没有任何外部 Agent 接入）：为每个任务按方向拉一个
+//    （前端→codex，其余→claude-code）——枢纽自己就能开工，不依赖外部会话。
+function planLaunchTargets(
+  core: CoordinationCore,
+  tasks: Task[],
+  explicitAgents?: ("claude-code" | "codex")[],
+  areas?: ("frontend" | "backend" | "general")[],
+): LaunchTarget[] {
   if (explicitAgents && explicitAgents.length > 0) {
     return explicitAgents.map((harness, i) => ({ harness, task: tasks[i] ?? null }));
   }
@@ -211,7 +217,10 @@ function planLaunchTargets(core: CoordinationCore, tasks: Task[], explicitAgents
     if (a && (a.harness === "claude-code" || a.harness === "codex")) drivable.push({ harness: a.harness, task: t });
   }
   if (drivable.length > 0) return drivable;
-  return tasks[0] ? [{ harness: "claude-code", task: tasks[0] }] : [];
+  return tasks.map((task, i) => ({
+    harness: areas?.[i] === "frontend" ? ("codex" as const) : ("claude-code" as const),
+    task,
+  }));
 }
 
 // Mounts every REST endpoint. Writes use POST, reads use GET — one simple mental model.
@@ -276,6 +285,26 @@ export function mountRoutes(
     const project = core.projects.get(req.params.id);
     if (!project) return res.status(404).json({ error: "unknown_project" });
     res.json({ worktrees: runs.listProjectWorktrees(project.rootPath) });
+  });
+
+  // ----- 统一工作区：设置一次，启动任务/派单都默认在这个目录里自动执行 -----
+  app.get("/api/workspace", (_req, res) => {
+    const wsPath = core.store.getSetting("workspace_path");
+    const project = wsPath ? core.store.findProjectByRoot(wsPath) : null;
+    res.json({ path: wsPath, project });
+  });
+  app.post("/api/workspace", (req, res) => {
+    const body = parse(z.object({ path: z.string().min(1) }), req, res);
+    if (!body) return;
+    const resolved = path.resolve(body.path.trim());
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      return res.status(400).json({ error: "path_not_found", message: `目录不存在：${resolved}` });
+    }
+    const existing = core.store.findProjectByRoot(resolved);
+    const project = existing ?? core.projects.create({ rootPath: resolved, commands: detectCommands(resolved) });
+    core.store.setSetting("workspace_path", resolved);
+    core.events.emit("workspace_updated", { path: resolved, project });
+    res.json({ path: resolved, project, suggestGitInit: !project.isGitRepo });
   });
 
   // ----- C04/C07 agent runs -----
@@ -353,16 +382,19 @@ export function mountRoutes(
     const peers = core.agents.list().filter((a) => a.harness !== "other");
     const onlinePeers = peers.filter((a) => a.status === "online");
     let project = body.projectId ? core.projects.get(body.projectId) : null;
+    // 没显式传项目目录时回退到统一工作区——这是"启动任务后枢纽自动拉起 Agent
+    // 去干活"的默认路径；不回退的话任务只会停在任务板上等外部会话来认领。
+    const requestedPath = body.projectPath?.trim() || core.store.getSetting("workspace_path") || undefined;
     // 只传了 projectPath（dashboard 快捷启动）→ 自动 find-or-create 项目并探测验证命令，
     // 让"集成前自动验证"在默认路径下也生效（否则集成阶段无命令可跑，安全卖点落空）。
-    if (!project && body.projectPath) {
-      const resolved = path.resolve(body.projectPath);
+    if (!project && requestedPath) {
+      const resolved = path.resolve(requestedPath);
       if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
         const existing = core.store.findProjectByRoot(resolved);
         project = existing ?? core.projects.create({ rootPath: resolved, commands: detectCommands(resolved) });
       }
     }
-    const projectPath = project ? project.rootPath : body.projectPath;
+    const projectPath = project ? project.rootPath : requestedPath;
     const mission = core.missions.create({
       goal: body.goal,
       projectId: project?.id ?? null,
@@ -388,18 +420,6 @@ export function mountRoutes(
       mission.id,
       createdTasks.map((t) => t.id),
     );
-    if (body.createdBy) {
-      const unassigned = createdTasks.filter((t) => !t.assignee);
-      const lines = [
-        `Mission launched: ${body.goal}`,
-        body.projectPath ? `Project: ${body.projectPath}` : "",
-        `Tasks:`,
-        ...createdTasks.map((t) => `- ${t.id} ${t.title}${t.assignee ? ` -> ${core.agents.get(t.assignee)?.name ?? t.assignee}` : " (待认领)"}`),
-        unassigned.length ? `有 ${unassigned.length} 个任务暂无在线负责人，对应 Agent 上线后请用 claim_task 认领。` : "",
-        `Loop: get_contract -> declare_intent -> acquire_file_lock -> update_task in_progress -> build -> release_file_lock -> update_task done.`,
-      ].filter(Boolean);
-      core.messages.send(body.createdBy, "all", lines.join("\n"));
-    }
 
     // 驱动层（第二阶段：两个 Agent 在隔离目录并行修改）：有项目目录时，为应执行的任务
     // 并行拉起多个 worker，每个由 RunManager 自动创建独立 worktree+分支，互不干扰。
@@ -412,8 +432,11 @@ export function mountRoutes(
       const missionId = (updated ?? mission).id;
 
       // 一次运行的描述：harness + 绑定任务（任务用于命名、领域提示与 taskId）。
-      const targets = planLaunchTargets(core, createdTasks, body.agents);
+      const targets = planLaunchTargets(core, createdTasks, body.agents, drafts.map((d) => d.area));
       for (const { harness, task } of targets.slice(0, MAX_PARALLEL_WORKERS)) {
+        // worker 的协议是 claim_task 原子认领；预指派给外部 Agent 会让 worker
+        // 撞 already_claimed 直接退出（实测的"自动执行没人开工"根因之一）→ 先释放。
+        if (task?.assignee) core.tasks.release(task.id);
         const workerName = `自动助手·${task ? task.id.slice(-4) : harness}`;
         runs.start({
           harness,
@@ -429,11 +452,27 @@ export function mountRoutes(
       }
     }
 
+    // 通知在 worker 拉起之后发送，消息里的任务归属才是真实状态。
+    const finalTasks = createdTasks.map((t) => core.tasks.get(t.id) ?? t);
+    if (body.createdBy) {
+      const unassigned = finalTasks.filter((t) => !t.assignee);
+      const lines = [
+        `Mission launched: ${body.goal}`,
+        launchPath ? `Project: ${launchPath}` : "",
+        `Tasks:`,
+        ...finalTasks.map((t) => `- ${t.id} ${t.title}${t.assignee ? ` -> ${core.agents.get(t.assignee)?.name ?? t.assignee}` : " (待认领)"}`),
+        launchedRuns.length ? `枢纽已自动拉起 ${launchedRuns.length} 个执行助手，会用 claim_task 接管上面的待认领任务。` : "",
+        !launchedRuns.length && unassigned.length ? `有 ${unassigned.length} 个任务暂无在线负责人，对应 Agent 上线后请用 claim_task 认领。` : "",
+        `Loop: get_contract -> declare_intent -> acquire_file_lock -> update_task in_progress -> build -> release_file_lock -> update_task done.`,
+      ].filter(Boolean);
+      core.messages.send(body.createdBy, "all", lines.join("\n"));
+    }
+
     // B06：拉起了 worker → 推进状态机 draft→planning→preparing_workspaces→running。
     let finalMission = updated ?? mission;
     if (launchedRuns.length > 0) finalMission = core.missions.markRunning(finalMission.id) ?? finalMission;
 
-    res.json({ mission: finalMission, tasks: createdTasks, launchedRuns });
+    res.json({ mission: finalMission, tasks: finalTasks, launchedRuns });
   });
 
   // ----- 第四阶段：集成、验证、最终 Diff、人工审批 -----
@@ -554,6 +593,48 @@ export function mountRoutes(
     const task = core.tasks.release(req.params.id);
     if (!task) return res.status(404).json({ error: "unknown_task" });
     res.json({ task });
+  });
+
+  // 一键派单：为单个卡住的任务直接拉起一个自动 worker 去做。
+  // 项目目录取所属 mission 的，否则回退统一工作区；都没有则明确报错。
+  app.post("/api/tasks/:id/dispatch", (req, res) => {
+    if (!runs) return res.status(503).json({ error: "runs_unavailable" });
+    const body = parse(z.object({ harness: z.enum(["claude-code", "codex"]).optional() }), req, res);
+    if (!body) return;
+    const task = core.tasks.get(req.params.id);
+    if (!task) return res.status(404).json({ error: "unknown_task" });
+    if (task.status === "done") return res.status(400).json({ error: "task_done", message: "任务已完成，无需派单。" });
+
+    const mission = core.missions.list().filter((m) => m.taskIds.includes(task.id)).at(-1) ?? null;
+    const wsPath = mission?.projectPath?.trim() || core.store.getSetting("workspace_path");
+    if (!wsPath) {
+      return res.status(400).json({ error: "no_workspace", message: "未设置工作区目录，无法自动执行。先在面板里设置工作区。" });
+    }
+    const resolvedPath = path.resolve(wsPath);
+    if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isDirectory()) {
+      return res.status(400).json({ error: "path_not_found", message: `工作区目录不存在：${resolvedPath}` });
+    }
+
+    const assignee = task.assignee ? core.agents.get(task.assignee) : null;
+    const harness =
+      body.harness ?? (assignee && (assignee.harness === "claude-code" || assignee.harness === "codex") ? assignee.harness : "claude-code");
+    // worker 用 claim_task 原子认领；任务卡在他人名下会让 worker 撞 already_claimed
+    // 直接退出。派单 = 显式接管，先把任务释放回待认领。
+    if (task.assignee || task.status !== "todo") core.tasks.release(task.id);
+    const project = mission?.projectId ? core.projects.get(mission.projectId) : core.store.findProjectByRoot(resolvedPath);
+    const workerName = `自动助手·${task.id.slice(-4)}`;
+    const run = runs.start({
+      harness,
+      missionId: mission?.id ?? null,
+      taskId: task.id,
+      projectId: project?.id ?? null,
+      taskTitle: task.title,
+      goal: mission?.goal ?? task.title,
+      projectPath: resolvedPath,
+      mcp: { command: cliLaunchParts().command, args: mcpArgs(workerName, harness, hubUrl(req), Boolean(options.tokenRequired)) },
+    });
+    if (mission) core.missions.markRunning(mission.id);
+    res.json({ run });
   });
 
   // ----- locks -----

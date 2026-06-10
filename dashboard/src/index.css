@@ -1007,6 +1007,72 @@ body {
   flex: 0 0 auto;
   color: var(--accent);
 }
+.launcher-warning.info {
+  color: var(--accent);
+}
+.workspace-current {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-soft);
+  padding: 10px 12px;
+  color: var(--accent);
+}
+.workspace-current code {
+  flex: 1;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 13px;
+}
+.workspace-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.workspace-edit input {
+  flex: 1;
+  height: 38px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: #ffffff;
+  padding: 0 12px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.workspace-edit input:focus {
+  border-color: var(--accent);
+  box-shadow: var(--ring);
+}
+.workspace-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px 0 0;
+  color: var(--amber);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.workspace-hint svg {
+  margin-top: 2px;
+  flex: 0 0 auto;
+}
+.dispatch-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.dispatch-done {
+  color: var(--muted);
+}
+.task-panel .launcher-error {
+  margin-bottom: 10px;
+}
 .project-path-input {
   width: 100%;
   height: 38px;

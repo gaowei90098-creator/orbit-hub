@@ -338,7 +338,8 @@ export type HubEventType =
   | "worker_updated"
   | "integration_updated"
   | "validation_recorded"
-  | "approval_recorded";
+  | "approval_recorded"
+  | "workspace_updated";
 
 export interface HubEvent {
   type: HubEventType;
@@ -359,4 +360,5 @@ export interface Snapshot {
   missions: Mission[];
   projects: Project[];
   agentRuns: AgentRun[];
+  workspace: string | null; // 统一工作区目录（未设置为 null）
 }

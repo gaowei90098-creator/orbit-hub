@@ -76,7 +76,7 @@ function AppSidebar({
 }
 
 export function App() {
-  const { agents, tasks, locks, messages, intents, conflicts, contract, missions, workers, connected, connectInfo, actions } =
+  const { agents, tasks, locks, messages, intents, conflicts, contract, missions, workers, workspace, connected, connectInfo, actions } =
     useHubState();
   const openConflicts = conflicts.filter((c) => c.status === "open").length;
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -111,6 +111,7 @@ export function App() {
             contract={contract}
             missions={missions}
             workers={workers}
+            workspace={workspace}
             connected={connected}
             connectInfo={connectInfo}
             actions={actions}

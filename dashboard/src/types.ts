@@ -152,6 +152,7 @@ export interface Snapshot {
   conflicts: Conflict[];
   contract: Contract;
   missions: Mission[];
+  workspace: string | null;
 }
 
 export interface TaskDraft {
