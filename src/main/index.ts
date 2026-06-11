@@ -1,0 +1,313 @@
+import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain } from "electron"
+import { join, resolve } from "path"
+import { HubServer } from "./hub/server"
+import { AgentRegistry } from "./hub/registry"
+import { EventPipeline } from "./hub/pipeline"
+import { KeywordRouter } from "./hub/router"
+import { Aggregator } from "./hub/aggregator"
+import { Dispatcher, StreamEvent } from "./hub/dispatcher"
+import { store } from "./store"
+import { detectAgentsAsync } from "./hub/agent-detector"
+import { getProviderManager } from "./providers/manager"
+import { getLocalProxy } from "./routing/proxy"
+
+let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+let hub: HubServer | null = null
+const registry = new AgentRegistry()
+const pipeline = new EventPipeline()
+const router = new KeywordRouter()
+const aggregator = new Aggregator()
+const providerMgr = getProviderManager()
+let dispatcher: Dispatcher | null = null
+const proxy = getLocalProxy()
+
+const AGENT_CAPS: Record<string, string[]> = {
+  codex: ["coding", "debug", "refactor", "api"],
+  claude: ["analysis", "writing", "translation", "research"],
+  openclaw: ["automation", "deploy", "pipeline", "script"],
+  hermes: ["tools", "system", "automation"]
+}
+
+const AGENT_NAMES: Record<string, string> = {
+  codex: "Codex CLI",
+  claude: "Claude Code",
+  openclaw: "OpenClaw",
+  hermes: "Hermes"
+}
+
+function createWindow(): void {
+  mainWindow = new BrowserWindow({
+    width: 1280,
+    height: 820,
+    minWidth: 960,
+    minHeight: 640,
+    title: "AgentHub",
+    webPreferences: {
+      preload: join(__dirname, "../preload/index.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    },
+    show: false,
+    frame: true,
+    backgroundColor: "#0f1117"
+  })
+  mainWindow.on("ready-to-show", () => mainWindow?.show())
+  mainWindow.on("close", (event) => {
+    if (store.get("minimizeToTray") !== false) {
+      event.preventDefault()
+      mainWindow?.hide()
+    }
+  })
+  if (process.env.ELECTRON_RENDERER_URL) {
+    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)
+  } else {
+    mainWindow.loadFile(join(__dirname, "../renderer/index.html"))
+  }
+}
+
+function createTray(): void {
+  const trayIcon = nativeImage.createEmpty()
+  tray = new Tray(trayIcon)
+  const contextMenu = Menu.buildFromTemplate([
+    { label: "Open AgentHub", click: () => mainWindow?.show() },
+    { type: "separator" },
+    { label: "Status: Running", enabled: false },
+    { type: "separator" },
+    { label: "Quit", click: () => { (app as any).isQuitting = true; app.quit() } }
+  ])
+  tray.setToolTip("AgentHub - Multi-Agent Workbench")
+  tray.setContextMenu(contextMenu)
+  tray.on("double-click", () => mainWindow?.show())
+}
+
+function registerAgentsFromBindings(): void {
+  const bindings = providerMgr.getBindings()
+  for (const b of bindings) {
+    const existing = registry.get(b.agentId)
+    const name = AGENT_NAMES[b.agentId] || b.agentId
+    const caps = AGENT_CAPS[b.agentId] || []
+    if (!existing) {
+      registry.registerHttpAgent(b.agentId, name, caps, b.providerId, b.modelId)
+    } else {
+      existing.providerId = b.providerId
+      existing.modelId = b.modelId
+    }
+  }
+}
+
+async function initHub(): Promise<void> {
+  registerAgentsFromBindings()
+  pipeline.register({
+    name: "rate-limiter",
+    type: "guard",
+    handle: async (event) => event
+  })
+  pipeline.register({
+    name: "logger",
+    type: "observe",
+    handle: async (event) => {
+      console.log("[Pipeline] " + event.source + " -> " + event.target)
+      return event
+    }
+  })
+  dispatcher = new Dispatcher(registry, pipeline)
+  hub = new HubServer(registry)
+
+  hub.on("client:message", async ({ clientId, message }) => {
+    if (message.type === "chat:message") {
+      const task = await dispatcher!.dispatch(
+        message.payload.text,
+        message.payload.mode || "auto",
+        message.payload.targetAgent,
+        { thinking: message.payload.thinking }
+      )
+      hub?.broadcast("chat:response", {
+        taskId: task.id,
+        status: task.status,
+        results: Array.from(task.results.entries()).map(([agentId, content]) => ({
+          agentId, content, thinking: task.thinking.get(agentId) || ""
+        })),
+        errors: Array.from(task.errors.entries()),
+        thinkingSummary: Array.from(task.thinkingSummary.entries()),
+        error: task.error
+      })
+      if (task.status === "completed") {
+        const agents = Array.from(task.results.keys()).join(", ")
+        if (agents) {
+          new Notification({ title: "AgentHub", body: "Task done by " + agents, silent: true }).show()
+        }
+      }
+    }
+  })
+
+  dispatcher.on("stream", (event: StreamEvent) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("dispatch:stream", event)
+    }
+  })
+
+  try {
+    await detectAgentsAsync()
+    console.log("[Hub] Initial agent detection complete")
+  } catch (e) {
+    console.error("[Hub] Initial detection failed:", e)
+  }
+
+  try {
+    await proxy.start()
+    console.log("[Proxy] Local Chat Completions:", proxy.getUrl())
+  } catch (e) {
+    console.error("[Proxy] Failed to start:", e)
+  }
+
+  hub.start()
+}
+
+ipcMain.handle("hub:status", () => ({
+  running: hub !== null,
+  url: hub?.getUrl() || "",
+  proxyUrl: proxy.getUrl(),
+  clientCount: hub?.getClientCount() || 0,
+  agents: registry.getAll().map(a => ({
+    id: a.id, name: a.name, status: a.status, capabilities: a.capabilities,
+    providerId: a.providerId, modelId: a.modelId, errorCount: a.errorCount
+  })),
+  tasks: dispatcher?.getRecentTasks(10).map(t => ({
+    id: t.id, text: t.text.slice(0, 50), mode: t.mode, status: t.status, createdAt: t.createdAt
+  })) || []
+}))
+
+ipcMain.handle("hub:dispatch", async (_event, payload) => {
+  return dispatcher?.dispatch(payload.text, payload.mode || "auto", payload.targetAgent, { thinking: payload.thinking })
+})
+
+ipcMain.handle("hub:rescan", async () => {
+  const agents = await detectAgentsAsync()
+  return agents.map(d => ({
+    id: d.id, name: d.name, found: d.found, 
+    capabilities: d.capabilities, providerId: d.providerId, modelId: d.modelId,
+    baseUrl: d.baseUrl, reachable: d.reachable, error: d.error
+  }))
+})
+
+ipcMain.handle("hub:cancel", async (_event, taskId: string) => dispatcher?.cancel(taskId))
+ipcMain.handle("store:get", async (_event, key: string) => store.get(key))
+ipcMain.handle("store:set", async (_event, key: string, value: any) => { store.set(key, value); return true })
+
+ipcMain.handle("providers:get", async () => providerMgr.getConfig())
+ipcMain.handle("providers:upsert", async (_e, p) => { providerMgr.upsertProvider(p); registerAgentsFromBindings(); return providerMgr.getConfig() })
+ipcMain.handle("providers:delete", async (_e, id) => { const ok = providerMgr.deleteProvider(id); if (ok) registerAgentsFromBindings(); return ok })
+ipcMain.handle("providers:setEnabled", async (_e, id, enabled) => { providerMgr.setProviderEnabled(id, enabled); return providerMgr.getConfig() })
+ipcMain.handle("providers:setKey", async (_e, id, key) => { providerMgr.setProviderApiKey(id, key); registerAgentsFromBindings(); return providerMgr.getConfig() })
+ipcMain.handle("providers:health", async (_e, id) => providerMgr.checkProviderHealth(id))
+ipcMain.handle("providers:healthAll", async () => {
+  const results: any = {}
+  for (const p of providerMgr.getProviders()) {
+    results[p.id] = await providerMgr.checkProviderHealth(p.id)
+  }
+  return results
+})
+ipcMain.handle("routing:setBinding", async (_e, b) => { providerMgr.upsertBinding(b); registerAgentsFromBindings(); return providerMgr.getBindings() })
+ipcMain.handle("routing:removeBinding", async (_e, agentId) => { providerMgr.removeBinding(agentId); return providerMgr.getBindings() })
+ipcMain.handle("routing:setFallback", async (_e, chain) => { providerMgr.setFallbackChain(chain); return providerMgr.getConfig().routing })
+ipcMain.handle("routing:setStrategy", async (_e, s) => { providerMgr.setStrategy(s); return providerMgr.getConfig().routing })
+ipcMain.handle("routing:setBindingThinking", async (_e, agentId, t) => { providerMgr.setBindingThinking(agentId, t); return providerMgr.getBindings() })
+ipcMain.handle("routing:setProviderThinking", async (_e, id, t) => { providerMgr.setProviderThinking(id, t); return providerMgr.getConfig() })
+ipcMain.handle("routing:activeBinding", async (_e, agentId) => { providerMgr.setActiveBinding(agentId); return providerMgr.getConfig().activeBindingId })
+ipcMain.handle("proxy:info", async () => ({ url: proxy.getUrl(), running: true }))
+
+
+function parseDeepLink(url: string): { action: string; params: Record<string, string> } | null {
+  if (!url || !url.startsWith('agenthub://')) return null
+  try {
+    const stripped = url.startsWith('agenthub://') ? url.slice('agenthub://'.length).replace(/^[/]+/, '') : url
+    const [actionPath, query] = stripped.split('?')
+    const action = actionPath.split('/')[0] || 'open'
+    const params: Record<string, string> = {}
+    if (query) {
+      for (const part of query.split('&')) {
+        const [k, v] = part.split('=')
+        if (k) params[decodeURIComponent(k)] = v ? decodeURIComponent(v) : ''
+      }
+    }
+    return { action, params }
+  } catch {
+    return null
+  }
+}
+
+function handleDeepLink(url: string): void {
+  const link = parseDeepLink(url)
+  if (!link) return
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    mainWindow.webContents.send('app:deep-link', link)
+  } else {
+    pendingDeepLink = link
+  }
+}
+
+let pendingDeepLink: { action: string; params: Record<string, string> } | null = null
+
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    app.setAsDefaultProtocolClient('agenthub', process.execPath, [resolve(process.argv[1])])
+  }
+} else {
+  app.setAsDefaultProtocolClient('agenthub')
+}
+
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (_event, argv) => {
+    const url = argv.find(a => a.startsWith('agenthub://'))
+    if (url) handleDeepLink(url)
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
+
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  handleDeepLink(url)
+})
+
+const initialDeepLink = process.argv.find(a => a.startsWith('agenthub://'))
+if (initialDeepLink) pendingDeepLink = parseDeepLink(initialDeepLink)
+
+app.whenReady().then(async () => {
+  createWindow()
+  createTray()
+  await initHub()
+  if (pendingDeepLink) {
+    mainWindow?.webContents.once("did-finish-load", () => {
+      mainWindow?.webContents.send("app:deep-link", pendingDeepLink)
+      pendingDeepLink = null
+    })
+  }
+})
+
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit()
+})
+
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  else mainWindow?.show()
+})
+
+app.on("before-quit", async () => {
+  (app as any).isQuitting = true
+  await registry.stopAll()
+  hub?.stop()
+  proxy.stop()
+})

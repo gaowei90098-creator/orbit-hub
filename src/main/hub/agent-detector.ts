@@ -1,0 +1,84 @@
+/**
+ * Real agent detection - no mock data.
+ */
+import { execSync } from "child_process";
+import { getProviderManager } from "../providers/manager";
+
+export interface DetectedAgent {
+  id: string;
+  name: string;
+  found: boolean;
+  version?: string;
+  path?: string;
+  capabilities: string[];
+  providerId?: string | null;
+  modelId?: string | null;
+  baseUrl?: string | null;
+  reachable?: boolean;
+  latencyMs?: number | null;
+  error?: string | null;
+}
+
+const CLI_PROBES = [
+  { id: "codex", name: "Codex CLI", binary: "codex", caps: ["coding", "debug", "refactor", "api"] },
+  { id: "claude", name: "Claude Code", binary: "claude", caps: ["analysis", "writing", "translation", "research"] },
+  { id: "openclaw", name: "OpenClaw", binary: "openclaw", caps: ["automation", "deploy", "pipeline", "script"] },
+  { id: "hermes", name: "Hermes", binary: "hermes", caps: ["tools", "system", "automation"] },
+  { id: "aider", name: "Aider", binary: "aider", caps: ["coding", "pair-programming"] },
+  { id: "goose", name: "Goose", binary: "goose", caps: ["automation", "coding"] },
+  { id: "opencode", name: "OpenCode", binary: "opencode", caps: ["coding", "terminal"] },
+  { id: "gemini", name: "Gemini CLI", binary: "gemini", caps: ["analysis", "coding"] },
+  { id: "copilot", name: "Copilot CLI", binary: "copilot", caps: ["coding", "cli"] }
+];
+
+function probe(probe: typeof CLI_PROBES[0]) {
+  try {
+    const out = execSync(probe.binary + " --version", { timeout: 3000, encoding: "utf-8" });
+    const version = out.trim().split(/\r?\n/)[0];
+    let binaryPath = probe.binary;
+    try {
+      binaryPath = execSync("where " + probe.binary, { timeout: 2000, encoding: "utf-8" }).trim().split(/\r?\n/)[0].trim();
+    } catch {}
+    return { id: probe.id, name: probe.name, found: true, version, path: binaryPath, capabilities: probe.caps };
+  } catch {
+    return { id: probe.id, name: probe.name, found: false, capabilities: probe.caps };
+  }
+}
+
+export function detectAgents() {
+  const mgr = getProviderManager();
+  const bindings = mgr.getBindings();
+  const agents = bindings.map(b => {
+    const resolved = mgr.resolveBinding(b.agentId);
+    const provider = resolved && resolved.provider;
+    const health = provider && provider.health;
+    const caps = b.agentId === "codex"
+      ? ["coding", "debug", "refactor", "api"]
+      : b.agentId === "claude"
+      ? ["analysis", "writing", "translation", "research"]
+      : b.agentId === "openclaw"
+      ? ["automation", "deploy", "pipeline", "script"]
+      : ["tools", "system", "automation"];
+    return {
+      id: b.agentId,
+      name: b.agentId.charAt(0).toUpperCase() + b.agentId.slice(1),
+      found: !!provider && provider.enabled && !!provider.apiKey,
+      capabilities: caps,
+      providerId: provider && provider.id,
+      modelId: resolved && resolved.model.id,
+      baseUrl: provider && provider.baseUrl,
+      reachable: health && health.reachable,
+      latencyMs: health && health.latencyMs,
+      error: health && health.error
+    };
+  });
+  return agents.concat(CLI_PROBES.map(probe) as any);
+}
+
+export async function detectAgentsAsync() {
+  const mgr = getProviderManager();
+  for (const p of mgr.getEnabledProviders()) {
+    await mgr.checkProviderHealth(p.id);
+  }
+  return detectAgents();
+}
