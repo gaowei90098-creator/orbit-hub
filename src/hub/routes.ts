@@ -12,6 +12,7 @@ import { detectEnvironment } from "../drivers/detect.js";
 import { detectCommands } from "../core/projects.js";
 import { launchParts } from "../launch.js";
 import { newId } from "../core/id.js";
+import { buildReviewPrompt } from "./review.js";
 import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type MissionPlan, type TaskDraft } from "./task-planner.js";
 import type { LeadPlannerFn } from "./lead-planner.js";
 
@@ -615,6 +616,42 @@ export function mountRoutes(
     }
     const result = core.missions.transition(mission.id, "cancelled");
     res.json({ mission: result.mission ?? mission, stoppedRuns, transitioned: result.ok });
+  });
+
+  // M3.2 /review：对集成候选起一个只读审查 worker。它在集成 worktree 现场跑、连回
+  // Orbit MCP，把审查结论用 send_message 回灌时间线（借 codex-plugin-cc 的后台任务模型）。
+  app.post("/api/missions/:id/review", (req, res) => {
+    if (!runs) return res.status(503).json({ error: "runs_unavailable" });
+    if (!integration) return res.status(503).json({ error: "integration_unavailable" });
+    const mission = core.missions.get(req.params.id);
+    if (!mission) return res.status(404).json({ error: "unknown_mission" });
+    const integ = integration.getIntegration(mission.id);
+    // 没有集成候选就没有统一的「本次改动」可审；提示先 /integrate。
+    if (!integ) return res.status(409).json({ error: "no_integration" });
+
+    // 审查者优先用一个在线 peer 的 harness，否则回退 claude-code。
+    const reviewer = core.agents.list().find((a) => a.harness !== "other" && a.status === "online");
+    const harness: Harness = reviewer?.harness ?? "claude-code";
+    const prompt = buildReviewPrompt(mission.goal, integ.baseCommit);
+    const url = hubUrl(req);
+    const { command } = cliLaunchParts();
+    const runId = newId("run");
+    const workerName = `审查助手·${mission.id.slice(-4)}`;
+    runs.start({
+      runId,
+      harness,
+      missionId: mission.id,
+      taskId: null,
+      projectId: mission.projectId ?? null,
+      taskTitle: `审查：${mission.goal}`,
+      goal: prompt,
+      // 显式 prompt 绕过协作协议渲染——审查在集成 worktree 现场进行，不走任务板/锁协议。
+      prompt,
+      projectPath: integ.worktreePath,
+      isolate: false, // 直接在集成候选 worktree 现场审查（只读），不另建隔离区
+      mcp: { command, args: mcpArgs(workerName, harness, url, Boolean(options.tokenRequired), undefined, runId) },
+    });
+    res.json({ ok: true, runId });
   });
 
   // ----- 第四阶段：集成、验证、最终 Diff、人工审批 -----

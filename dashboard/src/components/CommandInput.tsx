@@ -149,6 +149,9 @@ export function CommandInput({
         } else if (cmd === "/integrate") {
           const integ = await actions.triggerIntegration(mission!.id);
           setResult({ text: `已发起集成（${integ.status}）。完成后用 /result 看结果。`, tone: "success" });
+        } else if (cmd === "/review") {
+          await actions.reviewMission(mission!.id);
+          setResult({ text: "已派出审查助手，结论会以消息出现在时间线。", tone: "success" });
         } else if (cmd === "/cancel") {
           const { stoppedRuns, transitioned } = await actions.cancelMission(mission!.id);
           const head = transitioned ? "已取消该协作" : "该协作已是终态，无需取消";
@@ -161,6 +164,8 @@ export function CommandInput({
       } catch {
         if (cmd === "/integrate") {
           setError("集成未成功：可能有合并冲突或验证未通过，去下方「设置与经典视图」的集成面板看详情。");
+        } else if (cmd === "/review") {
+          setError("还没有集成候选可审查，先用 /integrate 生成，再 /review。");
         } else {
           setError(`命令 ${cmd} 执行失败，请稍后再试。`);
         }

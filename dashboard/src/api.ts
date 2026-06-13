@@ -87,6 +87,7 @@ export interface HubActions {
   setWorkspace: (path: string) => Promise<{ path: string }>;
   dispatchTask: (taskId: string, harness?: "claude-code" | "codex") => Promise<void>;
   cancelMission: (missionId: string) => Promise<{ stoppedRuns: string[]; transitioned: boolean }>;
+  reviewMission: (missionId: string) => Promise<{ ok: boolean; runId?: string }>;
 }
 
 export interface HubState {
@@ -383,6 +384,12 @@ export function useHubState(): HubState {
     return { stoppedRuns: r.stoppedRuns ?? [], transitioned: Boolean(r.transitioned) };
   }, []);
 
+  const reviewMission = useCallback(async (missionId: string) => {
+    return api<{ ok: boolean; runId?: string }>(`/api/missions/${missionId}/review`, {
+      method: "POST", body: "{}",
+    });
+  }, []);
+
   const updateContract = useCallback(
     async (fields: { apiContract?: string; designSpec?: string; expectedVersion?: number }) => {
       const r = await api<{ ok: boolean }>("/api/contract", {
@@ -432,6 +439,7 @@ export function useHubState(): HubState {
       setWorkspace,
       dispatchTask,
       cancelMission,
+      reviewMission,
     },
   };
 }

@@ -5,6 +5,7 @@ import path from "node:path";
 import request from "supertest";
 import type { Express } from "express";
 import { createHubApp } from "../src/hub/server.js";
+import { buildReviewPrompt } from "../src/hub/review.js";
 
 let app: Express;
 
@@ -297,6 +298,30 @@ describe("mission cancel (M3 /cancel)", () => {
     const res = await request(app).post("/api/missions/nope/cancel").send();
     expect(res.status).toBe(404);
     expect(res.body.error).toBe("unknown_mission");
+  });
+});
+
+describe("mission review (M3.2 /review)", () => {
+  it("404s for an unknown mission", async () => {
+    const res = await request(app).post("/api/missions/nope/review").send();
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("unknown_mission");
+  });
+
+  it("409s when there is no integration candidate to review yet", async () => {
+    const launch = await request(app).post("/api/missions/launch").send({ goal: "做个登录页" });
+    const missionId = launch.body.mission.id as string;
+    const res = await request(app).post(`/api/missions/${missionId}/review`).send();
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("no_integration");
+  });
+
+  it("buildReviewPrompt embeds the goal, base commit and read-only contract", () => {
+    const p = buildReviewPrompt("加用户注册", "abc1234");
+    expect(p).toContain("加用户注册");
+    expect(p).toContain("git diff abc1234 HEAD");
+    expect(p).toContain("send_message");
+    expect(p).toContain("不要修改任何文件");
   });
 });
 

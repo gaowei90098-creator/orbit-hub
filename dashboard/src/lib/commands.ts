@@ -19,7 +19,7 @@ export const SLASH_COMMAND_SPECS: SlashCommandSpec[] = [
   { cmd: "/result", label: "查看最近集成结果与改动摘要", kind: "action", needsMission: true },
   { cmd: "/integrate", label: "把各 Agent 分支合并为集成候选", kind: "action", needsMission: true },
   { cmd: "/cancel", label: "取消当前协作并停掉在途 Agent", kind: "action", needsMission: true },
-  { cmd: "/review", label: "（即将接入）发起代码审查后台任务", kind: "pending", needsMission: true },
+  { cmd: "/review", label: "对集成候选发起只读代码审查（结论回时间线）", kind: "action", needsMission: true },
   { cmd: "/rescue", label: "（即将接入）救援停滞的 Agent", kind: "pending", needsMission: true },
 ];
 
