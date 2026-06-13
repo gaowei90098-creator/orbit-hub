@@ -295,9 +295,9 @@ export class ProviderManager extends EventEmitter {
   // ---- 健康检查 ----
   async checkProviderHealth(id: string): Promise<import('./types').ProviderHealth> {
     const p = this.getProvider(id)
-    if (!p) return { reachable: false, lastCheck: Date.now(), error: 'Provider not found' }
+    if (!p) return { reachable: false, status: 'error', lastCheck: Date.now(), error: 'Provider not found' }
     if (!p.apiKey) {
-      const h = { reachable: false, lastCheck: Date.now(), error: '未配置 API Key' }
+      const h: import('./types').ProviderHealth = { reachable: false, status: 'unauthorized', lastCheck: Date.now(), error: '未配置 API Key' }
       p.health = h
       this.save()
       return h
@@ -308,17 +308,20 @@ export class ProviderManager extends EventEmitter {
       const headers = this.buildHeaders(p)
       const res = await fetch(url, { method: 'GET', headers, signal: AbortSignal.timeout(8000) })
       const latencyMs = Date.now() - start
-      const h = {
-        reachable: res.status < 500,
+      // 401/403 = 鉴权失败：服务器虽响应，但 key 无效，不应显示为“可达/绿灯”
+      const unauthorized = res.status === 401 || res.status === 403
+      const h: import('./types').ProviderHealth = {
+        reachable: !unauthorized && res.status < 500,
+        status: unauthorized ? 'unauthorized' : (res.status < 400 ? 'ok' : 'error'),
         lastCheck: Date.now(),
         latencyMs,
-        error: res.status >= 400 ? `HTTP ${res.status}` : undefined
+        error: unauthorized ? `鉴权失败 (HTTP ${res.status})` : (res.status >= 400 ? `HTTP ${res.status}` : undefined)
       }
       p.health = h
       this.save()
       return h
     } catch (e: any) {
-      const h = { reachable: false, lastCheck: Date.now(), latencyMs: Date.now() - start, error: e?.message || String(e) }
+      const h: import('./types').ProviderHealth = { reachable: false, status: 'unreachable', lastCheck: Date.now(), latencyMs: Date.now() - start, error: e?.message || String(e) }
       p.health = h
       this.save()
       return h

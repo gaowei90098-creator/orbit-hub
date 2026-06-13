@@ -111,7 +111,7 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
   onDelete: (id: string) => void
 }) {
   const [checking, setChecking] = useState<Record<string, boolean>>({})
-  const [health, setHealth] = useState<Record<string, { reachable: boolean; latencyMs?: number; error?: string }>>({})
+  const [health, setHealth] = useState<Record<string, { reachable: boolean; status?: 'ok' | 'unauthorized' | 'error' | 'unreachable'; latencyMs?: number; error?: string }>>({})
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [fetching, setFetching] = useState<Record<string, boolean>>({})
   const [fetchMsg, setFetchMsg] = useState<Record<string, { ok: boolean; text: string }>>({})
@@ -122,7 +122,7 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
       const h = await window.electronAPI.providers.health(id)
       setHealth(hs => ({ ...hs, [id]: h }))
     } catch (e: any) {
-      setHealth(hs => ({ ...hs, [id]: { reachable: false, error: e?.message || '检查失败' } }))
+      setHealth(hs => ({ ...hs, [id]: { reachable: false, status: 'unreachable', error: e?.message || '检查失败' } }))
     } finally {
       setChecking(c => ({ ...c, [id]: false }))
     }
@@ -229,6 +229,8 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
               </button>
               {h && (h.reachable
                 ? <span style={{ fontSize: 12, color: 'var(--mint)', display: 'flex', alignItems: 'center', gap: 6 }}><span className="ah-dot idle"></span>{tr('可达', 'Reachable')} · {h.latencyMs}ms</span>
+                : h.status === 'unauthorized'
+                ? <span style={{ fontSize: 12, color: 'var(--st-busy)', display: 'flex', alignItems: 'center', gap: 6 }}><span className="ah-dot" style={{ background: 'var(--st-busy)' }}></span>{h.error || tr('鉴权失败', 'Unauthorized')}</span>
                 : <span style={{ fontSize: 12, color: 'var(--st-error)', display: 'flex', alignItems: 'center', gap: 6 }}><span className="ah-dot error"></span>{h.error || tr('不可达', 'Unreachable')}</span>)}
               {fetchMsg[p.id] && (
                 <span style={{ fontSize: 12, color: fetchMsg[p.id].ok ? 'var(--mint)' : 'var(--st-error)' }}>{fetchMsg[p.id].text}</span>

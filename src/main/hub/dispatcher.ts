@@ -137,7 +137,8 @@ export class Dispatcher extends EventEmitter {
  // stdio routing: 若 registry 注册的是 stdio adapter(非 http),则走本地 CLI 子进程
  const agentInfo = this.registry.get(agentId)
  if (agentInfo && (agentInfo.adapter as any).protocol && (agentInfo.adapter as any).protocol !== 'http') {
- return this.sendToAgentStdio(task, agentId, text, opts, resolved, agentInfo.adapter)
+ const binding = mgr.getBinding(agentId)
+ return this.sendToAgentStdio(task, agentId, text, opts, resolved, agentInfo.adapter, binding)
  }
     if (!resolved) {
       const err = "No available provider for agent " + agentId
@@ -250,11 +251,13 @@ export class Dispatcher extends EventEmitter {
    * interactive 适配器保留输出静默判定; 任务被取消时 kill 子进程.
    * 注意: stdio 不依赖 HTTP provider, resolved 可为 null.
    */
-  private async sendToAgentStdio(task: DispatchTask, agentId: string, text: string, _opts: DispatchOptions, resolved: any, adapter: any): Promise<{ content: string }> {
+  private async sendToAgentStdio(task: DispatchTask, agentId: string, text: string, _opts: DispatchOptions, resolved: any, adapter: any, binding?: any): Promise<{ content: string }> {
     this.registry.setStatus(agentId, "busy")
     let content = ""
-    const providerId = resolved?.provider?.id ?? "local-cli"
-    const modelId = resolved?.model?.id ?? "stdio"
+    // stdio 直连本地 CLI：用绑定自身的 provider/model 做标注（而非 HTTP 回退结果，
+    // 否则本地任务会被错标成 fallbackChain 里某个 HTTP provider）
+    const providerId = binding?.providerId ?? resolved?.provider?.id ?? "local-cli"
+    const modelId = binding?.modelId ?? resolved?.model?.id ?? "stdio"
     this.emit("stream", { kind: "start", taskId: task.id, agentId, providerId, modelId, mode: "content" })
     const start = Date.now()
     const TIMEOUT_MS = 5 * 60 * 1000

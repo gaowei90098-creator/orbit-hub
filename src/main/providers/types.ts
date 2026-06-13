@@ -79,6 +79,8 @@ export interface ProviderDefinition {
 
 export interface ProviderHealth {
   reachable: boolean
+  /** 细分状态：ok=可达且鉴权通过；unauthorized=鉴权失败(401/403/无 key)；error=其它 HTTP 错误；unreachable=网络不可达 */
+  status?: 'ok' | 'unauthorized' | 'error' | 'unreachable'
   lastCheck: number
   latencyMs?: number
   error?: string
