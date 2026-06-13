@@ -34,8 +34,8 @@ export class HttpAgentAdapter implements AgentAdapter {
   id: string
   name: string
   binary = "provider"
-  protocol: "http" = "http"
-  mode: "oneshot" = "oneshot"
+  protocol = "http" as const
+  mode = "oneshot" as const
   status: "idle" | "busy" | "error" = "idle"
   onOutput: ((chunk: string) => void) | null = null
   onError: ((err: Error) => void) | null = null

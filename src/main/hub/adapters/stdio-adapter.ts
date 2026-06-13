@@ -19,8 +19,8 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
   id: string
   name: string
   binary = ''
-  protocol: 'stdio-plain' = 'stdio-plain'
-  mode: 'oneshot' = 'oneshot'
+  protocol = 'stdio-plain' as const
+  mode = 'oneshot' as const
   /** oneshot 参数；可被路由绑定的 args 覆盖 */
   execArgs: string[]
 
