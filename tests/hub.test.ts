@@ -6,6 +6,7 @@ import request from "supertest";
 import type { Express } from "express";
 import { createHubApp } from "../src/hub/server.js";
 import { buildReviewPrompt } from "../src/hub/review.js";
+import { buildAgentCard } from "../src/hub/agent-card.js";
 
 let app: Express;
 
@@ -340,6 +341,30 @@ describe("mission rescue (M3.2 /rescue)", () => {
     expect(res.body.rescued).toEqual([]);
     expect(res.body.skipped).toEqual([]);
     expect(res.body.scanned).toBe(0);
+  });
+});
+
+describe("A2A agent card (M4.2)", () => {
+  it("serves a public agent card at /.well-known/agent.json", async () => {
+    const res = await request(app).get("/.well-known/agent.json").set("Host", "localhost:4100");
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe("Orbit");
+    expect(res.body.url).toBe("http://localhost:4100/a2a");
+    expect(res.body.skills.map((s: { id: string }) => s.id)).toContain("launch_collaboration");
+  });
+
+  it("agent card stays public even when a token is required", async () => {
+    const secured = createHubApp({ dbPath: ":memory:", token: "secret" }).app;
+    const res = await request(secured).get("/.well-known/agent.json");
+    expect(res.status).toBe(200); // 发现入口必须免鉴权
+    expect(res.body.name).toBe("Orbit");
+  });
+
+  it("buildAgentCard normalizes the base url and points skills at /a2a", () => {
+    const card = buildAgentCard("http://host:9/");
+    expect(card.url).toBe("http://host:9/a2a");
+    expect(card.capabilities.streaming).toBe(false);
+    expect(card.skills.length).toBeGreaterThanOrEqual(2);
   });
 });
 

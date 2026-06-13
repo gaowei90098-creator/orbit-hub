@@ -14,6 +14,7 @@ import { launchParts } from "../launch.js";
 import { newId } from "../core/id.js";
 import { buildReviewPrompt } from "./review.js";
 import { buildRescuePrompt, selectRescueTargets, RESCUE_STALL_MS } from "./rescue.js";
+import { buildAgentCard } from "./agent-card.js";
 import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type MissionPlan, type TaskDraft } from "./task-planner.js";
 import type { LeadPlannerFn } from "./lead-planner.js";
 
@@ -277,6 +278,10 @@ export function mountRoutes(
   messageRouter?: MessageRouter,
 ): void {
   app.get("/healthz", (_req, res) => res.json({ ok: true }));
+
+  // M4.2 A2A 服务发现：公开的 Agent Card（不在 /api 下，故免鉴权）。外部 A2A 客户端
+  // 据此把 Orbit 当作一个标准 agent 来调用。
+  app.get("/.well-known/agent.json", (req, res) => res.json(buildAgentCard(hubUrl(req))));
   app.get("/api/snapshot", (_req, res) => res.json(core.snapshot()));
 
   // ----- A01/A02 环境与登录检测 -----
