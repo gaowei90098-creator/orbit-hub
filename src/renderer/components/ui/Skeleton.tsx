@@ -13,7 +13,7 @@ export function Skeleton({ className = '', variant = 'rect', width, height }: Sk
     height: typeof height === 'number' ? height + 'px' : height
   }
   if (variant === 'circle') style.borderRadius = '9999px'
-  else if (variant === 'text') { style.height = style.height || '0.75em'; style.borderRadius = '4px' }
+  else if (variant === 'text') { style.height = style.height || '0.75em'; style.borderRadius = '8px' }
   return <div className={'skeleton ' + className} style={style} />
 }
 

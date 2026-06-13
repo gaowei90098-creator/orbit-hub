@@ -13,8 +13,25 @@ const api = {
     },
     onStream: (callback: (data: any) => void) => {
       const handler = (_event: any, data: any) => callback(data)
-      ipcRenderer.on('hub:stream', handler)
-      return () => ipcRenderer.removeListener('hub:stream', handler)
+      ipcRenderer.on('dispatch:stream', handler)
+      return () => ipcRenderer.removeListener('dispatch:stream', handler)
+    }
+  },
+  proxy: {
+    info: () => ipcRenderer.invoke('proxy:info')
+  },
+  agents: {
+    locate: () => ipcRenderer.invoke('agents:locate')
+  },
+  win: {
+    minimize: () => ipcRenderer.invoke('win:minimize'),
+    maximizeToggle: () => ipcRenderer.invoke('win:maximizeToggle'),
+    isMaximized: () => ipcRenderer.invoke('win:isMaximized'),
+    close: () => ipcRenderer.invoke('win:close'),
+    onMaximized: (callback: (maximized: boolean) => void) => {
+      const handler = (_event: any, v: boolean) => callback(v)
+      ipcRenderer.on('win:maximized', handler)
+      return () => ipcRenderer.removeListener('win:maximized', handler)
     }
   },
   providers: {
@@ -24,7 +41,13 @@ const api = {
     setEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke('providers:setEnabled', id, enabled),
     setKey: (id: string, key: string) => ipcRenderer.invoke('providers:setKey', id, key),
     health: (id: string) => ipcRenderer.invoke('providers:health', id),
-    healthAll: () => ipcRenderer.invoke('providers:healthAll')
+    healthAll: () => ipcRenderer.invoke('providers:healthAll'),
+    fetchModels: (id: string) => ipcRenderer.invoke('providers:fetchModels', id)
+  },
+  takeover: {
+    status: () => ipcRenderer.invoke('takeover:status'),
+    apply: (app: string, modelRef: string) => ipcRenderer.invoke('takeover:apply', app, modelRef),
+    restore: (app: string) => ipcRenderer.invoke('takeover:restore', app)
   },
   routing: {
     setBinding: (b: any) => ipcRenderer.invoke('routing:setBinding', b),
@@ -45,6 +68,7 @@ const api = {
     set: (key: string, value: any) => ipcRenderer.invoke('store:set', key, value)
   },
   app: {
+    openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
     onDeepLink: (callback: (link: { action: string; params: Record<string, string> }) => void) => {
       const handler = (_event: any, link: any) => callback(link)
       ipcRenderer.on('app:deep-link', handler)

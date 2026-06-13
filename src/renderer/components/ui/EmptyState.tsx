@@ -14,13 +14,13 @@ export function EmptyState({ icon, title, description, action, className = '', s
   return (
     <div className={'flex flex-col items-center justify-center text-center px-6 py-10 ' + className}>
       {icon && (
-        <div className={'relative ' + dims.wrap + ' rounded-2xl bg-gradient-to-br from-[#6366f1]/20 to-[#8b5cf6]/10 border border-[#6366f1]/20 flex items-center justify-center mb-4 animate-scale-in'}>
-          <div className="absolute inset-0 rounded-2xl bg-[#6366f1]/5 blur-xl" />
-          <div className="relative text-[#a5b4fc]">{icon}</div>
+        <div className={'relative ' + dims.wrap + ' rounded-2xl bg-gradient-to-br from-[#ff9f0a]/20 to-[#f0566a]/10 border border-[#ff9f0a]/20 flex items-center justify-center mb-4 animate-scale-in'}>
+          <div className="absolute inset-0 rounded-2xl bg-[#ff9f0a]/5 blur-xl" />
+          <div className="relative text-[#ffc66b]">{icon}</div>
         </div>
       )}
-      <h3 className="text-sm font-semibold text-[#e2e6ef] mb-1 tracking-tight">{title}</h3>
-      {description && <p className="text-xs text-[#5c6478] leading-relaxed max-w-xs mb-4">{description}</p>}
+      <h3 className="text-sm font-semibold text-[#ece4dc] mb-1 tracking-tight">{title}</h3>
+      {description && <p className="text-xs text-[#75665a] leading-relaxed max-w-xs mb-4">{description}</p>}
       {action}
     </div>
   )

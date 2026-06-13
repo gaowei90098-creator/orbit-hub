@@ -1,13 +1,51 @@
-﻿import * as http from "http"
+/**
+ * 本地路由代理（对标 CC Switch「本地路由与高可用」）
+ *
+ * 入站双协议：
+ *   - OpenAI 兼容   POST /v1/chat/completions   （Codex / OpenCode 等接管入口）
+ *   - Anthropic 原生 POST /v1/messages           （Claude Code 接管入口）
+ * 出站经 ProviderClient 做格式转换（chat_completions / messages / generate_content），
+ * 因此 DeepSeek、Gemini 等任意已配置厂商都能伺服两种协议的客户端。
+ *
+ * 高可用：
+ *   - 模型未匹配时走默认路由（messages→claude 绑定，chat/completions→codex 绑定，再退到首个可用厂商）
+ *   - 故障转移：按 routing.fallbackChain 依次重试（仅在尚未向客户端输出任何字节时切换）
+ *   - 熔断：同一厂商连续失败 3 次后跳过 60s，成功即复位
+ *
+ * 接管方式（见 设置→代理）：
+ *   Claude Code:  ANTHROPIC_BASE_URL=http://127.0.0.1:9528  ANTHROPIC_AUTH_TOKEN=agenthub
+ *   Codex:        config.toml 自定义 model_provider，base_url=http://127.0.0.1:9528/v1
+ *   模型名可用 "provider/model"（如 deepseek/deepseek-chat）精确指路，未知名称走默认路由。
+ */
+import * as http from "http"
 import { EventEmitter } from "events"
 import { URL } from "url"
 import { getProviderManager } from "../providers/manager"
 import { buildProviderClient, ProviderClient } from "../providers/client"
-import { ChatCompletionMessage, ChatCompletionRequest, ChatCompletionResponse, ThinkingSummary } from "../providers/types"
+import { ChatCompletionMessage, ChatCompletionRequest, ProviderDefinition, ModelDefinition, ThinkingConfig } from "../providers/types"
+
+interface Candidate {
+  provider: ProviderDefinition
+  model: ModelDefinition
+  agentId: string
+  thinking: ThinkingConfig
+  temperature?: number
+  maxOutputTokens?: number
+}
+
+interface InboundOverrides {
+  temperature?: number
+  maxTokens?: number
+}
+
+const BREAK_AFTER_FAILS = 3
+const BREAK_FOR_MS = 60_000
 
 export class LocalProxy extends EventEmitter {
   private server: http.Server | null = null
   private port: number
+  /** 熔断状态：providerId → 连续失败次数/恢复时间 */
+  private breaker: Map<string, { fails: number; untilTs: number }> = new Map()
 
   constructor(port = 9528) {
     super()
@@ -19,7 +57,7 @@ export class LocalProxy extends EventEmitter {
       this.server = http.createServer((req, res) => this.handle(req, res))
       this.server.on("error", reject)
       this.server.listen(this.port, "127.0.0.1", () => {
-        console.log("[Proxy] Chat Completions proxy listening on http://127.0.0.1:" + this.port + "/v1")
+        console.log("[Proxy] OpenAI 兼容: http://127.0.0.1:" + this.port + "/v1 · Anthropic 兼容: http://127.0.0.1:" + this.port)
         resolve()
       })
     })
@@ -36,12 +74,17 @@ export class LocalProxy extends EventEmitter {
     return "http://127.0.0.1:" + this.port + "/v1"
   }
 
+  /** Anthropic SDK 会自行拼 /v1/messages，所以 base 是源站地址 */
+  getOrigin(): string {
+    return "http://127.0.0.1:" + this.port
+  }
+
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url || "/", "http://127.0.0.1:" + this.port)
     const cors = {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "GET,POST,OPTIONS",
-      "access-control-allow-headers": "content-type,authorization,x-api-key,anthropic-version",
+      "access-control-allow-headers": "content-type,authorization,x-api-key,anthropic-version,anthropic-beta",
       "access-control-max-age": "86400"
     }
     if (req.method === "OPTIONS") {
@@ -56,6 +99,8 @@ export class LocalProxy extends EventEmitter {
       if (url.pathname === "/v1/providers" && req.method === "GET") return this.listProviders(res)
       if (url.pathname === "/v1/chat/completions" && req.method === "POST") return this.chatCompletions(req, res, false)
       if (url.pathname === "/v1/chat/completions/no-stream" && req.method === "POST") return this.chatCompletions(req, res, true)
+      if (url.pathname === "/v1/messages" && req.method === "POST") return this.anthropicMessages(req, res)
+      if (url.pathname === "/v1/messages/count_tokens" && req.method === "POST") return this.countTokens(req, res)
       if (url.pathname === "/v1/route" && req.method === "POST") return this.route(req, res)
       if (url.pathname === "/health") {
         res.writeHead(200, { "content-type": "application/json" })
@@ -65,10 +110,315 @@ export class LocalProxy extends EventEmitter {
       res.writeHead(404, { "content-type": "application/json" })
       res.end(JSON.stringify({ error: { message: "not found", path: url.pathname } }))
     } catch (e: any) {
-      res.writeHead(500, { "content-type": "application/json" })
-      res.end(JSON.stringify({ error: { message: e?.message || String(e) } }))
+      if (!res.headersSent) {
+        res.writeHead(500, { "content-type": "application/json" })
+        res.end(JSON.stringify({ error: { message: e?.message || String(e) } }))
+      } else {
+        try { res.end() } catch { /* noop */ }
+      }
     }
   }
+
+  /* ---------------- 熔断 ---------------- */
+
+  private breakerOpen(providerId: string): boolean {
+    const s = this.breaker.get(providerId)
+    return !!s && s.fails >= BREAK_AFTER_FAILS && Date.now() < s.untilTs
+  }
+
+  private breakerFail(providerId: string): void {
+    const s = this.breaker.get(providerId) || { fails: 0, untilTs: 0 }
+    s.fails++
+    if (s.fails >= BREAK_AFTER_FAILS) s.untilTs = Date.now() + BREAK_FOR_MS
+    this.breaker.set(providerId, s)
+  }
+
+  private breakerSuccess(providerId: string): void {
+    this.breaker.delete(providerId)
+  }
+
+  /* ---------------- 路由解析 ---------------- */
+
+  private usable(p?: ProviderDefinition | null): p is ProviderDefinition {
+    return !!p && p.enabled && !!p.apiKey && p.models.length > 0
+  }
+
+  /**
+   * 组装候选链：首选 → fallbackChain → （仍为空时）任意可用厂商。
+   * fallback 厂商若有同名模型用同名，否则用其第一个模型。
+   */
+  private buildCandidates(primary: Candidate | null, modelIdHint?: string): Candidate[] {
+    const mgr = getProviderManager()
+    const out: Candidate[] = []
+    const seen = new Set<string>()
+    const push = (c: Candidate | null) => {
+      if (!c || seen.has(c.provider.id)) return
+      seen.add(c.provider.id)
+      out.push(c)
+    }
+    push(primary)
+    const chain = mgr.getConfig().routing.fallbackChain || []
+    for (const id of chain) {
+      const p = mgr.getProvider(id)
+      if (!this.usable(p)) continue
+      const model = (modelIdHint && p.models.find(m => m.id === modelIdHint)) || p.models[0]
+      push({ provider: p, model, agentId: "proxy-fallback", thinking: p.defaultThinking })
+    }
+    if (out.length === 0) {
+      for (const p of mgr.getProviders()) {
+        if (this.usable(p)) {
+          push({ provider: p, model: p.models[0], agentId: "proxy-any", thinking: p.defaultThinking })
+          break
+        }
+      }
+    }
+    return out
+  }
+
+  /** "provider/model" 精确引用 / 全局模型名匹配 / agent 绑定默认路由
+   *  也接受 "provider:model" 别名（OpenClaw 等模型 id 不允许斜杠的场景） */
+  private resolvePrimary(modelRef: string | undefined, preferAgent: string): Candidate | null {
+    const mgr = getProviderManager()
+    if (modelRef && !modelRef.includes("/") && modelRef.includes(":")) {
+      modelRef = modelRef.replace(":", "/")
+    }
+    if (modelRef) {
+      if (modelRef.startsWith("agent/")) {
+        const r = mgr.resolveBinding(modelRef.slice(6))
+        if (r) return { provider: r.provider, model: r.model, agentId: r.binding.agentId, thinking: r.thinking, temperature: r.binding.temperature, maxOutputTokens: r.binding.maxOutputTokens }
+      }
+      if (modelRef.includes("/")) {
+        const i = modelRef.indexOf("/")
+        const p = mgr.getProvider(modelRef.slice(0, i))
+        if (this.usable(p)) {
+          const m = p.models.find(mm => mm.id === modelRef.slice(i + 1))
+          if (m) return { provider: p, model: m, agentId: "proxy-" + p.id, thinking: p.defaultThinking }
+        }
+      }
+      for (const p of mgr.getProviders()) {
+        if (!this.usable(p)) continue
+        const m = p.models.find(mm => mm.id === modelRef)
+        if (m) return { provider: p, model: m, agentId: "proxy-" + p.id, thinking: p.defaultThinking }
+      }
+    }
+    // 未匹配 → 协议对应 agent 的绑定（resolveBinding 自带不可用回退）
+    const r = mgr.resolveBinding(preferAgent)
+    if (r) return { provider: r.provider, model: r.model, agentId: r.binding.agentId, thinking: r.thinking, temperature: r.binding.temperature, maxOutputTokens: r.binding.maxOutputTokens }
+    return null
+  }
+
+  /* ---------------- OpenAI 兼容入站 ---------------- */
+
+  private async chatCompletions(req: http.IncomingMessage, res: http.ServerResponse, forceNoStream: boolean): Promise<void> {
+    const body = await readBody(req)
+    let parsed: ChatCompletionRequest
+    try { parsed = JSON.parse(body) } catch {
+      res.writeHead(400, { "content-type": "application/json" })
+      res.end(JSON.stringify({ error: { message: "invalid json" } }))
+      return
+    }
+    if (!Array.isArray(parsed.messages) || parsed.messages.length === 0) {
+      res.writeHead(400, { "content-type": "application/json" })
+      res.end(JSON.stringify({ error: { message: "messages required" } }))
+      return
+    }
+    const noStream = forceNoStream || parsed.stream === false
+    // 抽取 system（出站 anthropic/gemini 需要独立 system 字段）
+    const sysParts: string[] = []
+    const rest: ChatCompletionMessage[] = []
+    for (const m of parsed.messages) {
+      if (m.role === "system") sysParts.push(typeof m.content === "string" ? m.content : JSON.stringify(m.content))
+      else rest.push({ ...m, content: flattenContent(m.content) })
+    }
+    const primary = this.resolvePrimary(parsed.model, "codex")
+    const candidates = this.buildCandidates(primary, primary?.model.id)
+    if (candidates.length === 0) {
+      res.writeHead(503, { "content-type": "application/json" })
+      res.end(JSON.stringify({ error: { message: "no usable provider. Configure API keys in AgentHub → 设置 → 提供商" } }))
+      return
+    }
+    await this.streamWithFailover(res, "openai", noStream, parsed.model || candidates[0].model.id, candidates, rest,
+      sysParts.length ? sysParts.join("\n\n") : undefined,
+      { temperature: parsed.temperature, maxTokens: parsed.max_tokens })
+  }
+
+  /* ---------------- Anthropic 原生入站（Claude Code 接管） ---------------- */
+
+  private async anthropicMessages(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const body = await readBody(req)
+    let parsed: any
+    try { parsed = JSON.parse(body) } catch {
+      res.writeHead(400, { "content-type": "application/json" })
+      res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "invalid json" } }))
+      return
+    }
+    if (!Array.isArray(parsed.messages) || parsed.messages.length === 0) {
+      res.writeHead(400, { "content-type": "application/json" })
+      res.end(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "messages required" } }))
+      return
+    }
+    const systemPrompt = flattenAnthropicSystem(parsed.system)
+    const messages: ChatCompletionMessage[] = parsed.messages.map((m: any) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: flattenContent(m.content)
+    }))
+    const noStream = parsed.stream !== true
+    const primary = this.resolvePrimary(parsed.model, "claude")
+    const candidates = this.buildCandidates(primary, primary?.model.id)
+    if (candidates.length === 0) {
+      res.writeHead(503, { "content-type": "application/json" })
+      res.end(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "no usable provider. Configure API keys in AgentHub → 设置 → 提供商" } }))
+      return
+    }
+    await this.streamWithFailover(res, "anthropic", noStream, parsed.model || candidates[0].model.id, candidates, messages, systemPrompt,
+      { temperature: parsed.temperature, maxTokens: parsed.max_tokens })
+  }
+
+  private async countTokens(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const body = await readBody(req)
+    let chars = body.length
+    try {
+      const parsed = JSON.parse(body)
+      chars = JSON.stringify(parsed.messages || "").length + JSON.stringify(parsed.system || "").length
+    } catch { /* 按原始长度估算 */ }
+    res.writeHead(200, { "content-type": "application/json" })
+    res.end(JSON.stringify({ input_tokens: Math.max(1, Math.ceil(chars / 4)) }))
+  }
+
+  /* ---------------- Agent 路由入站（AgentHub 自用） ---------------- */
+
+  private async route(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const body = await readBody(req)
+    let parsed: any
+    try { parsed = JSON.parse(body) } catch { parsed = {} }
+    if (!parsed.agentId) {
+      res.writeHead(400, { "content-type": "application/json" })
+      res.end(JSON.stringify({ error: { message: "agentId required" } }))
+      return
+    }
+    const primary = this.resolvePrimary("agent/" + parsed.agentId, parsed.agentId)
+    const candidates = this.buildCandidates(primary, primary?.model.id)
+    if (candidates.length === 0 || !Array.isArray(parsed.messages) || parsed.messages.length === 0) {
+      res.writeHead(503, { "content-type": "application/json" })
+      res.end(JSON.stringify({ error: { message: candidates.length === 0 ? "no available provider for agent " + parsed.agentId : "messages required" } }))
+      return
+    }
+    await this.streamWithFailover(res, "openai", !!parsed.noStream, candidates[0].model.id, candidates,
+      parsed.messages, parsed.systemPrompt, {})
+  }
+
+  /* ---------------- 流式引擎：lazy 首字节 + 故障转移 ---------------- */
+
+  private async streamWithFailover(
+    res: http.ServerResponse,
+    wire: "openai" | "anthropic",
+    noStream: boolean,
+    inboundModel: string,
+    candidates: Candidate[],
+    messages: ChatCompletionMessage[],
+    systemPrompt: string | undefined,
+    overrides: InboundOverrides
+  ): Promise<void> {
+    let lastErr: Error | null = null
+    for (const cand of candidates) {
+      if (this.breakerOpen(cand.provider.id)) continue
+      const start = Date.now()
+      this.emit("request", { model: cand.model.id, provider: cand.provider.id })
+      try {
+        await this.tryOne(res, wire, noStream, inboundModel, cand, messages, systemPrompt, overrides)
+        this.breakerSuccess(cand.provider.id)
+        this.emit("response", { model: cand.model.id, provider: cand.provider.id, durationMs: Date.now() - start })
+        return
+      } catch (e: any) {
+        lastErr = e
+        this.breakerFail(cand.provider.id)
+        this.emit("error", { model: cand.model.id, provider: cand.provider.id, error: e?.message })
+        if (e?.afterOutput) {
+          // 已向客户端输出，无法切换厂商：终止响应
+          try { res.end() } catch { /* noop */ }
+          return
+        }
+        // 尚未输出 → 尝试下一个候选
+      }
+    }
+    if (!res.headersSent) {
+      const msg = lastErr?.message || "all providers failed"
+      res.writeHead(502, { "content-type": "application/json" })
+      res.end(wire === "anthropic"
+        ? JSON.stringify({ type: "error", error: { type: "api_error", message: msg } })
+        : JSON.stringify({ error: { message: msg } }))
+    } else {
+      try { res.end() } catch { /* noop */ }
+    }
+  }
+
+  private tryOne(
+    res: http.ServerResponse,
+    wire: "openai" | "anthropic",
+    noStream: boolean,
+    inboundModel: string,
+    cand: Candidate,
+    messages: ChatCompletionMessage[],
+    systemPrompt: string | undefined,
+    overrides: InboundOverrides
+  ): Promise<void> {
+    const binding: any = {
+      agentId: cand.agentId,
+      providerId: cand.provider.id,
+      modelId: cand.model.id,
+      thinkingAllow: ["off", "auto", "enabled"],
+      thinking: cand.thinking,
+      temperature: overrides.temperature ?? cand.temperature,
+      maxOutputTokens: overrides.maxTokens ?? cand.maxOutputTokens
+    }
+    const client: ProviderClient = buildProviderClient({
+      provider: cand.provider,
+      model: cand.model,
+      binding,
+      thinking: cand.thinking
+    })
+    const emitter = wire === "anthropic"
+      ? new AnthropicWire(res, inboundModel)
+      : new OpenAIWire(res, inboundModel)
+
+    let content = ""
+    let thinkingTxt = ""
+    let started = false
+
+    return new Promise<void>((resolve, reject) => {
+      client.stream(
+        { messages, systemPrompt, thinkingOverride: cand.thinking },
+        {
+          onContent: (delta) => {
+            content += delta
+            if (noStream) return
+            if (!started) { started = true; emitter.begin() }
+            emitter.content(delta)
+          },
+          onThinking: (delta) => {
+            thinkingTxt += delta
+            if (noStream) return
+            if (!started) { started = true; emitter.begin() }
+            emitter.thinking(delta)
+          },
+          onDone: (final) => {
+            if (noStream) {
+              emitter.json(content, thinkingTxt, final.usage)
+            } else {
+              if (!started) { started = true; emitter.begin() }
+              emitter.done(final.usage)
+            }
+            resolve()
+          },
+          onError: (err) => {
+            reject(Object.assign(err instanceof Error ? err : new Error(String(err)), { afterOutput: started }))
+          }
+        }
+      ).catch((e) => reject(Object.assign(e instanceof Error ? e : new Error(String(e)), { afterOutput: started })))
+    })
+  }
+
+  /* ---------------- 元数据端点 ---------------- */
 
   private listModels(res: http.ServerResponse): void {
     const mgr = getProviderManager()
@@ -80,9 +430,8 @@ export class LocalProxy extends EventEmitter {
           object: "model",
           created: Date.now(),
           owned_by: p.id,
-          permission: [],
+          display_name: p.name + " · " + m.label,
           root: m.id,
-          parent: null,
           capabilities: {
             provider: p.id,
             providerKind: p.kind,
@@ -96,7 +445,7 @@ export class LocalProxy extends EventEmitter {
       }
     }
     res.writeHead(200, { "content-type": "application/json" })
-    res.end(JSON.stringify({ object: "list", data }))
+    res.end(JSON.stringify({ object: "list", data, has_more: false }))
   }
 
   private listProviders(res: http.ServerResponse): void {
@@ -112,189 +461,151 @@ export class LocalProxy extends EventEmitter {
         enabled: p.enabled,
         hasKey: !!p.apiKey,
         health: p.health || null,
+        breakerOpen: this.breakerOpen(p.id),
         modelCount: p.models.length,
         capabilities: p.capabilities,
         defaultThinking: p.defaultThinking
       }))
     }))
   }
+}
 
-  private async route(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-    const body = await readBody(req)
-    let parsed: any
-    try { parsed = JSON.parse(body) } catch { parsed = {} }
-    const agentId = parsed.agentId
-    if (!agentId) {
-      res.writeHead(400, { "content-type": "application/json" })
-      res.end(JSON.stringify({ error: { message: "agentId required" } }))
-      return
-    }
-    const mgr = getProviderManager()
-    const resolved = mgr.resolveBinding(agentId)
-    if (!resolved) {
-      res.writeHead(503, { "content-type": "application/json" })
-      res.end(JSON.stringify({ error: { message: "no available provider for agent " + agentId } }))
-      return
-    }
-    const messages: ChatCompletionMessage[] = parsed.messages || []
-    if (messages.length === 0) {
-      res.writeHead(400, { "content-type": "application/json" })
-      res.end(JSON.stringify({ error: { message: "messages required" } }))
-      return
-    }
-    const client = buildProviderClient(resolved)
-    await this.doStream(res, resolved.binding.agentId, resolved.model.id, messages, parsed.systemPrompt, parsed.thinking, client, !!parsed.noStream)
-  }
+/* ============ 出站→入站协议回写 ============ */
 
-  private async chatCompletions(req: http.IncomingMessage, res: http.ServerResponse, forceNoStream: boolean): Promise<void> {
-    const body = await readBody(req)
-    let parsed: ChatCompletionRequest
-    try { parsed = JSON.parse(body) } catch {
-      res.writeHead(400, { "content-type": "application/json" })
-      res.end(JSON.stringify({ error: { message: "invalid json" } }))
-      return
-    }
-    if (!parsed.model || !Array.isArray(parsed.messages)) {
-      res.writeHead(400, { "content-type": "application/json" })
-      res.end(JSON.stringify({ error: { message: "model and messages required" } }))
-      return
-    }
-    const mgr = getProviderManager()
-    const { providerId, modelId, agentBinding } = parseModelRef(parsed.model, mgr)
-    const provider = providerId ? mgr.getProvider(providerId) : null
-    if (!provider) {
-      const allModels = mgr.getProviders().map(p => p.id + '/' + p.models.map(m => m.id).join(',')).join('; ')
-      res.writeHead(503, { "content-type": "application/json" })
-      res.end(JSON.stringify({ error: { message: "unknown model: " + parsed.model + ". Available: " + allModels } }))
-      return
-    }
-    const model = provider.models.find(m => m.id === modelId) || provider.models[0]
-    if (!model) {
-      res.writeHead(503, { "content-type": "application/json" })
-      res.end(JSON.stringify({ error: { message: "model not found in provider" } }))
-      return
-    }
-    const binding = agentBinding || mgr.getBindings().find(b => b.providerId === provider.id && b.modelId === model.id) || {
-      agentId: "proxy-" + provider.id,
-      providerId: provider.id,
-      modelId: model.id,
-      thinkingAllow: ["off", "auto", "enabled"],
-      thinking: provider.defaultThinking,
-      temperature: parsed.temperature,
-      maxOutputTokens: parsed.max_tokens
-    }
+/** OpenAI chat.completion.chunk SSE / chat.completion JSON */
+class OpenAIWire {
+  private id = "cmpl-" + Date.now()
+  constructor(private res: http.ServerResponse, private model: string) {}
 
-    const client = buildProviderClient({
-      provider,
-      model,
-      binding: binding as any,
-      thinking: (binding as any).thinking || provider.defaultThinking,
+  begin(): void {
+    this.res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      "connection": "keep-alive"
     })
-    await this.doStream(res, binding.agentId, model.id, parsed.messages, undefined, undefined, client, forceNoStream)
   }
 
-  private async doStream(
-    res: http.ServerResponse,
-    agentId: string,
-    modelId: string,
-    messages: ChatCompletionMessage[],
-    systemPrompt: string | undefined,
-    thinkingOverride: any,
-    client: ProviderClient,
-    forceNoStream = false
-  ): Promise<void> {
-    const start = Date.now()
-    this.emit("request", { model: modelId, agentId })
+  private chunk(delta: any, finish: string | null = null): void {
+    this.res.write("data: " + JSON.stringify({
+      id: this.id,
+      object: "chat.completion.chunk",
+      created: Math.floor(Date.now() / 1000),
+      model: this.model,
+      choices: [{ index: 0, delta, finish_reason: finish }]
+    }) + "\n\n")
+  }
 
-    let content = ""
-    let thinkingTxt = ""
-    let usage: any = undefined
+  content(d: string): void { this.chunk({ content: d }) }
+  thinking(d: string): void { this.chunk({ reasoning_content: d }) }
 
-    try {
-      if (!forceNoStream) {
-        res.writeHead(200, {
-          "content-type": "text/event-stream",
-          "cache-control": "no-cache",
-          "connection": "keep-alive"
-        })
-      }
-      await client.stream(
-        { messages, systemPrompt, thinkingOverride },
-        {
-          onContent: (delta) => {
-            content += delta
-            if (!forceNoStream) {
-              res.write("data: " + JSON.stringify({
-                id: "cmpl-" + Date.now(),
-                object: "chat.completion.chunk",
-                created: Math.floor(Date.now() / 1000),
-                model: modelId,
-                choices: [{ index: 0, delta: { content: delta }, finish_reason: null }]
-              }) + "\n\n")
-            }
-          },
-          onThinking: (delta) => {
-            thinkingTxt += delta
-            if (!forceNoStream) {
-              res.write("data: " + JSON.stringify({
-                id: "cmpl-" + Date.now(),
-                object: "chat.completion.chunk",
-                created: Math.floor(Date.now() / 1000),
-                model: modelId,
-                choices: [{ index: 0, delta: { reasoning_content: delta }, finish_reason: null }]
-              }) + "\n\n")
-            }
-          },
-          onDone: (final) => {
-            usage = final.usage
-            if (forceNoStream) {
-              const resp: ChatCompletionResponse = {
-                id: "cmpl-" + Date.now(),
-                object: "chat.completion",
-                created: Math.floor(Date.now() / 1000),
-                model: modelId,
-                choices: [{ index: 0, message: { role: "assistant", content, reasoning_content: thinkingTxt }, finish_reason: "stop" }],
-                usage,
-                thinking: final.thinking
-              }
-              res.writeHead(200, { "content-type": "application/json" })
-              res.end(JSON.stringify(resp))
-            } else {
-              res.write("data: " + JSON.stringify({
-                id: "cmpl-" + Date.now(),
-                object: "chat.completion.chunk",
-                created: Math.floor(Date.now() / 1000),
-                model: modelId,
-                choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
-              }) + "\n\n")
-              res.write("data: [DONE]\n\n")
-              res.end()
-            }
-            this.emit("response", { model: modelId, agentId, durationMs: Date.now() - start, tokens: usage })
-          },
-          onError: (err) => {
-            this.emit("error", { model: modelId, agentId, error: err.message })
-            if (!res.headersSent) {
-              res.writeHead(502, { "content-type": "application/json" })
-              res.end(JSON.stringify({ error: { message: err.message } }))
-            } else {
-              res.write("data: " + JSON.stringify({ error: { message: err.message } }) + "\n\n")
-              res.end()
-            }
-          }
-        }
-      )
-    } catch (e: any) {
-      this.emit("error", { model: modelId, agentId, error: e.message })
-      if (!res.headersSent) {
-        res.writeHead(502, { "content-type": "application/json" })
-        res.end(JSON.stringify({ error: { message: e.message } }))
-      } else {
-        res.end()
-      }
+  done(usage: any): void {
+    this.chunk({}, "stop")
+    if (usage) {
+      this.res.write("data: " + JSON.stringify({
+        id: this.id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000),
+        model: this.model, choices: [], usage
+      }) + "\n\n")
     }
+    this.res.write("data: [DONE]\n\n")
+    this.res.end()
+  }
+
+  json(content: string, thinking: string, usage: any): void {
+    this.res.writeHead(200, { "content-type": "application/json" })
+    this.res.end(JSON.stringify({
+      id: this.id,
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: this.model,
+      choices: [{ index: 0, message: { role: "assistant", content, ...(thinking ? { reasoning_content: thinking } : {}) }, finish_reason: "stop" }],
+      usage
+    }))
   }
 }
+
+/** Anthropic messages SSE（message_start → content_block_* → message_delta → message_stop）/ message JSON */
+class AnthropicWire {
+  private id = "msg_agenthub_" + Date.now()
+  private blockIndex = -1
+  private blockType: "thinking" | "text" | null = null
+  constructor(private res: http.ServerResponse, private model: string) {}
+
+  private ev(event: string, data: any): void {
+    this.res.write("event: " + event + "\ndata: " + JSON.stringify(data) + "\n\n")
+  }
+
+  begin(): void {
+    this.res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      "connection": "keep-alive"
+    })
+    this.ev("message_start", {
+      type: "message_start",
+      message: {
+        id: this.id, type: "message", role: "assistant", model: this.model,
+        content: [], stop_reason: null, stop_sequence: null,
+        usage: { input_tokens: 0, output_tokens: 0 }
+      }
+    })
+  }
+
+  private openBlock(type: "thinking" | "text"): void {
+    if (this.blockType === type) return
+    this.closeBlock()
+    this.blockIndex++
+    this.blockType = type
+    this.ev("content_block_start", {
+      type: "content_block_start",
+      index: this.blockIndex,
+      content_block: type === "text" ? { type: "text", text: "" } : { type: "thinking", thinking: "" }
+    })
+  }
+
+  private closeBlock(): void {
+    if (this.blockType === null) return
+    this.ev("content_block_stop", { type: "content_block_stop", index: this.blockIndex })
+    this.blockType = null
+  }
+
+  thinking(d: string): void {
+    this.openBlock("thinking")
+    this.ev("content_block_delta", { type: "content_block_delta", index: this.blockIndex, delta: { type: "thinking_delta", thinking: d } })
+  }
+
+  content(d: string): void {
+    this.openBlock("text")
+    this.ev("content_block_delta", { type: "content_block_delta", index: this.blockIndex, delta: { type: "text_delta", text: d } })
+  }
+
+  done(usage: any): void {
+    this.closeBlock()
+    this.ev("message_delta", {
+      type: "message_delta",
+      delta: { stop_reason: "end_turn", stop_sequence: null },
+      usage: { output_tokens: usage?.completion_tokens ?? usage?.output_tokens ?? 0 }
+    })
+    this.ev("message_stop", { type: "message_stop" })
+    this.res.end()
+  }
+
+  json(content: string, thinking: string, usage: any): void {
+    this.res.writeHead(200, { "content-type": "application/json" })
+    const blocks: any[] = []
+    if (thinking) blocks.push({ type: "thinking", thinking })
+    blocks.push({ type: "text", text: content })
+    this.res.end(JSON.stringify({
+      id: this.id, type: "message", role: "assistant", model: this.model,
+      content: blocks, stop_reason: "end_turn", stop_sequence: null,
+      usage: {
+        input_tokens: usage?.prompt_tokens ?? usage?.input_tokens ?? 0,
+        output_tokens: usage?.completion_tokens ?? usage?.output_tokens ?? 0
+      }
+    }))
+  }
+}
+
+/* ============ 工具函数 ============ */
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -305,22 +616,31 @@ function readBody(req: http.IncomingMessage): Promise<string> {
   })
 }
 
-function parseModelRef(modelRef: string, mgr: ReturnType<typeof getProviderManager>): { providerId: string | null; modelId: string; agentBinding: any | null } {
-  if (modelRef.includes("/")) {
-    const slashIdx = modelRef.indexOf("/")
-    const providerId = modelRef.slice(0, slashIdx)
-    const modelId = modelRef.slice(slashIdx + 1)
-    const binding = mgr.getBindings().find(b => b.providerId === providerId && b.modelId === modelId) || null
-    return { providerId, modelId, agentBinding: binding }
+/** Anthropic system 可为 string 或 [{type:'text',text}] */
+function flattenAnthropicSystem(system: any): string | undefined {
+  if (!system) return undefined
+  if (typeof system === "string") return system
+  if (Array.isArray(system)) {
+    return system.map(b => typeof b === "string" ? b : (b?.text ?? "")).filter(Boolean).join("\n\n") || undefined
   }
-  for (const p of mgr.getProviders()) {
-    const m = p.models.find(mm => mm.id === modelRef)
-    if (m) {
-      const binding = mgr.getBindings().find(b => b.providerId === p.id && b.modelId === m.id) || null
-      return { providerId: p.id, modelId: m.id, agentBinding: binding }
-    }
+  return undefined
+}
+
+/** 消息 content 可为 string 或内容块数组（text / tool_result / image…），统一压平为纯文本 */
+function flattenContent(content: any): string {
+  if (typeof content === "string") return content
+  if (Array.isArray(content)) {
+    return content.map(b => {
+      if (typeof b === "string") return b
+      if (b?.type === "text") return b.text ?? ""
+      if (b?.type === "tool_result") return "[tool_result] " + flattenContent(b.content)
+      if (b?.type === "tool_use") return "[tool_use:" + (b.name ?? "") + "] " + JSON.stringify(b.input ?? {})
+      if (b?.type === "image" || b?.type === "image_url") return "[image]"
+      return ""
+    }).filter(Boolean).join("\n")
   }
-  return { providerId: null, modelId: modelRef, agentBinding: null }
+  if (content == null) return ""
+  return JSON.stringify(content)
 }
 
 let _instance: LocalProxy | null = null

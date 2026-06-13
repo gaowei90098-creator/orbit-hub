@@ -5,7 +5,7 @@ import { X, CheckCircle2, AlertCircle, Info, AlertTriangle } from 'lucide-react'
 const styles: Record<string, { icon: any; accent: string; soft: string; border: string }> = {
   success: { icon: CheckCircle2,  accent: '#22c55e', soft: 'rgba(34, 197, 94, 0.10)',  border: 'rgba(34, 197, 94, 0.30)' },
   error:   { icon: AlertCircle,   accent: '#ef4444', soft: 'rgba(239, 68, 68, 0.10)',  border: 'rgba(239, 68, 68, 0.30)' },
-  info:    { icon: Info,          accent: '#6366f1', soft: 'rgba(99, 102, 241, 0.12)', border: 'rgba(99, 102, 241, 0.30)' },
+  info:    { icon: Info,          accent: '#ff9f0a', soft: 'rgba(255, 159, 10, 0.12)', border: 'rgba(255, 159, 10, 0.30)' },
   warning: { icon: AlertTriangle, accent: '#f59e0b', soft: 'rgba(245, 158, 11, 0.10)', border: 'rgba(245, 158, 11, 0.30)' }
 }
 
@@ -34,14 +34,14 @@ function Toast({ id, type, message, onClose, duration = 4000 }: ToastProps) {
         'relative overflow-hidden flex items-start gap-2.5 pl-3 pr-2 py-2.5 rounded-xl border min-w-[260px] max-w-[380px] shadow-2xl glass-strong',
         closing ? 'animate-fade-only opacity-0' : 'animate-slide-bottom'
       ].join(' ')}
-      style={{ borderColor: s.border, background: `linear-gradient(180deg, ${s.soft} 0%, rgba(10, 12, 18, 0.85) 100%)` }}
+      style={{ borderColor: s.border, background: `linear-gradient(180deg, ${s.soft} 0%, rgba(15, 11, 9, 0.85) 100%)` }}
     >
       <span className="absolute left-0 top-0 bottom-0 w-0.5" style={{ background: s.accent }} />
       <Icon size={14} className="shrink-0 mt-0.5" style={{ color: s.accent }} />
-      <span className="flex-1 text-xs text-[#e2e6ef] leading-relaxed">{message}</span>
+      <span className="flex-1 text-xs text-[#ece4dc] leading-relaxed">{message}</span>
       <button
         onClick={() => { setClosing(true); setTimeout(onClose, 200) }}
-        className="text-[#5c6478] hover:text-[#e2e6ef] p-0.5 rounded transition-colors"
+        className="text-[#75665a] hover:text-[#ece4dc] p-0.5 rounded-lg transition-colors"
         aria-label="Dismiss"
       >
         <X size={12} />

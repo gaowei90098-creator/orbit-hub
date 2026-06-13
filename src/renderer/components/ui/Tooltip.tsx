@@ -51,7 +51,7 @@ export function Tooltip({ content, children, side = 'top', delay = 300, disabled
         <div
           role="tooltip"
           style={{ position: 'fixed', ...placement, zIndex: 9999 }}
-          className="px-2 py-1 rounded-md text-[11px] font-medium text-[#e2e6ef] bg-[#0a0c12] border border-[#262d3d] shadow-xl pointer-events-none animate-fade-only whitespace-nowrap"
+          className="px-2 py-1 rounded-lg text-[11px] font-medium text-[#ece4dc] bg-[#0f0b09] border border-[#362c25] shadow-xl pointer-events-none animate-fade-only whitespace-nowrap"
         >
           {content}
         </div>

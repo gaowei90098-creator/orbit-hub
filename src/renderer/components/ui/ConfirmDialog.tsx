@@ -30,17 +30,17 @@ export function ConfirmDialog({
   return (
     <Modal open={open} onClose={onClose} title={title} width="max-w-md">
       <div className="space-y-3">
-        {description && <p className="text-sm text-[#a0a8ba] leading-relaxed">{description}</p>}
+        {description && <p className="text-sm text-[#b3a294] leading-relaxed">{description}</p>}
         {requireText && (
           <div>
-            <p className="text-[11px] text-[#5c6478] mb-1.5">
-              Type <span className="font-mono text-[#e2e6ef] bg-[#1a1f2e] px-1.5 py-0.5 rounded">{requireText}</span> to confirm
+            <p className="text-[11px] text-[#75665a] mb-1.5">
+              Type <span className="font-mono text-[#ece4dc] bg-[#261f1a] px-1.5 py-0.5 rounded-lg">{requireText}</span> to confirm
             </p>
             <input
               autoFocus
               value={typed}
               onChange={e => setTyped(e.target.value)}
-              className="w-full bg-[#0a0c12] text-sm text-[#e2e6ef] placeholder-[#3f4758] px-3 py-2 rounded-md border border-[#262d3d] outline-none focus:border-[#6366f1]/50 focus:ring-2 focus:ring-[#6366f1]/15 transition-all"
+              className="w-full bg-[#0f0b09] text-sm text-[#ece4dc] placeholder-[#51443a] px-3 py-2 rounded-lg border border-[#362c25] outline-none focus:border-[#ff9f0a]/50 focus:ring-2 focus:ring-[#ff9f0a]/15 transition-all"
               placeholder={requireText}
             />
           </div>

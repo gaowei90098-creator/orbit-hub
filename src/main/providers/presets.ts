@@ -178,6 +178,167 @@ export const BUILTIN_PROVIDERS: ProviderDefinition[] = [
     ]
   },
   {
+    id: 'minimax',
+    name: 'MiniMax',
+    kind: 'openai-compatible',
+    baseUrl: 'https://api.minimaxi.com/v1',
+    apiKey: '',
+    enabled: false,
+    builtIn: true,
+    capabilities: {
+      protocol: 'chat_completions',
+      stream: true,
+      nativeThinking: true,
+      budgetTokens: false,
+      toolCalls: true,
+      systemPrompt: true
+    },
+    defaultThinking: { mode: 'auto', level: 'medium', collapseInUI: true },
+    models: [
+      oaiModel('MiniMax-M2.7', 'MiniMax M2.7', { contextWindow: 200000, supportsThinking: true, maxThinkingLevel: 'high', description: 'MiniMax 旗舰 Agent/编码模型' }),
+      oaiModel('MiniMax-M2', 'MiniMax M2', { contextWindow: 200000, supportsThinking: true, maxThinkingLevel: 'high', description: '上一代旗舰' }),
+      oaiModel('MiniMax-Text-01', 'MiniMax Text-01', { contextWindow: 1000000, description: '超长上下文通用模型' })
+    ],
+    note: '国际版用 https://api.minimax.io/v1；配好 Key 后点「获取模型」拉取最新列表'
+  },
+  {
+    id: 'moonshot',
+    name: 'Kimi (Moonshot)',
+    kind: 'openai-compatible',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    apiKey: '',
+    enabled: false,
+    builtIn: true,
+    capabilities: {
+      protocol: 'chat_completions',
+      stream: true,
+      nativeThinking: true,
+      budgetTokens: false,
+      toolCalls: true,
+      systemPrompt: true
+    },
+    defaultThinking: { mode: 'auto', level: 'medium', collapseInUI: true },
+    models: [
+      oaiModel('kimi-k2.6', 'Kimi K2.6', { contextWindow: 256000, supportsThinking: true, maxThinkingLevel: 'high', description: '月之暗面旗舰' }),
+      oaiModel('kimi-k2-0905-preview', 'Kimi K2 Preview', { contextWindow: 256000, description: 'K2 预览版' }),
+      oaiModel('moonshot-v1-128k', 'Moonshot v1 128K', { description: '经典长上下文' })
+    ]
+  },
+  {
+    id: 'zhipu',
+    name: '智谱 GLM',
+    kind: 'openai-compatible',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    apiKey: '',
+    enabled: false,
+    builtIn: true,
+    capabilities: {
+      protocol: 'chat_completions',
+      stream: true,
+      nativeThinking: true,
+      budgetTokens: false,
+      toolCalls: true,
+      systemPrompt: true
+    },
+    defaultThinking: { mode: 'auto', level: 'medium', collapseInUI: true },
+    models: [
+      oaiModel('glm-4.7', 'GLM-4.7', { contextWindow: 200000, supportsThinking: true, maxThinkingLevel: 'high', description: '智谱旗舰编码/推理' }),
+      oaiModel('glm-4.6', 'GLM-4.6', { contextWindow: 200000, supportsThinking: true, maxThinkingLevel: 'high', description: '上一代旗舰' }),
+      oaiModel('glm-4-flash', 'GLM-4 Flash', { description: '高速免费档' })
+    ]
+  },
+  {
+    id: 'qwen',
+    name: '通义千问',
+    kind: 'openai-compatible',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: '',
+    enabled: false,
+    builtIn: true,
+    capabilities: {
+      protocol: 'chat_completions',
+      stream: true,
+      nativeThinking: true,
+      budgetTokens: false,
+      toolCalls: true,
+      systemPrompt: true
+    },
+    defaultThinking: { mode: 'auto', level: 'medium', collapseInUI: true },
+    models: [
+      oaiModel('qwen3-max', 'Qwen3 Max', { contextWindow: 256000, supportsThinking: true, maxThinkingLevel: 'high', description: '阿里旗舰' }),
+      oaiModel('qwen-plus', 'Qwen Plus', { contextWindow: 131072, description: '均衡档' }),
+      oaiModel('qwen-turbo', 'Qwen Turbo', { description: '高速低成本' })
+    ]
+  },
+  {
+    id: 'doubao',
+    name: '豆包 (火山方舟)',
+    kind: 'openai-compatible',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    apiKey: '',
+    enabled: false,
+    builtIn: true,
+    capabilities: {
+      protocol: 'chat_completions',
+      stream: true,
+      nativeThinking: true,
+      budgetTokens: false,
+      toolCalls: true,
+      systemPrompt: true
+    },
+    defaultThinking: { mode: 'auto', level: 'medium', collapseInUI: true },
+    models: [
+      oaiModel('doubao-seed-2-0', 'Doubao Seed 2.0', { contextWindow: 256000, supportsThinking: true, maxThinkingLevel: 'high', description: '字节旗舰全模态' }),
+      oaiModel('doubao-1-5-pro-256k', 'Doubao 1.5 Pro 256K', { contextWindow: 256000, description: '长上下文' })
+    ],
+    note: '方舟也支持推理接入点 ID（ep-xxx）作为模型名；点「获取模型」可拉取你账号下可用列表'
+  },
+  {
+    id: 'hunyuan',
+    name: '腾讯混元',
+    kind: 'openai-compatible',
+    baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',
+    apiKey: '',
+    enabled: false,
+    builtIn: true,
+    capabilities: {
+      protocol: 'chat_completions',
+      stream: true,
+      nativeThinking: true,
+      budgetTokens: false,
+      toolCalls: true,
+      systemPrompt: true
+    },
+    defaultThinking: { mode: 'auto', level: 'medium', collapseInUI: true },
+    models: [
+      oaiModel('hunyuan-turbos-latest', 'Hunyuan TurboS', { contextWindow: 256000, description: '混元旗舰快思考' }),
+      oaiModel('hunyuan-t1-latest', 'Hunyuan T1', { contextWindow: 256000, supportsThinking: true, maxThinkingLevel: 'high', description: '混元深度推理' }),
+      oaiModel('hunyuan-lite', 'Hunyuan Lite', { description: '轻量免费档' })
+    ]
+  },
+  {
+    id: 'siliconflow',
+    name: '硅基流动',
+    kind: 'openai-compatible',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    apiKey: '',
+    enabled: false,
+    builtIn: true,
+    capabilities: {
+      protocol: 'chat_completions',
+      stream: true,
+      nativeThinking: true,
+      budgetTokens: false,
+      toolCalls: true,
+      systemPrompt: true
+    },
+    defaultThinking: { mode: 'auto', level: 'medium', collapseInUI: true },
+    models: [
+      oaiModel('deepseek-ai/DeepSeek-V3.2', 'DeepSeek V3.2 (SiliconFlow)', { contextWindow: 131072, description: '聚合平台直供' }),
+      oaiModel('Qwen/Qwen3-32B', 'Qwen3 32B (SiliconFlow)', { description: '开源模型托管' })
+    ]
+  },
+  {
     id: 'openrouter',
     name: 'OpenRouter',
     kind: 'openai-compatible',
@@ -201,28 +362,6 @@ export const BUILTIN_PROVIDERS: ProviderDefinition[] = [
       oaiModel('deepseek/deepseek-r1', 'DeepSeek R1 (via OpenRouter)', { supportsThinking: true, maxThinkingLevel: 'xhigh' })
     ]
   },
-  {
-    id: 'custom',
-    name: '自定义 OpenAI 兼容',
-    kind: 'custom',
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    apiKey: '',
-    enabled: false,
-    builtIn: true,
-    capabilities: {
-      protocol: 'chat_completions',
-      stream: true,
-      nativeThinking: false,
-      budgetTokens: false,
-      toolCalls: false,
-      systemPrompt: true
-    },
-    defaultThinking: OAI_OFF_THINKING,
-    models: [
-      oaiModel('llama3.1', 'Llama 3.1 8B (示例)', { description: '请在设置里改成你实际的模型 ID' }),
-      oaiModel('qwen2.5', 'Qwen 2.5 (示例)', { description: '示例模型，可在设置中替换' })
-    ]
-  }
 ]
 
 /** 思考等级档位（UI 暴露） */

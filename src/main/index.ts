@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain } from "electron"
+﻿import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell } from "electron"
 import { join, resolve } from "path"
 import { HubServer } from "./hub/server"
 import { AgentRegistry } from "./hub/registry"
@@ -10,6 +10,9 @@ import { store } from "./store"
 import { detectAgentsAsync } from "./hub/agent-detector"
 import { getProviderManager } from "./providers/manager"
 import { getLocalProxy } from "./routing/proxy"
+import { createAdapter } from "./hub/adapters/base"
+import { locateAgentCandidates } from "./hub/agent-locator"
+import { takeoverStatus, takeoverApply, takeoverRestore } from "./routing/takeover"
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -26,14 +29,18 @@ const AGENT_CAPS: Record<string, string[]> = {
   codex: ["coding", "debug", "refactor", "api"],
   claude: ["analysis", "writing", "translation", "research"],
   openclaw: ["automation", "deploy", "pipeline", "script"],
-  hermes: ["tools", "system", "automation"]
+  hermes: ["tools", "system", "automation"],
+  marvis: ["knowledge", "browser", "android", "office"],
+  "minimax-code": ["coding", "agentic", "tools", "review"]
 }
 
 const AGENT_NAMES: Record<string, string> = {
   codex: "Codex CLI",
   claude: "Claude Code",
   openclaw: "OpenClaw",
-  hermes: "Hermes"
+  hermes: "Hermes",
+  marvis: "Marvis",
+  "minimax-code": "MiniMax Code"
 }
 
 function createWindow(): void {
@@ -50,10 +57,12 @@ function createWindow(): void {
       sandbox: false
     },
     show: false,
-    frame: true,
-    backgroundColor: "#0f1117"
+    frame: false,
+    backgroundColor: "#101319"
   })
   mainWindow.on("ready-to-show", () => mainWindow?.show())
+  mainWindow.on("maximize", () => mainWindow?.webContents.send("win:maximized", true))
+  mainWindow.on("unmaximize", () => mainWindow?.webContents.send("win:maximized", false))
   mainWindow.on("close", (event) => {
     if (store.get("minimizeToTray") !== false) {
       event.preventDefault()
@@ -88,11 +97,24 @@ function registerAgentsFromBindings(): void {
     const existing = registry.get(b.agentId)
     const name = AGENT_NAMES[b.agentId] || b.agentId
     const caps = AGENT_CAPS[b.agentId] || []
-    if (!existing) {
-      registry.registerHttpAgent(b.agentId, name, caps, b.providerId, b.modelId)
+    const protocol = (b as any).protocol || "http"
+    const binary = (b as any).binary as string | undefined
+    const argsStr = ((b as any).args as string | undefined) || ""
+    const args = argsStr.trim() ? argsStr.trim().split(/\s+/) : undefined
+    // 绑定签名：协议/二进制/参数任一变化都重建 adapter（http 适配器无签名，仅比协议）
+    const sig = protocol + "|" + (binary || "") + "|" + argsStr.trim()
+    if (existing && ((existing.adapter as any).protocol !== protocol || ((existing.adapter as any).__sig ?? sig) !== sig)) {
+      existing.adapter.stop().catch(() => {})
+      registry.unregister(b.agentId)
+    }
+    const fresh = registry.get(b.agentId)
+    if (!fresh) {
+      const adapter = createAdapter(b.agentId, name, protocol as any, binary, args)
+      ;(adapter as any).__sig = sig
+      registry.register(adapter, caps, b.providerId, b.modelId)
     } else {
-      existing.providerId = b.providerId
-      existing.modelId = b.modelId
+      fresh.providerId = b.providerId
+      fresh.modelId = b.modelId
     }
   }
 }
@@ -200,7 +222,17 @@ ipcMain.handle("providers:get", async () => providerMgr.getConfig())
 ipcMain.handle("providers:upsert", async (_e, p) => { providerMgr.upsertProvider(p); registerAgentsFromBindings(); return providerMgr.getConfig() })
 ipcMain.handle("providers:delete", async (_e, id) => { const ok = providerMgr.deleteProvider(id); if (ok) registerAgentsFromBindings(); return ok })
 ipcMain.handle("providers:setEnabled", async (_e, id, enabled) => { providerMgr.setProviderEnabled(id, enabled); return providerMgr.getConfig() })
-ipcMain.handle("providers:setKey", async (_e, id, key) => { providerMgr.setProviderApiKey(id, key); registerAgentsFromBindings(); return providerMgr.getConfig() })
+ipcMain.handle("providers:setKey", async (_e, id, key) => {
+  providerMgr.setProviderApiKey(id, key)
+  registerAgentsFromBindings()
+  // 配好 Key 后自动拉取模型列表（后台进行，不阻塞返回）
+  if (key) providerMgr.fetchModels(id).catch(() => {})
+  return providerMgr.getConfig()
+})
+ipcMain.handle("providers:fetchModels", async (_e, id) => {
+  const r = await providerMgr.fetchModels(id)
+  return { ...r, config: providerMgr.getConfig() }
+})
 ipcMain.handle("providers:health", async (_e, id) => providerMgr.checkProviderHealth(id))
 ipcMain.handle("providers:healthAll", async () => {
   const results: any = {}
@@ -216,7 +248,31 @@ ipcMain.handle("routing:setStrategy", async (_e, s) => { providerMgr.setStrategy
 ipcMain.handle("routing:setBindingThinking", async (_e, agentId, t) => { providerMgr.setBindingThinking(agentId, t); return providerMgr.getBindings() })
 ipcMain.handle("routing:setProviderThinking", async (_e, id, t) => { providerMgr.setProviderThinking(id, t); return providerMgr.getConfig() })
 ipcMain.handle("routing:activeBinding", async (_e, agentId) => { providerMgr.setActiveBinding(agentId); return providerMgr.getConfig().activeBindingId })
-ipcMain.handle("proxy:info", async () => ({ url: proxy.getUrl(), running: true }))
+ipcMain.handle("proxy:info", async () => ({
+  url: proxy.getUrl(),
+  openaiUrl: proxy.getUrl(),
+  anthropicUrl: proxy.getOrigin(),
+  running: true
+}))
+ipcMain.handle("takeover:status", async () => takeoverStatus())
+ipcMain.handle("takeover:apply", async (_e, app2: string, modelRef: string) =>
+  takeoverApply(app2, modelRef, proxy.getUrl(), proxy.getOrigin()))
+ipcMain.handle("takeover:restore", async (_e, app2: string) => takeoverRestore(app2))
+// 每个 Agent 返回全部已检测安装（桌面版/终端版，按路径去重）
+ipcMain.handle("agents:locate", async () => locateAgentCandidates())
+
+ipcMain.handle("app:openExternal", async (_e, url: string) => {
+  if (/^https?:\/\//.test(url) || /^mailto:/.test(url)) await shell.openExternal(url)
+})
+ipcMain.handle("win:minimize", () => { mainWindow?.minimize() })
+ipcMain.handle("win:maximizeToggle", () => {
+  if (!mainWindow) return false
+  if (mainWindow.isMaximized()) mainWindow.unmaximize()
+  else mainWindow.maximize()
+  return mainWindow.isMaximized()
+})
+ipcMain.handle("win:isMaximized", () => mainWindow?.isMaximized() ?? false)
+ipcMain.handle("win:close", () => { mainWindow?.close() })
 
 
 function parseDeepLink(url: string): { action: string; params: Record<string, string> } | null {

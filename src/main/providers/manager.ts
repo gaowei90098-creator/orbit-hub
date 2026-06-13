@@ -73,6 +73,26 @@ function defaultBindings(): AgentRouteBinding[] {
       thinking: { mode: 'auto', level: 'low', budgetTokens: THINKING_BUDGET_TOKENS.low, collapseInUI: true },
       temperature: 0.3,
       maxOutputTokens: 8192
+    },
+    {
+      agentId: 'marvis',
+      providerId: 'hunyuan',
+      modelId: 'hunyuan-turbos-latest',
+      thinkingAllow: ['off', 'auto', 'enabled'],
+      thinking: { mode: 'auto', level: 'low', collapseInUI: true },
+      temperature: 0.3,
+      maxOutputTokens: 8192
+    },
+    {
+      agentId: 'minimax-code',
+      providerId: 'minimax',
+      modelId: 'MiniMax-M2.7',
+      // 默认 StdIO 直连桌面版内置 opencode（吃桌面版登录态，无需 API Key）
+      protocol: 'stdio-plain',
+      thinkingAllow: ['off', 'auto', 'enabled'],
+      thinking: { mode: 'auto', level: 'medium', collapseInUI: true },
+      temperature: 0.2,
+      maxOutputTokens: 8192
     }
   ]
 }
@@ -126,7 +146,11 @@ export class ProviderManager extends EventEmitter {
       }
     }
 
-    const storedBindings = stored.routing?.bindings?.length ? stored.routing.bindings : defaults.routing.bindings
+    const storedBindings = stored.routing?.bindings?.length ? [...stored.routing.bindings] : defaults.routing.bindings
+    // 新增内置 Agent 时补齐缺失的默认绑定（老配置升级）
+    for (const db of defaults.routing.bindings) {
+      if (!storedBindings.find(b => b.agentId === db.agentId)) storedBindings.push(db)
+    }
 
     return {
       providers,
@@ -143,7 +167,6 @@ export class ProviderManager extends EventEmitter {
     store.set(STORAGE_KEY, this.cfg)
     this.emit('config:changed', this.cfg)
   }
-
   // ---- 查询 ----
   getConfig(): ProvidersConfig {
     return JSON.parse(JSON.stringify(this.cfg))
@@ -169,26 +192,30 @@ export class ProviderManager extends EventEmitter {
     return this.cfg.routing.bindings.find(b => b.agentId === agentId)
   }
 
-  /** 解析 Agent → (Provider, Model, Thinking) 完整配置，处理 Provider 不可用回退 */
-  resolveBinding(agentId: string): { provider: ProviderDefinition; model: import('./types').ModelDefinition; binding: AgentRouteBinding; thinking: ThinkingConfig } | null {
-    const binding = this.getBinding(agentId)
-    if (!binding) return null
-    let provider = this.getProvider(binding.providerId)
-    if (!provider || !provider.enabled || !provider.apiKey) {
-      // 走回退链
-      for (const fb of this.cfg.routing.fallbackChain) {
-        const p = this.getProvider(fb)
-        if (p && p.enabled && p.apiKey) {
-          provider = p
-          break
-        }
-      }
-    }
-    if (!provider) return null
-    const model = provider.models.find(m => m.id === binding.modelId) || provider.models[0]
-    if (!model) return null
-    return { provider, model, binding, thinking: binding.thinking }
-  }
+ /**解析 Agent → (Provider, Model, Thinking)完整配置；目标 Provider不可用时按 fallbackChain 回退 */
+ resolveBinding(agentId: string): { provider: ProviderDefinition; model: import('./types').ModelDefinition; binding: AgentRouteBinding; thinking: ThinkingConfig } | null {
+ const binding = this.getBinding(agentId)
+ if (!binding) return null
+
+ const isUsable = (p: ProviderDefinition | undefined): p is ProviderDefinition =>
+ !!p && p.enabled && !!p.apiKey
+
+ let provider = this.getProvider(binding.providerId)
+ if (!isUsable(provider)) {
+ for (const id of this.cfg.routing.fallbackChain) {
+ const p = this.getProvider(id)
+ if (isUsable(p)) {
+ provider = p
+ break
+ }
+ }
+ }
+ if (!provider) return null
+
+ const model = provider.models.find(m => m.id === binding.modelId) ?? provider.models[0]
+ if (!model) return null
+ return { provider, model, binding, thinking: binding.thinking }
+ }
 
   // ---- 修改 ----
   upsertProvider(p: ProviderDefinition): void {
@@ -295,6 +322,64 @@ export class ProviderManager extends EventEmitter {
       p.health = h
       this.save()
       return h
+    }
+  }
+
+  /**
+   * 从厂商 API 拉取模型列表（自动/手动）。
+   * openai 兼容: GET /models → data[].id
+   * anthropic:  GET /models?limit=200 → data[].{id,display_name}
+   * gemini:     GET /models?pageSize=200 → models[].{name,displayName,inputTokenLimit}
+   * 与现有列表按 id 合并（保留人工配置的能力标记），其余字段用启发式默认。
+   */
+  async fetchModels(id: string): Promise<{ ok: boolean; count?: number; error?: string }> {
+    const p = this.getProvider(id)
+    if (!p) return { ok: false, error: 'Provider not found' }
+    if (!p.apiKey) return { ok: false, error: '未配置 API Key' }
+    try {
+      const base = p.baseUrl.replace(/\/$/, '')
+      const url = p.kind === 'gemini'
+        ? `${base}/models?key=${encodeURIComponent(p.apiKey)}&pageSize=200`
+        : p.kind === 'anthropic'
+          ? `${base}/models?limit=200`
+          : `${base}/models`
+      const res = await fetch(url, { method: 'GET', headers: this.buildHeaders(p), signal: AbortSignal.timeout(10000) })
+      if (res.status >= 400) return { ok: false, error: `HTTP ${res.status}` }
+      const j: any = await res.json()
+
+      let raw: Array<{ id: string; label?: string; contextWindow?: number }> = []
+      if (p.kind === 'gemini') {
+        raw = (j.models || [])
+          .filter((m: any) => !m.supportedGenerationMethods || m.supportedGenerationMethods.includes('generateContent'))
+          .map((m: any) => ({
+            id: String(m.name || '').replace(/^models\//, ''),
+            label: m.displayName,
+            contextWindow: m.inputTokenLimit
+          }))
+      } else {
+        raw = (j.data || []).map((m: any) => ({ id: m.id, label: m.display_name }))
+      }
+      raw = raw.filter(m => m.id).slice(0, 300)
+      if (raw.length === 0) return { ok: false, error: '接口未返回模型' }
+
+      const old = new Map(p.models.map(m => [m.id, m]))
+      const thinkRe = /think|reason|r1|o[134](-|$)|gpt-5|claude-(opus|sonnet)-4|gemini-2\.5/i
+      p.models = raw.map(m => {
+        const prev = old.get(m.id)
+        if (prev) return { ...prev, label: prev.label || m.label || m.id, contextWindow: m.contextWindow || prev.contextWindow }
+        return {
+          id: m.id,
+          label: m.label || m.id,
+          contextWindow: m.contextWindow || 128000,
+          supportsTools: true,
+          supportsVision: /vision|4o|omni|gemini|claude/i.test(m.id),
+          supportsThinking: thinkRe.test(m.id)
+        }
+      })
+      this.save()
+      return { ok: true, count: p.models.length }
+    } catch (e: any) {
+      return { ok: false, error: e?.message || String(e) }
     }
   }
 

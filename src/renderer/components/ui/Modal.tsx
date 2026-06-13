@@ -39,18 +39,18 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg', foot
       <div
         ref={dialogRef}
         className={[width, 'w-full glass-strong rounded-2xl shadow-2xl overflow-hidden animate-scale-in flex flex-col max-h-[88vh]'].join(' ')}
-        style={{ boxShadow: '0 24px 60px -12px rgba(0,0,0,0.6), 0 0 0 1px rgba(99,102,241,0.08)' }}
+        style={{ boxShadow: '0 24px 60px -12px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,159,10,0.08)' }}
       >
         {(title || showClose) && (
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#1a1f2e] shrink-0">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#261f1a] shrink-0">
             {title ? (
-              <h2 className="text-sm font-semibold text-[#e2e6ef] tracking-tight">{title}</h2>
+              <h2 className="text-sm font-semibold text-[#ece4dc] tracking-tight">{title}</h2>
             ) : <span />}
             {showClose && (
               <button
                 onClick={onClose}
                 aria-label="Close"
-                className="p-1.5 rounded-md text-[#5c6478] hover:text-[#e2e6ef] hover:bg-[#1a1f2e] transition-colors"
+                className="p-1.5 rounded-lg text-[#75665a] hover:text-[#ece4dc] hover:bg-[#261f1a] transition-colors"
               >
                 <X size={14} />
               </button>
@@ -58,7 +58,7 @@ export function Modal({ open, onClose, title, children, width = 'max-w-lg', foot
           </div>
         )}
         <div className="flex-1 overflow-y-auto p-5">{children}</div>
-        {footer && <div className="shrink-0 border-t border-[#1a1f2e]">{footer}</div>}
+        {footer && <div className="shrink-0 border-t border-[#261f1a]">{footer}</div>}
       </div>
     </div>
   )

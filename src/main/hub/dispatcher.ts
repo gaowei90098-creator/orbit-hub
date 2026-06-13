@@ -134,6 +134,11 @@ export class Dispatcher extends EventEmitter {
   private async sendToAgent(task: DispatchTask, agentId: string, text: string, opts: DispatchOptions): Promise<{ content: string }> {
     const mgr = getProviderManager()
     const resolved = mgr.resolveBinding(agentId)
+ // stdio routing: 若 registry 注册的是 stdio adapter(非 http),则走本地 CLI 子进程
+ const agentInfo = this.registry.get(agentId)
+ if (agentInfo && (agentInfo.adapter as any).protocol && (agentInfo.adapter as any).protocol !== 'http') {
+ return this.sendToAgentStdio(task, agentId, text, opts, resolved, agentInfo.adapter)
+ }
     if (!resolved) {
       const err = "No available provider for agent " + agentId
       task.errors.set(agentId, err)
@@ -214,7 +219,9 @@ export class Dispatcher extends EventEmitter {
       codex: "You are Codex, an expert software engineer focused on coding, debugging and refactoring. Be precise and produce working code.",
       claude: "You are Claude Code, an analytical assistant focused on writing, research and clear explanations.",
       hermes: "You are Hermes, a system automation agent specialised in tooling, configuration and command execution.",
-      openclaw: "You are OpenClaw, an automation and deployment agent specialised in pipelines, scripts and runtime tasks."
+      openclaw: "You are OpenClaw, an automation and deployment agent specialised in pipelines, scripts and runtime tasks.",
+      marvis: "You are Marvis, Tencent's intelligent assistant specialised in knowledge management, browser automation, office workflows and Android device control.",
+      "minimax-code": "You are MiniMax Code, an agentic coding assistant built on OpenCode. Be precise, write working code and explain briefly."
     }
     return map[agentId] || "You are AgentHub agent " + agentId + ". Be concise and helpful."
   }
@@ -236,5 +243,88 @@ export class Dispatcher extends EventEmitter {
     return Array.from(this.tasks.values())
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit)
+  }
+
+  /** Stdio路径: 通过本地 CLI 子进程向 agent 发 prompt, 收集 stdout 作为 stream 内容.
+   * oneshot 适配器（codex exec / claude --print）以进程退出为完成信号;
+   * interactive 适配器保留输出静默判定; 任务被取消时 kill 子进程.
+   * 注意: stdio 不依赖 HTTP provider, resolved 可为 null.
+   */
+  private async sendToAgentStdio(task: DispatchTask, agentId: string, text: string, _opts: DispatchOptions, resolved: any, adapter: any): Promise<{ content: string }> {
+    this.registry.setStatus(agentId, "busy")
+    let content = ""
+    const providerId = resolved?.provider?.id ?? "local-cli"
+    const modelId = resolved?.model?.id ?? "stdio"
+    this.emit("stream", { kind: "start", taskId: task.id, agentId, providerId, modelId, mode: "content" })
+    const start = Date.now()
+    const TIMEOUT_MS = 5 * 60 * 1000
+    const POLL_MS = 200
+    const SILENCE_MS = 1500
+    const procField = "proc" // 适配器内部的子进程字段
+    const interactive = adapter.mode === "interactive"
+    const self = this
+    let settled = false
+    let spawnedOnce = false
+    const cleanup = () => {
+      adapter.onOutput = null
+      adapter.onError = null
+    }
+    try {
+      await this.pipeline.process(text, agentId)
+      await new Promise<void>((resolveP, rejectP) => {
+        let lastOutputAt = Date.now()
+        const onChunk = (chunk: string) => {
+          content += chunk
+          lastOutputAt = Date.now()
+          self.emit("stream", { kind: "delta", taskId: task.id, agentId, providerId, modelId, channel: "content", text: chunk })
+        }
+        const onErr = (err: Error) => {
+          if (settled) return
+          settled = true
+          clearInterval(poll)
+          cleanup()
+          rejectP(err)
+        }
+        adapter.onOutput = onChunk
+        adapter.onError = onErr
+        adapter.start().then(() => {
+          try {
+            adapter.send(text)
+            spawnedOnce = true
+          } catch (e) { onErr(e as Error) }
+        }).catch(onErr)
+        const poll = setInterval(() => {
+          if (settled) return
+          const proc = adapter[procField]
+          const procGone = spawnedOnce && !proc        // 进程退出（oneshot 的正常完成信号）
+          const tooQuiet = interactive && (Date.now() - lastOutputAt) > SILENCE_MS && content.length > 0
+          const timedOut = (Date.now() - start) > TIMEOUT_MS
+          const cancelled = (task as any).status === "cancelled"
+          if (procGone || tooQuiet || timedOut || cancelled) {
+            settled = true
+            clearInterval(poll)
+            cleanup()
+            if (cancelled || timedOut) {
+              try { adapter.stop() } catch { /* noop */ }
+            }
+            if (timedOut && !content) {
+              rejectP(new Error("本地 CLI 执行超时（5 分钟）"))
+              return
+            }
+            resolveP()
+          }
+        }, POLL_MS)
+      })
+      task.results.set(agentId, content)
+      this.emit("stream", { kind: "done", taskId: task.id, agentId, providerId, modelId, content, durationMs: Date.now() - start })
+      return { content }
+    } catch (e: any) {
+      task.errors.set(agentId, e.message)
+      this.emit("stream", { kind: "error", taskId: task.id, agentId, providerId, modelId, error: e.message })
+      return { content: "" }
+    } finally {
+      try { await adapter.stop() } catch { /* noop */ }
+      this.registry.setStatus(agentId, "idle")
+    }
   }
 }

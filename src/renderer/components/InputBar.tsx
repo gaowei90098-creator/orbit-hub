@@ -265,7 +265,7 @@ export function InputBar() {
   const canSend = input.trim().length > 0 && !isProcessing
 
   const dispatchModeConfig: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-    auto: { label: '自动', icon: <Zap size={10} />, color: 'text-[#a5b4fc] bg-[#6366f1]/15 ring-[#6366f1]/30' },
+    auto: { label: '自动', icon: <Zap size={10} />, color: 'text-[#ffc66b] bg-[#ff9f0a]/15 ring-[#ff9f0a]/30' },
     broadcast: { label: '广播', icon: <Repeat size={10} />, color: 'text-[#22d3ee] bg-[#06b6d4]/15 ring-[#06b6d4]/30' },
     chain: { label: '链式', icon: <Sparkles size={10} />, color: 'text-[#fbbf24] bg-[#f59e0b]/15 ring-[#f59e0b]/30' }
   }
@@ -298,7 +298,7 @@ export function InputBar() {
             <ChevronUp size={9} className='opacity-60' />
           </button>
 
-          <span className='text-[10px] text-[#3f4758] hidden sm:inline'>Enter 发送 · Shift+Enter 换行</span>
+          <span className='text-[10px] text-[#51443a] hidden sm:inline'>Enter 发送 · Shift+Enter 换行</span>
 
           <div className='ml-auto flex items-center gap-2 text-[10px]'>
             {activeAgents.length === 0 ? (
@@ -323,13 +323,13 @@ export function InputBar() {
         {attachedFiles.length > 0 && (
           <div className='flex gap-1.5 mb-2 flex-wrap'>
             {attachedFiles.map((f, i) => (
-              <div key={i} className='flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-md bg-[#1a1f2e] border border-[#262d3d] text-[10px] animate-fade-in'>
-                <Paperclip size={10} className='text-[#a5b4fc]' />
-                <span className='text-[#e2e6ef] truncate max-w-[120px]'>{f.name}</span>
-                <span className='text-[#5c6478]'>{Math.round(f.size / 1024)}KB</span>
+              <div key={i} className='flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-md bg-[#261f1a] border border-[#362c25] text-[10px] animate-fade-in'>
+                <Paperclip size={10} className='text-[#ffc66b]' />
+                <span className='text-[#ece4dc] truncate max-w-[120px]'>{f.name}</span>
+                <span className='text-[#75655a]'>{Math.round(f.size / 1024)}KB</span>
                 <button
                   onClick={() => setAttachedFiles(prev => prev.filter((_, j) => j !== i))}
-                  className='p-0.5 rounded text-[#5c6478] hover:text-[#ef4444]'
+                  className='p-0.5 rounded text-[#75655a] hover:text-[#ef4444]'
                 >
                   <X size={10} />
                 </button>
@@ -339,14 +339,14 @@ export function InputBar() {
         )}
 
         <div className={[
-          'relative flex items-end gap-2 px-3 py-2.5 rounded-2xl glass border transition-all duration-200',
+          'relative flex items-end gap-2 px-3 py-2.5 rounded-2xl glass-light border transition-all duration-200',
           isDragging
-            ? 'border-[#6366f1] bg-[#6366f1]/10 scale-[1.01] shadow-xl shadow-[#6366f1]/20'
-            : 'border-[#1a1f2e] focus-within:border-[#6366f1]/50 focus-within:shadow-lg focus-within:shadow-[#6366f1]/10'
+            ? 'border-[#ff9f0a] bg-[#ff9f0a]/10 scale-[1.01] shadow-xl shadow-[#ff9f0a]/20'
+            : 'border-[#0f0b09] focus-within:border-[#ff9f0a]/50 focus-within:shadow-lg focus-within:shadow-[#ff9f0a]/10'
         ].join(' ')}>
           {isDragging && (
-            <div className='absolute inset-0 flex items-center justify-center pointer-events-none rounded-2xl border-2 border-dashed border-[#6366f1] bg-[#6366f1]/5'>
-              <div className='flex items-center gap-2 text-xs font-semibold text-[#a5b4fc]'>
+            <div className='absolute inset-0 flex items-center justify-center pointer-events-none rounded-2xl border-2 border-dashed border-[#ff9f0a] bg-[#ff9f0a]/5'>
+              <div className='flex items-center gap-2 text-xs font-semibold text-[#ffc66b]'>
                 <Paperclip size={14} /> 释放以添加文件
               </div>
             </div>
@@ -354,7 +354,7 @@ export function InputBar() {
 
           <button
             onClick={() => { setInput(p => p + '@'); requestAnimationFrame(() => inputRef.current?.focus()) }}
-            className='p-1.5 rounded-md text-[#5c6478] hover:text-[#a5b4fc] hover:bg-[#6366f1]/10 transition-colors shrink-0 mb-0.5'
+            className='p-1.5 rounded-md text-[#75655a] hover:text-[#ffc66b] hover:bg-[#ff9f0a]/10 transition-colors shrink-0 mb-0.5'
             title='提及 Agent (@)'
             disabled={isProcessing}
           >
@@ -370,12 +370,12 @@ export function InputBar() {
               placeholder={isProcessing ? '正在生成中…' : '输入消息,Enter 发送,@ 提及 Agent, / 命令'}
               rows={1}
               disabled={isProcessing}
-              className='w-full bg-transparent text-sm text-[#e2e6ef] placeholder-[#3f4758] resize-none outline-none leading-relaxed max-h-[180px] py-1 disabled:opacity-60'
+              className='w-full bg-transparent text-sm text-[#ece4dc] placeholder-[#51443a] resize-none outline-none leading-relaxed max-h-[180px] py-1 disabled:opacity-60'
             />
 
             {showMentions && filteredAgents.length > 0 && (
-              <div className='absolute bottom-full left-0 right-0 mb-2 glass-strong rounded-xl border border-[#262d3d] shadow-2xl overflow-hidden animate-slide-bottom z-50'>
-                <div className='px-3 py-1.5 text-[10px] text-[#5c6478] border-b border-[#1a1f2e] flex items-center gap-1'>
+              <div className='absolute bottom-full left-0 right-0 mb-2 glass-strong rounded-xl border border-[#362c25] shadow-2xl overflow-hidden animate-slide-bottom z-50'>
+                <div className='px-3 py-1.5 text-[10px] text-[#75655a] border-b border-[#261f1a] flex items-center gap-1'>
                   <AtSign size={10} /> 提及 Agent
                 </div>
                 <div className='max-h-[240px] overflow-y-auto p-1'>
@@ -385,7 +385,7 @@ export function InputBar() {
                       onClick={() => insertMention(agent.id)}
                       className={[
                         'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors',
-                        i === mentionIdx ? 'bg-[#6366f1]/15 text-[#e2e6ef]' : 'text-[#a0a8ba] hover:bg-[#1a1f2e]'
+                        i === mentionIdx ? 'bg-[#ff9f0a]/15 text-[#ece4dc]' : 'text-[#b3a294] hover:bg-[#261f1a]'
                       ].join(' ')}
                     >
                       <div
@@ -396,9 +396,9 @@ export function InputBar() {
                       </div>
                       <div className='flex-1 min-w-0'>
                         <div className='font-medium truncate'>{agent.name}</div>
-                        <div className='text-[9px] text-[#5c6478] truncate'>{agent.capabilities.slice(0, 2).join(' · ')}</div>
+                        <div className='text-[9px] text-[#75655a] truncate'>{agent.capabilities.slice(0, 2).join(' · ')}</div>
                       </div>
-                      <span className='text-[10px] text-[#3f4758] font-mono'>@{agent.id}</span>
+                      <span className='text-[10px] text-[#51443a] font-mono'>@{agent.id}</span>
                     </button>
                   ))}
                 </div>
@@ -406,8 +406,8 @@ export function InputBar() {
             )}
 
             {showSlash && filteredCommands.length > 0 && (
-              <div className='absolute bottom-full left-0 right-0 mb-2 glass-strong rounded-xl border border-[#262d3d] shadow-2xl overflow-hidden animate-slide-bottom z-50'>
-                <div className='px-3 py-1.5 text-[10px] text-[#5c6478] border-b border-[#1a1f2e] flex items-center gap-1'>
+              <div className='absolute bottom-full left-0 right-0 mb-2 glass-strong rounded-xl border border-[#362c25] shadow-2xl overflow-hidden animate-slide-bottom z-50'>
+                <div className='px-3 py-1.5 text-[10px] text-[#75655a] border-b border-[#261f1a] flex items-center gap-1'>
                   <Hash size={10} /> 命令
                 </div>
                 <div className='max-h-[240px] overflow-y-auto p-1'>
@@ -417,12 +417,12 @@ export function InputBar() {
                       onClick={() => executeSlash(cmd)}
                       className={[
                         'w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs text-left transition-colors',
-                        i === slashIdx ? 'bg-[#6366f1]/15 text-[#e2e6ef]' : 'text-[#a0a8ba] hover:bg-[#1a1f2e]'
+                        i === slashIdx ? 'bg-[#ff9f0a]/15 text-[#ece4dc]' : 'text-[#b3a294] hover:bg-[#261f1a]'
                       ].join(' ')}
                     >
-                      <span className={i === slashIdx ? 'text-[#a5b4fc]' : 'text-[#5c6478]'}>{cmd.icon}</span>
-                      <span className='font-mono font-semibold text-[#a5b4fc]'>/{cmd.label}</span>
-                      <span className='flex-1 text-[#5c6478] text-[10px] truncate'>{cmd.description}</span>
+                      <span className={i === slashIdx ? 'text-[#ffc66b]' : 'text-[#75655a]'}>{cmd.icon}</span>
+                      <span className='font-mono font-semibold text-[#ffc66b]'>/{cmd.label}</span>
+                      <span className='flex-1 text-[#75655a] text-[10px] truncate'>{cmd.description}</span>
                     </button>
                   ))}
                 </div>
@@ -431,7 +431,7 @@ export function InputBar() {
           </div>
 
           <button
-            className='p-1.5 rounded-md text-[#5c6478] hover:text-[#a0a8ba] hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5'
+            className='p-1.5 rounded-md text-[#75655a] hover:text-[#b3a294] hover:bg-[#261f1a] transition-colors shrink-0 mb-0.5'
             title='附件'
             disabled={isProcessing}
             onClick={() => addNotification('info', '拖放文件到输入框以添加', 2000)}
@@ -439,7 +439,7 @@ export function InputBar() {
             <Paperclip size={15} />
           </button>
           <button
-            className='p-1.5 rounded-md text-[#5c6478] hover:text-[#a0a8ba] hover:bg-[#1a1f2e] transition-colors shrink-0 mb-0.5 hidden sm:inline-flex'
+            className='p-1.5 rounded-md text-[#75655a] hover:text-[#b3a294] hover:bg-[#261f1a] transition-colors shrink-0 mb-0.5 hidden sm:inline-flex'
             title='语音输入 (即将推出)'
             disabled
           >
@@ -461,8 +461,8 @@ export function InputBar() {
               className={[
                 'p-2 rounded-xl shrink-0 transition-all',
                 canSend
-                  ? 'gradient-accent text-white shadow-lg shadow-[#6366f1]/30 hover:brightness-110 hover:scale-105 active:scale-90'
-                  : 'bg-[#1a1f2e] text-[#3f4758] cursor-not-allowed'
+                  ? 'gradient-accent text-white shadow-lg shadow-[#ff9f0a]/30 hover:brightness-110 hover:scale-105 active:scale-90'
+                  : 'bg-[#261f1a] text-[#51443a] cursor-not-allowed'
               ].join(' ')}
               title='发送 (Enter)'
             >
@@ -471,7 +471,7 @@ export function InputBar() {
           )}
         </div>
 
-        <div className='mt-1.5 flex items-center justify-between text-[9px] text-[#3f4758] px-1'>
+        <div className='mt-1.5 flex items-center justify-between text-[9px] text-[#51443a] px-1'>
           <span className='flex items-center gap-1'>
             <kbd className='kbd'>Enter</kbd> 发送
             <span className='mx-1'>·</span>

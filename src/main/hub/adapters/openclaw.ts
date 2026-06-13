@@ -1,45 +1,16 @@
-﻿import { BaseAgentAdapter } from './base'
-import { spawn, ChildProcess } from 'child_process'
+import { StdioAgentAdapter } from './stdio-adapter'
+import { locateOpenclawBinary } from '../agent-locator'
 
-export class OpenClawAdapter extends BaseAgentAdapter {
-  id = 'openclaw'
-  name = 'OpenClaw'
-  binary = ''
-  protocol: 'stdio-plain' = 'stdio-plain'
-  mode: 'interactive' = 'interactive'
-
-  private proc: ChildProcess | null = null
-
+/**
+ * OpenClaw 本地 CLI 直连适配器 — oneshot
+ *
+ * OpenClaw 默认入口需要交互式 TTY，单次命令须用其 crestodian 子命令：
+ *   openclaw crestodian --message "<prompt>"
+ * （CLI 报错信息给出的官方用法）prompt 经 {prompt} 占位符作为参数传入。
+ * 如需其他子命令/flag，可在 设置→路由→StdIO 的"附加参数"里覆盖。
+ */
+export class OpenClawAdapter extends StdioAgentAdapter {
   constructor() {
-    super()
-    this.binary = process.env.OPENCLAW_PATH || 'openclaw'
-  }
-
-  async start(): Promise<void> {
-    try {
-      this.proc = spawn(this.binary, [], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        shell: true,
-        env: { ...process.env }
-      })
-      this.proc.stdout?.on('data', (data: Buffer) => { this.handleOutput(data.toString()) })
-      this.proc.stderr?.on('data', (data: Buffer) => {
-        if (data.toString().includes('error')) this.handleError(new Error(data.toString()))
-      })
-      this.proc.on('exit', () => { this.proc = null })
-      this.status = 'idle'
-    } catch (e: any) {
-      this.status = 'error'
-      this.handleError(e)
-    }
-  }
-
-  async stop(): Promise<void> {
-    if (this.proc) { this.proc.kill(); this.proc = null }
-    this.status = 'idle'
-  }
-
-  send(prompt: string): void {
-    if (this.proc?.stdin?.writable) this.proc.stdin.write(prompt + '\n')
+    super('openclaw', 'OpenClaw', locateOpenclawBinary() || 'openclaw', ['crestodian', '--message', '{prompt}'])
   }
 }

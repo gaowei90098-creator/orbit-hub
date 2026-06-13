@@ -27,8 +27,8 @@ export function StatsPanel() {
       label: '消息',
       value: totalMessages,
       sub: currentSession ? '本会话 ' + sessionMessages : '',
-      color: '#6366f1',
-      gradient: 'from-[#6366f1]/15 to-[#6366f1]/0'
+      color: '#ff9f0a',
+      gradient: 'from-[#ff9f0a]/15 to-[#ff9f0a]/0'
     },
     {
       icon: CheckSquare,
@@ -57,10 +57,10 @@ export function StatsPanel() {
   ]
 
   return (
-    <div className='px-3 py-2.5 border-b border-[#1a1f2e]'>
+    <div className='px-3 py-2.5 border-b border-[#261f1a]'>
       <div className='flex items-center gap-1.5 mb-2'>
-        <BarChart3 size={11} className='text-[#6366f1]' />
-        <span className='text-[10px] font-semibold uppercase tracking-wider text-[#5c6478]'>工作区统计</span>
+        <BarChart3 size={11} className='text-[#ff9f0a]' />
+        <span className='text-[10px] font-semibold uppercase tracking-wider text-[#75655a]'>工作区统计</span>
       </div>
       <div className='grid grid-cols-2 gap-1.5'>
         {items.map((item, i) => {
@@ -68,16 +68,16 @@ export function StatsPanel() {
           return (
             <div
               key={i}
-              className='group relative flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-[#0a0c12] border border-[#1a1f2e] overflow-hidden hover:border-[#262d3d] transition-colors'
+              className='group relative flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-[#0a0807] border border-[#261f1a] overflow-hidden hover:border-[#362c25] transition-colors'
             >
               <div className={'absolute inset-0 bg-gradient-to-br ' + item.gradient + ' opacity-0 group-hover:opacity-100 transition-opacity'} />
               <div className='relative flex items-center gap-1.5'>
                 <Icon size={11} style={{ color: item.color }} />
-                <span className='text-[9px] text-[#5c6478] uppercase tracking-wider'>{item.label}</span>
+                <span className='text-[9px] text-[#75655a] uppercase tracking-wider'>{item.label}</span>
               </div>
               <div className='relative flex items-baseline gap-1'>
-                <span className='text-base font-bold text-[#e2e6ef] font-mono leading-none'>{item.value}</span>
-                {item.sub && <span className='text-[9px] text-[#5c6478]'>{item.sub}</span>}
+                <span className='text-base font-bold text-[#ece4dc] font-mono leading-none'>{item.value}</span>
+                {item.sub && <span className='text-[9px] text-[#75655a]'>{item.sub}</span>}
               </div>
             </div>
           )

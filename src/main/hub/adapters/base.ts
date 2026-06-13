@@ -1,4 +1,14 @@
-﻿import { EventEmitter } from "events"
+﻿export { BaseAgentAdapter } from "./agent-adapter"
+export type { AgentAdapter } from "./agent-adapter"
+import { StdioAgentAdapter } from "./stdio-adapter"
+import { CodexAdapter } from "./codex"
+import { ClaudeAdapter } from "./claude"
+import { HermesAdapter } from "./hermes"
+import { OpenClawAdapter } from "./openclaw"
+import { MarvisAdapter } from "./marvis"
+import { MinimaxCodeAdapter } from "./minimax-code"
+
+
 
 export interface AgentAdapter {
   id: string
@@ -14,34 +24,6 @@ export interface AgentAdapter {
   status: "idle" | "busy" | "error"
 }
 
-export abstract class BaseAgentAdapter extends EventEmitter implements AgentAdapter {
-  abstract id: string
-  abstract name: string
-  abstract binary: string
-  abstract protocol: "stdio-ndjson" | "stdio-plain" | "http"
-  abstract mode: "interactive" | "oneshot"
-
-  status: "idle" | "busy" | "error" = "idle"
-  onOutput: ((chunk: string) => void) | null = null
-  onError: ((err: Error) => void) | null = null
-
-  protected process: any = null
-  protected buffer = ""
-  protected startCount = 0
-
-  abstract start(): Promise<void>
-  abstract stop(): Promise<void>
-  abstract send(prompt: string): void
-
-  protected handleOutput(chunk: string): void {
-    if (this.onOutput) this.onOutput(chunk)
-  }
-
-  protected handleError(err: Error): void {
-    this.status = "error"
-    if (this.onError) this.onError(err)
-  }
-}
 
 /**
  * Provider-driven Adapter.
@@ -66,4 +48,41 @@ export class HttpAgentAdapter implements AgentAdapter {
   async start(): Promise<void> { this.status = "idle" }
   async stop(): Promise<void> { this.status = "idle" }
   send(_prompt: string): void { /* real dispatch happens through Dispatcher.dispatch() */ }
+}
+
+/**
+ * Factory: 根据 binding.protocol 决定实例化哪种 adapter。
+ * - protocol 缺省或 http        → HttpAgentAdapter (走 Dispatcher → ProviderClient → LLM HTTP)
+ * - protocol === stdio-plain    → 对应 agent 的 stdio adapter (spawn 本地 CLI 二进制, oneshot)
+ * 四个内置 Agent（codex/claude/hermes/openclaw）均支持 stdio-plain;
+ * 未知 agentId 走 stdio 会回退到 http 并在控制台告警。
+ * binary / args 来自路由绑定, 缺省时各 adapter 自动探测/用默认参数。
+ */
+const STDIO_FACTORIES: Record<string, () => StdioAgentAdapter> = {
+  codex: () => new CodexAdapter(),
+  claude: () => new ClaudeAdapter(),
+  hermes: () => new HermesAdapter(),
+  openclaw: () => new OpenClawAdapter(),
+  marvis: () => new MarvisAdapter(),
+  'minimax-code': () => new MinimaxCodeAdapter()
+}
+
+export function createAdapter(
+  agentId: string,
+  agentName: string,
+  protocol?: "http" | "stdio-plain",
+  binary?: string,
+  args?: string[]
+): AgentAdapter {
+  if (protocol === "stdio-plain") {
+    const make = STDIO_FACTORIES[agentId]
+    if (make) {
+      const a = make()
+      if (binary && binary.trim()) a.binary = binary.trim()
+      if (args && args.length > 0) a.execArgs = args
+      return a
+    }
+    console.warn("[createAdapter] stdio-plain not implemented for agent " + agentId + ", falling back to http")
+  }
+  return new HttpAgentAdapter(agentId, agentName)
 }

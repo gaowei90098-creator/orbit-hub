@@ -1,48 +1,15 @@
-﻿import { BaseAgentAdapter } from './base'
-import { spawn, ChildProcess } from 'child_process'
+import { StdioAgentAdapter } from './stdio-adapter'
+import { locateHermesBinary } from '../agent-locator'
 
-export class HermesAdapter extends BaseAgentAdapter {
-  id = 'hermes'
-  name = 'Hermes'
-  binary = ''
-  protocol: 'stdio-plain' = 'stdio-plain'
-  mode: 'interactive' = 'interactive'
-
-  private proc: ChildProcess | null = null
-
+/**
+ * Hermes 本地 CLI 直连适配器 — oneshot
+ *
+ * 默认无参数、prompt 经 stdin 传入；
+ * 若你的 hermes CLI 需要子命令/flag（或要求 prompt 作为参数，用 {prompt} 占位符），
+ * 在 设置→路由→StdIO 的"附加参数"里配置。
+ */
+export class HermesAdapter extends StdioAgentAdapter {
   constructor() {
-    super()
-    this.binary = process.env.HERMES_PATH || 'hermes'
-  }
-
-  async start(): Promise<void> {
-    try {
-      this.proc = spawn(this.binary, ['--interactive'], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        shell: true,
-        env: { ...process.env }
-      })
-
-      this.proc.stdout?.on('data', (data: Buffer) => {
-        this.handleOutput(data.toString())
-      })
-      this.proc.stderr?.on('data', (data: Buffer) => {
-        if (data.toString().includes('error')) this.handleError(new Error(data.toString()))
-      })
-      this.proc.on('exit', () => { this.proc = null })
-      this.status = 'idle'
-    } catch (e: any) {
-      this.status = 'error'
-      this.handleError(e)
-    }
-  }
-
-  async stop(): Promise<void> {
-    if (this.proc) { this.proc.kill(); this.proc = null }
-    this.status = 'idle'
-  }
-
-  send(prompt: string): void {
-    if (this.proc?.stdin?.writable) this.proc.stdin.write(prompt + '\n')
+    super('hermes', 'Hermes', locateHermesBinary() || 'hermes', [])
   }
 }

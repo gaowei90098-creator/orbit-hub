@@ -9,7 +9,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "build:win": "npm run build && electron-builder --win --publish never",

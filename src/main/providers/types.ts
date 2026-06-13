@@ -97,6 +97,12 @@ export interface AgentRouteBinding {
   maxOutputTokens?: number
   /** 温度（0-2） */
   temperature?: number
+  /** 传输协议：http（LLM provider）或 stdio-plain（本地 CLI 子进程，默认 http） */
+  protocol?: 'http' | 'stdio-plain'
+  /** stdio 模式下 CLI 二进制路径（默认自动探测：环境变量 → 桌面版安装目录 → PATH） */
+  binary?: string
+  /** stdio 模式下命令行参数（空格分隔；含 {prompt} 占位符则 prompt 作为参数传入，否则走 stdin） */
+  args?: string
 }
 
 /** 完整路由配置（持久化） */

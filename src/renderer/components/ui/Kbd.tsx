@@ -14,7 +14,7 @@ export function KbdGroup({ keys, separator = '+' }: { keys: React.ReactNode[]; s
     <span className="inline-flex items-center gap-0.5">
       {keys.map((k, i) => (
         <React.Fragment key={i}>
-          {i > 0 && <span className="text-[#3f4758] text-[10px] mx-0.5">{separator}</span>}
+          {i > 0 && <span className="text-[#51443a] text-[10px] mx-0.5">{separator}</span>}
           <Kbd>{k}</Kbd>
         </React.Fragment>
       ))}

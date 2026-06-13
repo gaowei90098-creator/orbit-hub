@@ -11,7 +11,7 @@ import { Tooltip } from './ui/Tooltip'
 import { EmptyState } from './ui/EmptyState'
 
 const modeConfig: Record<DispatchMode, { icon: any; label: string; desc: string; color: string; tint: string }> = {
-  auto: { icon: Zap, label: '自动调度', desc: '根据关键词自动匹配最合适的 Agent', color: '#6366f1', tint: 'from-[#6366f1]/15 to-transparent' },
+  auto: { icon: Zap, label: '自动调度', desc: '根据关键词自动匹配最合适的 Agent', color: '#ff9f0a', tint: 'from-[#ff9f0a]/15 to-transparent' },
   broadcast: { icon: GitMerge, label: '广播模式', desc: '同时发给所有 Agent 并汇总最佳答案', color: '#06b6d4', tint: 'from-[#06b6d4]/15 to-transparent' },
   chain: { icon: GitBranch, label: '链式调度', desc: '按顺序依次处理,前一个输出给下一个', color: '#f59e0b', tint: 'from-[#f59e0b]/15 to-transparent' }
 }
@@ -19,17 +19,17 @@ const modeConfig: Record<DispatchMode, { icon: any; label: string; desc: string;
 function Section({ icon, title, action, children, count }: { icon: React.ReactNode; title: string; action?: React.ReactNode; children: React.ReactNode; count?: number }) {
   const [open, setOpen] = useState(true)
   return (
-    <div className='border-b border-[#1a1f2e]'>
+    <div className='border-b border-[#261f1a]'>
       <button
         onClick={() => setOpen(o => !o)}
-        className='w-full flex items-center gap-1.5 px-3 py-2.5 hover:bg-[#1a1f2e]/40 transition-colors'
+        className='w-full flex items-center gap-1.5 px-3 py-2.5 hover:bg-[#261f1a]/40 transition-colors'
       >
-        <span className='text-[#6366f1]'>{icon}</span>
-        <span className='text-[10px] font-semibold uppercase tracking-wider text-[#5c6478]'>{title}</span>
-        {count != null && <span className='text-[9px] text-[#3f4758] bg-[#1a1f2e] px-1.5 rounded'>{count}</span>}
+        <span className='text-[#ff9f0a]'>{icon}</span>
+        <span className='text-[10px] font-semibold uppercase tracking-wider text-[#75655a]'>{title}</span>
+        {count != null && <span className='text-[9px] text-[#51443a] bg-[#261f1a] px-1.5 rounded'>{count}</span>}
         <div className='ml-auto flex items-center gap-1.5'>
           {action}
-          <ChevronDown size={11} className={['text-[#5c6478] transition-transform', open ? '' : '-rotate-90'].join(' ')} />
+          <ChevronDown size={11} className={['text-[#75655a] transition-transform', open ? '' : '-rotate-90'].join(' ')} />
         </div>
       </button>
       {open && <div className='px-3 pb-3'>{children}</div>}
@@ -45,7 +45,7 @@ export function ContextPanel() {
   const lastMessage = messages[messages.length - 1]
 
   return (
-    <aside className='w-60 bg-[#0a0c12]/80 border-l border-[#1a1f2e] flex flex-col shrink-0 overflow-hidden backdrop-blur-sm animate-slide-right'>
+    <aside className='w-60 bg-[#0a0807]/80 border-l border-[#261f1a] flex flex-col shrink-0 overflow-hidden backdrop-blur-sm animate-slide-right'>
       <Section icon={<Radio size={11} />} title='调度模式'>
         <div className='space-y-1.5'>
           {(Object.entries(modeConfig) as [DispatchMode, typeof modeConfig['auto']][]).map(([mode, config]) => {
@@ -59,8 +59,8 @@ export function ContextPanel() {
                 className={[
                   'group relative w-full flex items-start gap-2.5 px-2.5 py-2 rounded-lg text-left transition-all border overflow-hidden',
                   isActive
-                    ? 'border-transparent text-[#e2e6ef]'
-                    : 'border-transparent text-[#5c6478] hover:text-[#e2e6ef] hover:bg-[#1a1f2e] disabled:opacity-50',
+                    ? 'border-transparent text-[#ece4dc]'
+                    : 'border-transparent text-[#75655a] hover:text-[#ece4dc] hover:bg-[#261f1a] disabled:opacity-50',
                   isProcessing ? 'cursor-not-allowed' : 'cursor-pointer'
                 ].join(' ')}
                 style={isActive ? { background: 'linear-gradient(135deg, ' + config.color + '20 0%, ' + config.color + '05 100%)', borderColor: config.color + '40' } : undefined}
@@ -71,7 +71,7 @@ export function ContextPanel() {
                 <Icon size={13} className='mt-0.5 shrink-0' style={{ color: isActive ? config.color : undefined }} />
                 <div className='flex-1 min-w-0'>
                   <div className='text-xs font-semibold mb-0.5'>{config.label}</div>
-                  <div className='text-[10px] text-[#5c6478] leading-relaxed'>{config.desc}</div>
+                  <div className='text-[10px] text-[#75655a] leading-relaxed'>{config.desc}</div>
                 </div>
               </button>
             )
@@ -87,22 +87,22 @@ export function ContextPanel() {
       >
         {isProcessing ? (
           <div className='space-y-1.5'>
-            <div className='flex items-center gap-2 px-2.5 py-2 rounded-lg bg-[#6366f1]/8 border border-[#6366f1]/20'>
+            <div className='flex items-center gap-2 px-2.5 py-2 rounded-lg bg-[#ff9f0a]/8 border border-[#ff9f0a]/20'>
               <div className='flex-1'>
-                <div className='text-[10px] font-semibold text-[#a5b4fc] mb-1'>等待响应</div>
-                <div className='h-1 bg-[#1a1f2e] rounded-full overflow-hidden'>
+                <div className='text-[10px] font-semibold text-[#ffc66b] mb-1'>等待响应</div>
+                <div className='h-1 bg-[#261f1a] rounded-full overflow-hidden'>
                   <div className='h-full w-1/3 gradient-accent rounded-full' style={{ animation: 'progressBar 1.6s ease-in-out infinite' }} />
                 </div>
               </div>
             </div>
             {lastMessage && (
-              <div className='text-[9px] text-[#5c6478] px-1 truncate'>
+              <div className='text-[9px] text-[#75655a] px-1 truncate'>
                 最新: {lastMessage.agentName || lastMessage.type}
               </div>
             )}
           </div>
         ) : (
-          <div className='text-[10px] text-[#5c6478] text-center py-3'>暂无活跃任务</div>
+          <div className='text-[10px] text-[#75655a] text-center py-3'>暂无活跃任务</div>
         )}
       </Section>
 
@@ -118,7 +118,7 @@ export function ContextPanel() {
                   key={agent.id}
                   className={[
                     'group flex items-center gap-2 px-2 py-1.5 rounded-md text-[11px] transition-colors',
-                    isOnline ? 'hover:bg-[#1a1f2e]' : 'opacity-60'
+                    isOnline ? 'hover:bg-[#261f1a]' : 'opacity-60'
                   ].join(' ')}
                 >
                   <div
@@ -131,13 +131,13 @@ export function ContextPanel() {
                   >
                     {agent.name.charAt(0)}
                   </div>
-                  <span className='text-[#e2e6ef] flex-1 truncate'>{agent.name}</span>
+                  <span className='text-[#ece4dc] flex-1 truncate'>{agent.name}</span>
                   <StatusDot status={agent.status} size={6} withGlow={agent.status === 'busy'} />
                   <span className={[
                     'text-[9px] font-medium',
                     agent.status === 'idle' ? 'text-[#4ade80]' :
                     agent.status === 'busy' ? 'text-[#fbbf24]' :
-                    agent.status === 'error' ? 'text-[#f87171]' : 'text-[#5c6478]'
+                    agent.status === 'error' ? 'text-[#f87171]' : 'text-[#75655a]'
                   ].join(' ')}>
                     {statusLabel(agent.status)}
                   </span>
@@ -161,7 +161,7 @@ export function ContextPanel() {
             { keys: ['Esc'], label: '关闭弹窗' }
           ].map((s, i) => (
             <div key={i} className='flex items-center justify-between'>
-              <span className='text-[#a0a8ba]'>{s.label}</span>
+              <span className='text-[#b3a294]'>{s.label}</span>
               <KbdGroup keys={s.keys} />
             </div>
           ))}

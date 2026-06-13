@@ -39,7 +39,7 @@ function CopyButton({ text }: { text: string }) {
     <Tooltip content={copied ? '已复制' : '复制代码'}>
       <button
         onClick={onClick}
-        className='p-1 rounded text-[#5c6478] hover:text-[#e2e6ef] hover:bg-[#262d3d] transition-colors'
+        className='p-1 rounded text-[#75655a] hover:text-[#ece4dc] hover:bg-[#362c25] transition-colors'
         aria-label='Copy code'
       >
         {copied ? <Check size={11} /> : <Copy size={11} />}
@@ -55,12 +55,12 @@ function ThinkingBlock({ content, summary, defaultOpen = false }: { content: str
       <div className='flex items-center gap-1.5'>
         <Brain size={11} className='text-[#f59e0b]' />
         <span className='thinking-label'>思考过程</span>
-        {summary?.level && <span className='text-[9px] text-[#5c6478] uppercase tracking-wider'>{summary.level}</span>}
-        {summary?.durationMs != null && <span className='text-[9px] text-[#5c6478]'>· {(summary.durationMs / 1000).toFixed(1)}s</span>}
-        <ChevronDown size={10} className={['ml-auto text-[#5c6478] transition-transform', open ? 'rotate-180' : ''].join(' ')} />
+        {summary?.level && <span className='text-[9px] text-[#75655a] uppercase tracking-wider'>{summary.level}</span>}
+        {summary?.durationMs != null && <span className='text-[9px] text-[#75655a]'>· {(summary.durationMs / 1000).toFixed(1)}s</span>}
+        <ChevronDown size={10} className={['ml-auto text-[#75655a] transition-transform', open ? 'rotate-180' : ''].join(' ')} />
       </div>
       {open && (
-        <div className='mt-1 text-xs text-[#a0a8ba] whitespace-pre-wrap leading-relaxed'>
+        <div className='mt-1 text-xs text-[#b3a294] whitespace-pre-wrap leading-relaxed'>
           {summary?.preview && !content ? summary.preview : content}
         </div>
       )}
@@ -72,9 +72,9 @@ function CodeBlock({ className, children, ...props }: any) {
   const code = String(Array.isArray(children) ? children.join('') : children).replace(/\n$/, '')
   const lang = (className || '').replace('language-', '') || 'text'
   return (
-    <div className='relative group/code my-2 rounded-lg overflow-hidden border border-[#1a1f2e] shadow-sm'>
-      <div className='flex items-center justify-between px-3 py-1.5 bg-gradient-to-b from-[#1a1f2e] to-[#0f1117] border-b border-[#1a1f2e]'>
-        <span className='flex items-center gap-1.5 text-[10px] text-[#5c6478] font-mono'>
+    <div className='relative group/code my-2 rounded-lg overflow-hidden border border-[#261f1a] shadow-sm'>
+      <div className='flex items-center justify-between px-3 py-1.5 bg-gradient-to-b from-[#261f1a] to-[#171210] border-b border-[#261f1a]'>
+        <span className='flex items-center gap-1.5 text-[10px] text-[#75655a] font-mono'>
           <Code2 size={10} />
           {lang}
         </span>
@@ -89,7 +89,7 @@ function CodeBlock({ className, children, ...props }: any) {
 
 function AgentAvatar({ agent, size = 28, streaming = false }: { agent: any; size?: number; streaming?: boolean }) {
   const initial = (agent?.name || '?').charAt(0)
-  const color = agent?.color || '#6366f1'
+  const color = agent?.color || '#ff9f0a'
   return (
     <div className='relative shrink-0'>
       <div
@@ -120,19 +120,19 @@ function MessageActions({ message, onCopy, onResend, onDelete }: { message: Chat
   return (
     <div className='flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity'>
       <Tooltip content='复制'>
-        <button onClick={onCopy} className='p-1 rounded text-[#5c6478] hover:text-[#e2e6ef] hover:bg-[#1a1f2e] transition-colors'>
+        <button onClick={onCopy} className='p-1 rounded text-[#75655a] hover:text-[#ece4dc] hover:bg-white/[0.06] transition-colors'>
           <Copy size={11} />
         </button>
       </Tooltip>
       {onResend && (
         <Tooltip content='重新发送'>
-          <button onClick={onResend} className='p-1 rounded text-[#5c6478] hover:text-[#a5b4fc] hover:bg-[#6366f1]/10 transition-colors'>
+          <button onClick={onResend} className='p-1 rounded text-[#75655a] hover:text-[#ffc66b] hover:bg-[#ff9f0a]/10 transition-colors'>
             <RotateCcw size={11} />
           </button>
         </Tooltip>
       )}
       <Tooltip content='删除'>
-        <button onClick={onDelete} className='p-1 rounded text-[#5c6478] hover:text-[#ef4444] hover:bg-[#ef4444]/10 transition-colors'>
+        <button onClick={onDelete} className='p-1 rounded text-[#75655a] hover:text-[#ef4444] hover:bg-[#ef4444]/10 transition-colors'>
           <Trash2 size={11} />
         </button>
       </Tooltip>
@@ -162,7 +162,7 @@ function MessageBubble({ message, showHeader, onCopy, onResend, onDelete }: Mess
   if (isSystem) {
     return (
       <div className='flex justify-center py-2 animate-fade-only'>
-        <span className='text-[10px] text-[#5c6478] bg-[#1a1f2e]/50 backdrop-blur-sm px-2.5 py-1 rounded-full border border-[#262d3d]/50'>
+        <span className='text-[10px] text-[#75655a] bg-[#261f1a]/50 backdrop-blur-sm px-2.5 py-1 rounded-full border border-[#362c25]/50'>
           {message.content}
         </span>
       </div>
@@ -173,15 +173,15 @@ function MessageBubble({ message, showHeader, onCopy, onResend, onDelete }: Mess
     return (
       <div className='group flex gap-2.5 px-4 py-2 animate-fade-in flex-row-reverse'>
         <div className='shrink-0 mt-0.5'>
-          <div className='w-7 h-7 rounded-xl flex items-center justify-center bg-gradient-to-br from-[#6366f1] to-[#8b5cf6] shadow-md shadow-[#6366f1]/20'>
+          <div className='w-7 h-7 rounded-xl flex items-center justify-center bg-gradient-to-br from-[#ff9f0a] to-[#ff7a3d] shadow-md shadow-[#ff9f0a]/20'>
             <User size={14} className='text-white' />
           </div>
         </div>
         <div className='flex flex-col items-end max-w-[80%]'>
           {showHeader && (
             <div className='flex items-center gap-2 mb-1'>
-              <span className='text-[11px] font-medium text-[#a0a8ba]'>你</span>
-              <span className='text-[9px] text-[#3f4758]' title={formatTime(message.timestamp)}>
+              <span className='text-[11px] font-medium text-[#b3a294]'>你</span>
+              <span className='text-[9px] text-[#51443a]' title={formatTime(message.timestamp)}>
                 {timeAgo(message.timestamp)}
               </span>
             </div>
@@ -190,8 +190,8 @@ function MessageBubble({ message, showHeader, onCopy, onResend, onDelete }: Mess
             <div
               className='px-3.5 py-2 rounded-2xl rounded-tr-md text-sm text-white leading-relaxed whitespace-pre-wrap break-words max-w-full'
               style={{
-                background: 'linear-gradient(135deg, #6366f1 0%, #7c3aed 100%)',
-                boxShadow: '0 4px 12px -2px rgba(99, 102, 241, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+                background: 'linear-gradient(135deg, #ff9f0a 0%, #ff7a3d 100%)',
+                boxShadow: '0 4px 12px -2px rgba(255, 159, 10, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
               }}
             >
               {displayContent}
@@ -216,19 +216,19 @@ function MessageBubble({ message, showHeader, onCopy, onResend, onDelete }: Mess
       <div className='flex-1 min-w-0 max-w-[90%]'>
         {showHeader && (
           <div className='flex items-center gap-2 mb-1'>
-            <span className='text-[11px] font-semibold text-[#e2e6ef]'>{message.agentName || (isError ? '错误' : 'Agent')}</span>
+            <span className='text-[11px] font-semibold text-[#ece4dc]'>{message.agentName || (isError ? '错误' : 'Agent')}</span>
             {agent && (
-              <span className='flex items-center gap-1 text-[9px] text-[#5c6478]'>
+              <span className='flex items-center gap-1 text-[9px] text-[#75655a]'>
                 <StatusDot status={agent.status} size={6} />
                 {statusLabel(agent.status)}
               </span>
             )}
-            <span className='text-[9px] text-[#3f4758]' title={formatTime(message.timestamp)}>
+            <span className='text-[9px] text-[#51443a]' title={formatTime(message.timestamp)}>
               {timeAgo(message.timestamp)}
             </span>
             {isStreaming && (
-              <span className='flex items-center gap-1 text-[9px] text-[#a5b4fc]'>
-                <span className='w-1 h-1 rounded-full bg-[#6366f1] animate-pulse-dot' />
+              <span className='flex items-center gap-1 text-[9px] text-[#ffc66b]'>
+                <span className='w-1 h-1 rounded-full bg-[#ff9f0a] animate-pulse-dot' />
                 正在输入
               </span>
             )}
@@ -271,7 +271,7 @@ function MessageBubble({ message, showHeader, onCopy, onResend, onDelete }: Mess
             </ReactMarkdown>
             {isStreaming && (
               <span className='inline-flex items-center gap-1 ml-0.5 align-middle'>
-                <span className='w-1.5 h-3.5 bg-[#6366f1] animate-cursor' />
+                <span className='w-1.5 h-3.5 bg-[#ff9f0a] animate-cursor' />
                 <span className='thinking-wave ml-1'>
                   <span /><span /><span />
                 </span>
@@ -292,13 +292,13 @@ function MessageBubble({ message, showHeader, onCopy, onResend, onDelete }: Mess
 
 function WelcomeFeature({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
   return (
-    <div className='group flex flex-col items-start p-3 rounded-xl bg-gradient-to-br from-[#1a1f2e] to-[#0f1117] border border-[#262d3d] hover:border-[#6366f1]/40 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-[#6366f1]/10'>
+    <div className='group flex flex-col items-start p-3 rounded-xl bg-gradient-to-br from-[#261f1a] to-[#171210] border border-[#362c25] hover:border-[#ff9f0a]/40 text-left transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-[#ff9f0a]/10'>
       <div className='flex items-center gap-1.5 mb-1.5'>
-        <span className='text-[#a5b4fc] group-hover:text-[#c7d2fe] transition-colors'>{icon}</span>
-        <span className='text-xs font-semibold text-[#e2e6ef]'>{title}</span>
-        <ChevronRight size={11} className='ml-auto text-[#3f4758] group-hover:text-[#a5b4fc] group-hover:translate-x-0.5 transition-all' />
+        <span className='text-[#ffc66b] group-hover:text-[#ffe0a3] transition-colors'>{icon}</span>
+        <span className='text-xs font-semibold text-[#ece4dc]'>{title}</span>
+        <ChevronRight size={11} className='ml-auto text-[#51443a] group-hover:text-[#ffc66b] group-hover:translate-x-0.5 transition-all' />
       </div>
-      <span className='text-[10px] text-[#5c6478] leading-relaxed'>{desc}</span>
+      <span className='text-[10px] text-[#75655a] leading-relaxed'>{desc}</span>
     </div>
   )
 }
@@ -359,13 +359,13 @@ export function ChatPanel() {
       <div className='flex-1 flex items-center justify-center overflow-y-auto'>
         <div className='text-center max-w-2xl w-full px-6 py-8'>
           <div className='relative inline-block mb-5'>
-            <div className='absolute inset-0 bg-[#6366f1]/20 blur-2xl rounded-full animate-pulse-dot' />
-            <div className='relative w-16 h-16 rounded-2xl gradient-accent flex items-center justify-center mx-auto shadow-2xl shadow-[#6366f1]/40 animate-bounce-in'>
+            <div className='absolute inset-0 bg-[#ff9f0a]/20 blur-2xl rounded-full animate-pulse-dot' />
+            <div className='relative w-16 h-16 rounded-2xl gradient-accent flex items-center justify-center mx-auto shadow-2xl shadow-[#ff9f0a]/40 animate-bounce-in'>
               <Sparkles size={28} className='text-white' />
             </div>
           </div>
-          <h2 className='text-lg font-bold text-[#e2e6ef] mb-1.5 tracking-tight'>欢迎使用 AgentHub</h2>
-          <p className='text-xs text-[#5c6478] leading-relaxed mb-6 max-w-md mx-auto'>
+          <h2 className='text-lg font-bold text-[#ece4dc] mb-1.5 tracking-tight'>欢迎使用 AgentHub</h2>
+          <p className='text-xs text-[#75655a] leading-relaxed mb-6 max-w-md mx-auto'>
             多 Agent 协同工作台。在下方输入消息，<kbd className='kbd mx-0.5'>@agent</kbd> 指定 Agent，或 <kbd className='kbd mx-0.5'>/broadcast</kbd> 开启广播模式。
           </p>
           <div className='grid grid-cols-2 gap-2.5 max-w-lg mx-auto'>
@@ -375,11 +375,11 @@ export function ChatPanel() {
               </div>
             ))}
           </div>
-          <div className='mt-6 flex items-center justify-center gap-3 text-[10px] text-[#3f4758]'>
+          <div className='mt-6 flex items-center justify-center gap-3 text-[10px] text-[#51443a]'>
             <span className='flex items-center gap-1'><kbd className='kbd'>Ctrl</kbd> + <kbd className='kbd'>Enter</kbd> 发送</span>
-            <span className='w-1 h-1 rounded-full bg-[#3f4758]' />
+            <span className='w-1 h-1 rounded-full bg-[#51443a]' />
             <span className='flex items-center gap-1'><kbd className='kbd'>@</kbd> 提及 Agent</span>
-            <span className='w-1 h-1 rounded-full bg-[#3f4758]' />
+            <span className='w-1 h-1 rounded-full bg-[#51443a]' />
             <span className='flex items-center gap-1'><kbd className='kbd'>/</kbd> 命令</span>
           </div>
         </div>
@@ -388,7 +388,7 @@ export function ChatPanel() {
   }
 
   return (
-    <div className='flex-1 flex flex-col min-h-0 relative'>
+    <div className='flex-1 flex flex-col min-h-0 relative bg-gradient-to-b from-[#0a0807]/90 to-[#0a0807]/80'>
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -414,11 +414,11 @@ export function ChatPanel() {
           })}
           {isProcessing && messages[messages.length - 1]?.status !== 'streaming' && (
             <div className='flex gap-2.5 px-4 py-2 animate-fade-in'>
-              <div className='w-7 h-7 rounded-xl bg-[#6366f1]/15 flex items-center justify-center border border-[#6366f1]/30'>
-                <Loader2 size={14} className='animate-spin text-[#a5b4fc]' />
+              <div className='w-7 h-7 rounded-xl bg-[#ff9f0a]/15 flex items-center justify-center border border-[#ff9f0a]/30'>
+                <Loader2 size={14} className='animate-spin text-[#ffc66b]' />
               </div>
               <div className='flex items-center gap-2 px-2 py-1'>
-                <span className='text-[11px] text-[#5c6478]'>Agent 正在思考</span>
+                <span className='text-[11px] text-[#75655a]'>Agent 正在思考</span>
                 <span className='thinking-wave'>
                   <span /><span /><span />
                 </span>
@@ -430,7 +430,7 @@ export function ChatPanel() {
       {!autoScroll && (
         <button
           onClick={scrollToBottom}
-          className='absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-1.5 rounded-full glass-strong border border-[#262d3d] text-[11px] text-[#e2e6ef] shadow-lg hover:bg-[#1a1f2e] animate-slide-bottom z-10'
+          className='absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-1.5 rounded-full glass-strong border border-[#362c25] text-[11px] text-[#ece4dc] shadow-lg hover:bg-white/[0.06] animate-slide-bottom z-10'
         >
           <ArrowDown size={11} /> 跳到底部
         </button>

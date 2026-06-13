@@ -8,11 +8,11 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const variants: Record<string, string> = {
-  primary: 'bg-[#6366f1] text-white hover:bg-[#5558e6] shadow-md shadow-[#6366f1]/20 hover:shadow-[#6366f1]/40',
-  gradient: 'gradient-accent text-white hover:brightness-110 shadow-md shadow-[#6366f1]/25 hover:shadow-[#6366f1]/50 hover-glow',
-  secondary: 'bg-[#1a1f2e] text-[#e2e6ef] border border-[#262d3d] hover:bg-[#262d3d] hover:border-[#3f4758]',
-  ghost: 'text-[#a0a8ba] hover:text-[#e2e6ef] hover:bg-[#1a1f2e]',
-  subtle: 'text-[#a0a8ba] bg-[#1a1f2e]/40 hover:bg-[#1a1f2e] hover:text-[#e2e6ef]',
+  primary: 'bg-[#ff9f0a] text-white hover:bg-[#e8900a] shadow-md shadow-[#ff9f0a]/20 hover:shadow-[#ff9f0a]/40',
+  gradient: 'gradient-accent text-white hover:brightness-110 shadow-md shadow-[#ff9f0a]/25 hover:shadow-[#ff9f0a]/50 hover-glow',
+  secondary: 'bg-[#261f1a] text-[#ece4dc] border border-[#362c25] hover:bg-[#362c25] hover:border-[#51443a]',
+  ghost: 'text-[#b3a294] hover:text-[#ece4dc] hover:bg-[#261f1a]',
+  subtle: 'text-[#b3a294] bg-[#261f1a]/40 hover:bg-[#261f1a] hover:text-[#ece4dc]',
   danger: 'gradient-danger text-white hover:brightness-110 shadow-md shadow-[#ef4444]/25'
 }
 
@@ -23,7 +23,7 @@ const sizes: Record<string, string> = {
 }
 
 export function Button({ variant = 'primary', size = 'md', iconOnly, loading, className = '', children, disabled, ...props }: ButtonProps) {
-  const base = 'inline-flex items-center justify-center rounded-lg font-medium select-none whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6366f1]/40 focus-visible:ring-offset-1 focus-visible:ring-offset-[#0b0d14]'
+  const base = 'inline-flex items-center justify-center rounded-lg font-medium select-none whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff9f0a]/40 focus-visible:ring-offset-1 focus-visible:ring-offset-[#120e0b]'
   const variantClass = variants[variant] || variants.primary
   const sizeClass = sizes[size] || sizes.md
   const iconSize = size === 'sm' ? 'h-3 w-3' : size === 'lg' ? 'h-4 w-4' : 'h-3.5 w-3.5'

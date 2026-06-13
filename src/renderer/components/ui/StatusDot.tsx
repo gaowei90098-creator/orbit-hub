@@ -12,7 +12,7 @@ const colors: Record<string, { core: string; ring: string; glow: string; label: 
   idle:    { core: '#22c55e', ring: 'rgba(34, 197, 94, 0.25)',  glow: 'rgba(34, 197, 94, 0.5)',  label: '就绪' },
   busy:    { core: '#f59e0b', ring: 'rgba(245, 158, 11, 0.25)', glow: 'rgba(245, 158, 11, 0.5)', label: '忙碌' },
   error:   { core: '#ef4444', ring: 'rgba(239, 68, 68, 0.25)',  glow: 'rgba(239, 68, 68, 0.5)',  label: '错误' },
-  offline: { core: '#5c6478', ring: 'rgba(92, 100, 120, 0.2)',  glow: 'rgba(92, 100, 120, 0.3)', label: '离线' }
+  offline: { core: '#75655a', ring: 'rgba(117, 101, 90, 0.2)',  glow: 'rgba(117, 101, 90, 0.3)', label: '离线' }
 }
 
 export function StatusDot({ status, size = 8, withRing = false, withGlow = false, pulse }: StatusDotProps) {

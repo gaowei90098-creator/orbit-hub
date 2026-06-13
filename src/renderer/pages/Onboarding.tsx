@@ -9,12 +9,12 @@ const steps = [
     content: (
       <div className='text-center py-2'>
         <div className='relative inline-block mb-5'>
-          <div className='absolute inset-0 bg-[#6366f1]/30 blur-2xl rounded-full animate-pulse-dot' />
-          <div className='relative w-20 h-20 rounded-2xl gradient-accent flex items-center justify-center mx-auto shadow-2xl shadow-[#6366f1]/40 animate-bounce-in'>
+          <div className='absolute inset-0 bg-[#ff9f0a]/30 blur-2xl rounded-full animate-pulse-dot' />
+          <div className='relative w-20 h-20 rounded-2xl gradient-accent flex items-center justify-center mx-auto shadow-2xl shadow-[#ff9f0a]/40 animate-bounce-in'>
             <Zap size={36} className='text-white' fill='currentColor' />
           </div>
         </div>
-        <p className='text-sm text-[#a0a8ba] leading-relaxed'>
+        <p className='text-sm text-[#b3a294] leading-relaxed'>
           AgentHub 让多个 AI Agent 在同一工作台中协同工作。<br />
           像管理一个团队一样管理你的 Agent。
         </p>
@@ -34,7 +34,7 @@ const steps = [
         ].map((agent, i) => (
           <div
             key={agent.name}
-            className={'flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#0a0c12] border border-[#262d3d] hover:border-[#3f4758] transition-all hover:-translate-x-0.5 animate-slide-right ' + agent.glow}
+            className={'flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#0f0b09] border border-[#362c25] hover:border-[#51443a] transition-all hover:-translate-x-0.5 animate-slide-right ' + agent.glow}
             style={{ animationDelay: (i * 80) + 'ms' }}
           >
             <div
@@ -48,10 +48,10 @@ const steps = [
               {agent.name.charAt(0)}
             </div>
             <div className='flex-1 min-w-0'>
-              <div className='text-sm font-semibold text-[#e2e6ef]'>{agent.name}</div>
-              <div className='text-[10px] text-[#5c6478]'>{agent.desc}</div>
+              <div className='text-sm font-semibold text-[#ece4dc]'>{agent.name}</div>
+              <div className='text-[10px] text-[#75665a]'>{agent.desc}</div>
             </div>
-            <span className='text-[9px] text-[#3f4758] font-mono shrink-0'>ready</span>
+            <span className='text-[9px] text-[#51443a] font-mono shrink-0'>ready</span>
           </div>
         ))}
       </div>
@@ -63,7 +63,7 @@ const steps = [
     content: (
       <div className='space-y-2'>
         {[
-          { mode: 'auto', name: '自动调度', desc: '根据关键词自动匹配最合适的 Agent', icon: Zap, color: '#6366f1' },
+          { mode: 'auto', name: '自动调度', desc: '根据关键词自动匹配最合适的 Agent', icon: Zap, color: '#ff9f0a' },
           { mode: 'broadcast', name: '广播模式', desc: '同时发给所有 Agent,汇总最佳答案', icon: Repeat, color: '#06b6d4' },
           { mode: 'chain', name: '链式调度', desc: '按顺序依次处理,前一个输出给下一个', icon: GitBranch, color: '#f59e0b' }
         ].map((m, i) => {
@@ -71,7 +71,7 @@ const steps = [
           return (
             <div
               key={m.mode}
-              className='flex items-start gap-3 px-3 py-2.5 rounded-lg bg-[#0a0c12] border border-[#262d3d] hover:border-[#3f4758] transition-all hover:-translate-x-0.5 animate-slide-right'
+              className='flex items-start gap-3 px-3 py-2.5 rounded-lg bg-[#0f0b09] border border-[#362c25] hover:border-[#51443a] transition-all hover:-translate-x-0.5 animate-slide-right'
               style={{ animationDelay: (i * 80) + 'ms' }}
             >
               <div
@@ -85,8 +85,8 @@ const steps = [
                 <Icon size={16} style={{ color: m.color }} />
               </div>
               <div className='flex-1 min-w-0'>
-                <div className='text-sm font-semibold text-[#e2e6ef]'>{m.name}</div>
-                <div className='text-[10px] text-[#5c6478] leading-relaxed'>{m.desc}</div>
+                <div className='text-sm font-semibold text-[#ece4dc]'>{m.name}</div>
+                <div className='text-[10px] text-[#75665a] leading-relaxed'>{m.desc}</div>
               </div>
             </div>
           )
@@ -109,7 +109,7 @@ const steps = [
           { keys: ['Esc'], label: '关闭弹窗' }
         ].map((s, i) => (
           <div key={i} className='flex items-center justify-between px-1 animate-slide-right' style={{ animationDelay: (i * 50) + 'ms' }}>
-            <span className='text-xs text-[#a0a8ba]'>{s.label}</span>
+            <span className='text-xs text-[#b3a294]'>{s.label}</span>
             <KbdGroup keys={s.keys} />
           </div>
         ))}
@@ -127,14 +127,14 @@ const steps = [
             <Check size={32} className='text-[#4ade80]' />
           </div>
         </div>
-        <p className='text-sm text-[#a0a8ba] leading-relaxed mb-4'>
+        <p className='text-sm text-[#b3a294] leading-relaxed mb-4'>
           输入消息即可与 Agent 对话。<br />
           使用 <Kbd>@</Kbd> 提及 Agent,<br />
           或 <Kbd>/</Kbd> 命令切换模式。
         </p>
-        <div className='flex items-center justify-center gap-3 text-[10px] text-[#3f4758]'>
+        <div className='flex items-center justify-center gap-3 text-[10px] text-[#51443a]'>
           <span className='flex items-center gap-1'><Kbd>Enter</Kbd> 发送</span>
-          <span className='w-1 h-1 rounded-full bg-[#3f4758]' />
+          <span className='w-1 h-1 rounded-full bg-[#51443a]' />
           <span className='flex items-center gap-1'><Kbd>@</Kbd> 提及</span>
         </div>
       </div>
@@ -172,14 +172,14 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
       style={{ background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
     >
       <div className='w-[460px] max-w-[92vw] glass-strong rounded-2xl shadow-2xl overflow-hidden animate-scale-in'
-        style={{ boxShadow: '0 24px 60px -12px rgba(0,0,0,0.6), 0 0 0 1px rgba(99,102,241,0.1)' }}
+        style={{ boxShadow: '0 24px 60px -12px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,159,10,0.1)' }}
       >
         <div className='flex items-center justify-between px-5 pt-4 pb-2'>
-          <div className='flex items-center gap-1.5 text-[10px] text-[#5c6478] font-medium'>
-            <Wand2 size={11} className='text-[#a5b4fc]' />
+          <div className='flex items-center gap-1.5 text-[10px] text-[#75665a] font-medium'>
+            <Wand2 size={11} className='text-[#ffc66b]' />
             快速上手
           </div>
-          <button onClick={onComplete} className='p-1 rounded-md text-[#5c6478] hover:text-[#e2e6ef] hover:bg-[#1a1f2e]'>
+          <button onClick={onComplete} className='p-1 rounded-md text-[#75665a] hover:text-[#ece4dc] hover:bg-[#261f1a]'>
             <X size={13} />
           </button>
         </div>
@@ -188,40 +188,40 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
           {steps.map((_, i) => (
             <div
               key={i}
-              className={['h-1 flex-1 rounded-full transition-all duration-500', i <= step ? 'gradient-accent' : 'bg-[#1a1f2e]'].join(' ')}
+              className={['h-1 flex-1 rounded-full transition-all duration-500', i <= step ? 'gradient-accent' : 'bg-[#261f1a]'].join(' ')}
             />
           ))}
         </div>
 
         <div className='px-6 pb-2'>
           <div className='text-center mb-3'>
-            <h2 className='text-base font-bold text-[#e2e6ef] tracking-tight'>{current.title}</h2>
-            <p className='text-[10px] text-[#5c6478] mt-0.5'>{current.subtitle}</p>
+            <h2 className='text-base font-bold text-[#ece4dc] tracking-tight'>{current.title}</h2>
+            <p className='text-[10px] text-[#75665a] mt-0.5'>{current.subtitle}</p>
           </div>
           <div className='py-2 min-h-[260px] flex flex-col justify-center' key={step}>
             {current.content}
           </div>
         </div>
 
-        <div className='flex items-center justify-between px-5 py-3 border-t border-[#1a1f2e] bg-[#0a0c12]/60'>
-          <span className='text-[10px] text-[#5c6478] font-mono'>{step + 1} / {steps.length}</span>
+        <div className='flex items-center justify-between px-5 py-3 border-t border-[#261f1a] bg-[#0f0b09]/60'>
+          <span className='text-[10px] text-[#75665a] font-mono'>{step + 1} / {steps.length}</span>
           <div className='flex items-center gap-1.5'>
             {!isLast && (
-              <button onClick={onComplete} className='px-2 py-1 text-[10px] text-[#5c6478] hover:text-[#e2e6ef] transition-colors'>
+              <button onClick={onComplete} className='px-2 py-1 text-[10px] text-[#75665a] hover:text-[#ece4dc] transition-colors'>
                 跳过
               </button>
             )}
             {!isFirst && (
               <button
                 onClick={() => setStep(s => s - 1)}
-                className='flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] text-[#a0a8ba] hover:text-[#e2e6ef] hover:bg-[#1a1f2e] transition-colors'
+                className='flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] text-[#b3a294] hover:text-[#ece4dc] hover:bg-[#261f1a] transition-colors'
               >
                 <ArrowLeft size={11} /> 上一步
               </button>
             )}
             <button
               onClick={() => isLast ? onComplete() : setStep(s => s + 1)}
-              className='flex items-center gap-1 px-3 py-1.5 rounded-md text-[11px] font-semibold gradient-accent text-white shadow-md shadow-[#6366f1]/30 hover:brightness-110 active:scale-95 transition-all'
+              className='flex items-center gap-1 px-3 py-1.5 rounded-md text-[11px] font-semibold gradient-accent text-white shadow-md shadow-[#ff9f0a]/30 hover:brightness-110 active:scale-95 transition-all'
             >
               {isLast ? '开始使用' : '下一步'}
               <ArrowRight size={11} />
@@ -229,9 +229,9 @@ export function OnboardingOverlay({ onComplete }: OnboardingOverlayProps) {
           </div>
         </div>
 
-        <div className='px-5 pb-3 pt-1 flex items-center justify-center gap-3 text-[9px] text-[#3f4758]'>
+        <div className='px-5 pb-3 pt-1 flex items-center justify-center gap-3 text-[9px] text-[#51443a]'>
           <span className='flex items-center gap-1'><Kbd>←</Kbd> <Kbd>→</Kbd> 切换步骤</span>
-          <span className='w-1 h-1 rounded-full bg-[#3f4758]' />
+          <span className='w-1 h-1 rounded-full bg-[#51443a]' />
           <span className='flex items-center gap-1'><Kbd>esc</Kbd> 跳过</span>
         </div>
       </div>
