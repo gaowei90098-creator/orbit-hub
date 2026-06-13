@@ -111,7 +111,7 @@ export function ConsoleHome(props: ConsoleHomeProps) {
           )}
         </div>
 
-        <CommandInput agents={agents} workspace={workspace} actions={actions} />
+        <CommandInput agents={agents} missions={missions} workers={workers} workspace={workspace} actions={actions} />
       </div>
 
       <details className="console-setup" ref={setupRef} open={setupOpen}>

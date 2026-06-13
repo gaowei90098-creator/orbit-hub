@@ -599,6 +599,24 @@ export function mountRoutes(
     res.json({ mission: finalMission, tasks: finalTasks, launchedRuns });
   });
 
+  // M3 /cancel：取消 mission——停掉它名下所有在途 worker，再把状态机推进 cancelled。
+  app.post("/api/missions/:id/cancel", (req, res) => {
+    const mission = core.missions.get(req.params.id);
+    if (!mission) return res.status(404).json({ error: "unknown_mission" });
+    const stoppedRuns: string[] = [];
+    if (runs) {
+      for (const r of runs.list()) {
+        const inFlight = r.status === "starting" || r.status === "running" || r.status === "waiting_for_input";
+        if (r.missionId === mission.id && inFlight) {
+          runs.stop(r.id);
+          stoppedRuns.push(r.id);
+        }
+      }
+    }
+    const result = core.missions.transition(mission.id, "cancelled");
+    res.json({ mission: result.mission ?? mission, stoppedRuns, transitioned: result.ok });
+  });
+
   // ----- 第四阶段：集成、验证、最终 Diff、人工审批 -----
   // 产出集成候选（合并各 Agent 分支 → 验证）。
   app.post("/api/missions/:id/integrate", (req, res) => {

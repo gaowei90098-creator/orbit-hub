@@ -278,6 +278,28 @@ describe("hub REST", () => {
   });
 });
 
+describe("mission cancel (M3 /cancel)", () => {
+  it("cancels a mission and reports no in-flight runs when none were launched", async () => {
+    const launch = await request(app).post("/api/missions/launch").send({ goal: "做个登录页" });
+    const missionId = launch.body.mission.id as string;
+
+    const res = await request(app).post(`/api/missions/${missionId}/cancel`).send();
+    expect(res.status).toBe(200);
+    expect(res.body.transitioned).toBe(true);
+    expect(res.body.stoppedRuns).toEqual([]);
+    expect(res.body.mission.state).toBe("cancelled");
+
+    const snap = await request(app).get("/api/snapshot");
+    expect(snap.body.missions.find((m: { id: string }) => m.id === missionId).state).toBe("cancelled");
+  });
+
+  it("404s for an unknown mission", async () => {
+    const res = await request(app).post("/api/missions/nope/cancel").send();
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("unknown_mission");
+  });
+});
+
 describe("hub auth", () => {
   it("rejects /api without token and accepts with it", async () => {
     const secured = createHubApp({ dbPath: ":memory:", token: "secret" }).app;

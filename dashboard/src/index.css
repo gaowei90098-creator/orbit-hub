@@ -2911,6 +2911,36 @@ body {
   font-size: 12px;
   color: var(--amber);
 }
+.command-suggest-soon {
+  margin-left: 5px;
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--muted-2);
+}
+.command-result {
+  position: relative;
+  margin: 8px 0 0;
+  padding: 9px 12px 9px 26px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 8px);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-family: inherit;
+}
+.command-result-lead {
+  position: absolute;
+  left: 8px;
+  top: 11px;
+  color: var(--muted-2);
+}
+.command-result.tone-success { border-color: var(--teal); }
+.command-result.tone-danger { border-color: var(--danger); color: var(--danger); }
 
 /* 并行 worker 栏 */
 .worker-columns {

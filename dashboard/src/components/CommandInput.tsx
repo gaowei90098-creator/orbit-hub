@@ -1,11 +1,18 @@
 import { useMemo, useState } from "react";
-import { Rocket, Send, Slash, Loader2, AlertTriangle } from "lucide-react";
+import { Rocket, Send, Slash, Loader2, AlertTriangle, Terminal } from "lucide-react";
 import type { HubActions } from "../api";
-import type { Agent } from "../types";
+import type { Agent, Mission, Worker } from "../types";
 import { isOperator } from "../util";
+import {
+  SLASH_COMMANDS,
+  SLASH_COMMAND_SPECS,
+  parseCommand,
+  pickLatestMission,
+  renderResult,
+  renderStatus,
+} from "../lib/commands";
 
-// M3 会把这些斜杠命令接成真后台任务（借鉴 codex-plugin-cc）；M1 先占位 + 提示。
-const SLASH_COMMANDS = ["/review", "/rescue", "/status", "/result", "/integrate", "/cancel"];
+type CommandResult = { text: string; tone: "info" | "success" | "danger" };
 
 type Mode =
   | { kind: "launch"; goal: string }
@@ -21,16 +28,21 @@ function displayName(agent: Agent): string {
 // 一个输入框三合一：文本=启动协作；@名字=发消息给该 Agent；/=命令。
 export function CommandInput({
   agents,
+  missions,
+  workers,
   workspace,
   actions,
 }: {
   agents: Agent[];
+  missions: Mission[];
+  workers: Worker[];
   workspace: string | null;
   actions: HubActions;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [result, setResult] = useState<CommandResult | null>(null);
   const peers = useMemo(() => agents.filter((a) => !isOperator(a)), [agents]);
 
   const mode: Mode = useMemo(() => {
@@ -67,6 +79,7 @@ export function CommandInput({
   const submit = async () => {
     if (busy) return;
     setError("");
+    setResult(null);
     if (mode.kind === "empty") return;
 
     if (mode.kind === "launch") {
@@ -108,14 +121,53 @@ export function CommandInput({
     }
 
     if (mode.kind === "command") {
-      const cmd = mode.raw.split(/\s+/)[0]!;
-      if (cmd === "/integrate") {
-        setError("集成命令将在 M3 接入；当前请用下方「设置与经典视图」里的集成面板。");
-      } else if (SLASH_COMMANDS.includes(cmd)) {
-        setError(`命令 ${cmd} 将在 M3（委派命令）接入，敬请期待。`);
-      } else {
+      const { cmd, spec } = parseCommand(mode.raw);
+      if (!spec) {
         setError(`未知命令 ${cmd}。可用：${SLASH_COMMANDS.join(" ")}`);
+        return;
       }
+      if (spec.kind === "pending") {
+        setError(`命令 ${cmd} 即将接入：${spec.label}`);
+        return;
+      }
+      const mission = spec.needsMission ? pickLatestMission(missions) : null;
+      if (spec.needsMission && !mission) {
+        setError("还没有进行中的协作，先输入一个目标启动。");
+        return;
+      }
+      // /status 纯读，直接渲染快照。
+      if (cmd === "/status") {
+        setResult({ text: renderStatus(mission, workers), tone: "info" });
+        setText("");
+        return;
+      }
+      setBusy(true);
+      try {
+        if (cmd === "/result") {
+          const detail = await actions.getIntegration(mission!.id);
+          setResult({ text: renderResult(detail), tone: "info" });
+        } else if (cmd === "/integrate") {
+          const integ = await actions.triggerIntegration(mission!.id);
+          setResult({ text: `已发起集成（${integ.status}）。完成后用 /result 看结果。`, tone: "success" });
+        } else if (cmd === "/cancel") {
+          const { stoppedRuns, transitioned } = await actions.cancelMission(mission!.id);
+          const head = transitioned ? "已取消该协作" : "该协作已是终态，无需取消";
+          setResult({
+            text: `${head}，停掉 ${stoppedRuns.length} 个在途 Agent。`,
+            tone: transitioned ? "success" : "info",
+          });
+        }
+        setText("");
+      } catch {
+        if (cmd === "/integrate") {
+          setError("集成未成功：可能有合并冲突或验证未通过，去下方「设置与经典视图」的集成面板看详情。");
+        } else {
+          setError(`命令 ${cmd} 执行失败，请稍后再试。`);
+        }
+      } finally {
+        setBusy(false);
+      }
+      return;
     }
   };
 
@@ -153,9 +205,16 @@ export function CommandInput({
       </div>
       {text.trim().startsWith("/") && (
         <div className="command-suggest">
-          {SLASH_COMMANDS.map((c) => (
-            <button key={c} type="button" className="command-suggest-chip" onClick={() => setText(c + " ")}>
-              {c}
+          {SLASH_COMMAND_SPECS.map((s) => (
+            <button
+              key={s.cmd}
+              type="button"
+              className="command-suggest-chip"
+              title={s.label}
+              onClick={() => setText(s.cmd + " ")}
+            >
+              {s.cmd}
+              {s.kind === "pending" && <span className="command-suggest-soon">即将</span>}
             </button>
           ))}
         </div>
@@ -165,6 +224,12 @@ export function CommandInput({
           <AlertTriangle size={13} />
           {error}
         </small>
+      )}
+      {result && (
+        <pre className={`command-result tone-${result.tone}`}>
+          <Terminal size={13} className="command-result-lead" />
+          {result.text}
+        </pre>
       )}
     </div>
   );

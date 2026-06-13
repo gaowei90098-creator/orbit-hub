@@ -86,6 +86,7 @@ export interface HubActions {
   getRunDiff: (runId: string) => Promise<WorktreeDiff | null>;
   setWorkspace: (path: string) => Promise<{ path: string }>;
   dispatchTask: (taskId: string, harness?: "claude-code" | "codex") => Promise<void>;
+  cancelMission: (missionId: string) => Promise<{ stoppedRuns: string[]; transitioned: boolean }>;
 }
 
 export interface HubState {
@@ -375,6 +376,13 @@ export function useHubState(): HubState {
     await api(`/api/tasks/${taskId}/dispatch`, { method: "POST", body: JSON.stringify({ harness }) });
   }, []);
 
+  const cancelMission = useCallback(async (missionId: string) => {
+    const r = await api<{ stoppedRuns: string[]; transitioned: boolean }>(`/api/missions/${missionId}/cancel`, {
+      method: "POST", body: "{}",
+    });
+    return { stoppedRuns: r.stoppedRuns ?? [], transitioned: Boolean(r.transitioned) };
+  }, []);
+
   const updateContract = useCallback(
     async (fields: { apiContract?: string; designSpec?: string; expectedVersion?: number }) => {
       const r = await api<{ ok: boolean }>("/api/contract", {
@@ -423,6 +431,7 @@ export function useHubState(): HubState {
       getRunDiff,
       setWorkspace,
       dispatchTask,
+      cancelMission,
     },
   };
 }
