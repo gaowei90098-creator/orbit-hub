@@ -23,9 +23,10 @@ export interface Agent {
 export type MessageTarget = string; // an agent id, or the literal "all" for broadcast
 export const BROADCAST: MessageTarget = "all";
 
-// 消息类型（P2 结构化消息）：普通协调 / 同步接口变更 / 提问（期待回复）。
-// 路由器（P3）据此决定投递优先级：sync/question 比 normal 更值得打断在途 worker。
-export type MessageKind = "normal" | "sync" | "question";
+// 消息类型（P2 结构化消息）：普通协调 / 同步接口变更 / 提问（期待回复）/ 冲突（M4 互通门面）。
+// 路由器（P3/M4）据此决定投递动作：sync/question 比 normal 更值得打断在途 worker，
+// conflict 最强——直接停掉在途 worker 并保持暂停，等裁决后再放行（事中阻断而非事后集成冲突）。
+export type MessageKind = "normal" | "sync" | "question" | "conflict";
 
 export interface Message {
   id: string;

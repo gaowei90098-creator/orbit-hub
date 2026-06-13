@@ -6,7 +6,8 @@ import { SUPERVISOR_SENDER } from "./supervisor.js";
 const TERMINAL = new Set(["done", "failed", "stopped"]);
 
 function formatMessage(m: Message): string {
-  const prefix = m.kind === "sync" ? "[SYNC] " : m.kind === "question" ? "[QUESTION] " : "";
+  const prefix =
+    m.kind === "sync" ? "[SYNC] " : m.kind === "question" ? "[QUESTION] " : m.kind === "conflict" ? "[CONFLICT] " : "";
   return `${prefix}${m.content}`;
 }
 
@@ -101,6 +102,13 @@ export class MessageRouter {
       .listAgentRuns()
       .find((r) => r.agentId === agentId && r.sessionId);
     if (!run) return; // peer agent 或 worker 尚无 session：消息已入收件箱
+
+    // M4 冲突：停掉在途 worker 并保持暂停——不注入、不自动恢复，等操作员裁决后再 /rescue
+    // 或回复放行。把「事后集成冲突」提前为「事中阻断」。消息留在收件箱，恢复时可见。
+    if (message.kind === "conflict") {
+      if (this.runs.isRunning(run.id)) this.runs.stop(run.id);
+      return;
+    }
 
     const isHigh = message.kind === "sync" || message.kind === "question";
     if (!this.runs.isRunning(run.id)) {

@@ -24,7 +24,7 @@ export interface Task {
   updatedAt: number;
 }
 
-export type MessageKind = "normal" | "sync" | "question";
+export type MessageKind = "normal" | "sync" | "question" | "conflict";
 
 export interface Message {
   id: string;

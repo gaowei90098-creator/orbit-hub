@@ -114,10 +114,23 @@ export function buildTimeline(input: TimelineInput, limit = 60): TimelineEvent[]
   }
 
   for (const message of input.messages) {
-    // sync（接口同步）/ question（提问）类消息在时间线上加前缀与色调，便于一眼识别协调动作。
+    // sync（接口同步）/ question（提问）/ conflict（冲突）类消息在时间线上加前缀与色调，便于一眼识别协调动作。
     const kindPrefix =
-      message.kind === "sync" ? "接口同步 · " : message.kind === "question" ? "提问 · " : "";
-    const tone: Tone = message.kind === "sync" ? "info" : message.kind === "question" ? "warning" : "neutral";
+      message.kind === "sync"
+        ? "接口同步 · "
+        : message.kind === "question"
+          ? "提问 · "
+          : message.kind === "conflict"
+            ? "冲突 · "
+            : "";
+    const tone: Tone =
+      message.kind === "sync"
+        ? "info"
+        : message.kind === "question"
+          ? "warning"
+          : message.kind === "conflict"
+            ? "danger"
+            : "neutral";
     events.push({
       id: `msg-${message.id}`,
       ts: message.ts,

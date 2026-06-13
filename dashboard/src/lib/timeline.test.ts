@@ -137,6 +137,9 @@ describe("buildTimeline", () => {
     const normal = buildTimeline(input({ messages: [message({ id: "n", kind: "normal" })] }))[0]!;
     expect(normal.title).not.toContain("·");
     expect(normal.tone).toBe("neutral");
+    const conflict = buildTimeline(input({ messages: [message({ id: "c", kind: "conflict" })] }))[0]!;
+    expect(conflict.title).toContain("冲突");
+    expect(conflict.tone).toBe("danger");
   });
 });
 

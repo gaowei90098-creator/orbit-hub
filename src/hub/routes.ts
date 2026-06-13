@@ -39,7 +39,7 @@ const messageSchema = z.object({
   // P2 结构化字段（可选）。
   missionId: z.string().optional(),
   taskId: z.string().optional(),
-  kind: z.enum(["normal", "sync", "question"]).optional(),
+  kind: z.enum(["normal", "sync", "question", "conflict"]).optional(),
   replyTo: z.string().optional(),
   requiresReply: z.boolean().optional(),
 });

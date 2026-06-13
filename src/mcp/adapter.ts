@@ -108,15 +108,15 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
     {
       description:
         "Send a message to another agent. Use this to coordinate — e.g. announce an API/interface change so the other agent stays compatible. " +
-        'Set kind="sync" when announcing an interface/contract change, kind="question" (with requires_reply=true) when you need an answer to proceed; bind task_id to the relevant task so the message shows up in context.',
+        'Set kind="sync" when announcing an interface/contract change, kind="question" (with requires_reply=true) when you need an answer to proceed, kind="conflict" to halt a peer that is colliding with you (it pauses its in-flight worker until adjudicated); bind task_id to the relevant task so the message shows up in context.',
       inputSchema: {
         to: z.string().describe('Recipient agent name or id, or "all" to broadcast to everyone.'),
         content: z.string().describe("The message text."),
         task_id: z.string().optional().describe("Bind this message to a task id for context."),
         kind: z
-          .enum(["normal", "sync", "question"])
+          .enum(["normal", "sync", "question", "conflict"])
           .optional()
-          .describe('"normal" coordination, "sync" interface/contract change, "question" needs an answer.'),
+          .describe('"normal" coordination, "sync" interface/contract change, "question" needs an answer, "conflict" halts the recipient\'s in-flight worker until adjudicated.'),
         reply_to: z.string().optional().describe("Message id this is replying to (threads the conversation)."),
         requires_reply: z.boolean().optional().describe("Set true if you expect a reply before continuing."),
       },

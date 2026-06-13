@@ -197,4 +197,34 @@ describe("MessageRouter (M2.2)", () => {
     router.stop();
     core.close();
   });
+
+  it("conflict message stops in-transit run and keeps it paused (no injection)", async () => {
+    const root = makeGitRepo();
+    const core = new CoordinationCore(":memory:");
+    const sink: { message: string }[] = [];
+    const runs = new RunManager(core, (_h: Harness) => makeDriver("SLOW", sink, 500));
+    const router = new MessageRouter(core, runs);
+    router.start();
+
+    const agentA = core.agents.register("A", "claude-code");
+    const agentB = core.agents.register("B", "claude-code");
+    const runB = runs.start({ harness: "claude-code", missionId: null, taskId: null, projectId: null, taskTitle: "t", goal: "g", projectPath: root });
+    runs.bind(runB.id, agentB.id);
+
+    await waitFor(() => core.store.getAgentRun(runB.id)?.sessionId, 4000);
+    expect(runs.isRunning(runB.id)).toBe(true);
+
+    // 冲突消息 → 停掉在途 run，且不注入、不自动恢复（停在 stopped 等裁决）。
+    sink.length = 0;
+    core.messages.send(agentA.id, agentB.id, "CONFLICT-HALT", { kind: "conflict" });
+
+    await waitTerminal(core, runB.id, 3000);
+    await tick(150);
+
+    expect(core.store.getAgentRun(runB.id)?.status).toBe("stopped");
+    expect(sink).toHaveLength(0); // 关键：冲突不像 sync 那样注入恢复，worker 保持暂停
+
+    router.stop();
+    core.close();
+  });
 });
