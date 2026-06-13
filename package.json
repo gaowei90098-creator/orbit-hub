@@ -20,15 +20,8 @@
     "unpack": "electron-builder --dir"
   },
   "dependencies": {
-    "clsx": "^2.1.1",
-    "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-markdown": "^9.0.1",
-    "rehype-highlight": "^7.0.0",
-    "remark-gfm": "^4.0.0",
-    "tailwind-merge": "^2.5.2",
-    "zustand": "^5.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
