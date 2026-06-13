@@ -202,20 +202,12 @@ export function locateMinimaxCodeBinary(): string | null {
 /* ---------------- Marvis（暂无 CLI） ---------------- */
 
 export function marvisCandidates(): AgentBinaryCandidate[] {
-  const cands: Array<AgentBinaryCandidate | null> = [envCandidate('MARVIS_PATH')]
-  try {
-    const base = 'D:\\Program Files\\Tencent\\Marvis\\MarvisAgent'
-    if (existsSync(base)) {
-      for (const v of readdirSync(base).sort().reverse()) {
-        for (const n of ['marvis-cli.exe', 'marvis.exe']) {
-          const p = join(base, v, n)
-          if (existsSync(p)) cands.push({ source: 'desktop', label: '桌面版 (Tencent Marvis)', path: p })
-        }
-      }
-    }
-  } catch { /* noop */ }
-  cands.push(pathCandidate('marvis'))
-  return dedupe(cands)
+  // Marvis 桌面版（MarvisAgent.exe）没有公开的非交互 CLI：直接 spawn 只会拉起 GUI、
+  // 永不退出，把任务卡到 5 分钟超时。因此不再自动探测/暴露其 GUI 二进制，避免 UI
+  // 选择器把用户诱导到“必然卡死”的配置。Marvis 默认走 HTTP 绑定（腾讯混元）。
+  // 仅当用户显式设置 MARVIS_PATH（声明自己拥有可用 CLI）时才作为候选；用户也可随时
+  // 在 设置→路由→StdIO 手动填写路径与参数直连。
+  return dedupe([envCandidate('MARVIS_PATH')])
 }
 
 export function locateMarvisBinary(): string | null {
