@@ -28,7 +28,9 @@ export interface HubOptions {
 // Optional bearer-token gate. Off by default (local use); enabled for networked mode.
 function authMiddleware(token: string) {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.path.startsWith("/api")) return next();
+    // 公开：健康检查、静态前端、A2A 服务发现（/.well-known）。受保护：/api 与 A2A 调用端点 /a2a
+    // （能拉起协作，须与 /api/missions/launch 同等鉴权，不能因路径不在 /api 下就裸奔）。
+    if (!req.path.startsWith("/api") && req.path !== "/a2a") return next();
     const header = req.header("authorization") ?? "";
     const provided = header.startsWith("Bearer ") ? header.slice(7) : String(req.query.token ?? "");
     if (provided === token) return next();

@@ -368,6 +368,51 @@ describe("A2A agent card (M4.2)", () => {
   });
 });
 
+describe("A2A JSON-RPC endpoint (M4.2)", () => {
+  it("message/send launches a collaboration and returns an A2A task", async () => {
+    const res = await request(app)
+      .post("/a2a")
+      .send({ jsonrpc: "2.0", id: "r1", method: "message/send", params: { message: { parts: [{ kind: "text", text: "做个登录页" }] } } });
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe("r1");
+    expect(res.body.result.id).toMatch(/^mission/);
+    expect(["submitted", "working"]).toContain(res.body.result.status.state);
+    expect(res.body.result.metadata.goal).toBe("做个登录页");
+  });
+
+  it("tasks/get returns the live status of a launched mission", async () => {
+    const launched = await request(app)
+      .post("/a2a")
+      .send({ jsonrpc: "2.0", id: "r1", method: "message/send", params: { message: { parts: [{ text: "做个注册页" }] } } });
+    const taskId = launched.body.result.id as string;
+    const got = await request(app).post("/a2a").send({ jsonrpc: "2.0", id: "r2", method: "tasks/get", params: { id: taskId } });
+    expect(got.body.result.id).toBe(taskId);
+    expect(got.body.result.metadata.goal).toBe("做个注册页");
+  });
+
+  it("rejects empty text, unknown method and malformed envelope", async () => {
+    const empty = await request(app).post("/a2a").send({ jsonrpc: "2.0", id: 1, method: "message/send", params: { message: { parts: [] } } });
+    expect(empty.body.error.code).toBe(-32602);
+    const unknown = await request(app).post("/a2a").send({ jsonrpc: "2.0", id: 2, method: "frobnicate" });
+    expect(unknown.body.error.code).toBe(-32601);
+    const malformed = await request(app).post("/a2a").send({ method: "message/send" });
+    expect(malformed.status).toBe(400);
+    expect(malformed.body.error.code).toBe(-32600);
+  });
+
+  it("protects /a2a with the token while keeping discovery public", async () => {
+    const secured = createHubApp({ dbPath: ":memory:", token: "secret" }).app;
+    const noAuth = await request(secured).post("/a2a").send({ jsonrpc: "2.0", id: 1, method: "tasks/get", params: { id: "x" } });
+    expect(noAuth.status).toBe(401);
+    const withAuth = await request(secured)
+      .post("/a2a")
+      .set("Authorization", "Bearer secret")
+      .send({ jsonrpc: "2.0", id: 1, method: "tasks/get", params: { id: "x" } });
+    expect(withAuth.status).toBe(200); // 鉴权通过后才进入 handler（这里因 id 不存在返回 RPC 错误）
+    expect(withAuth.body.error.code).toBe(-32602);
+  });
+});
+
 describe("hub auth", () => {
   it("rejects /api without token and accepts with it", async () => {
     const secured = createHubApp({ dbPath: ":memory:", token: "secret" }).app;

@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Express, Request, Response } from "express";
 import { z, type ZodType } from "zod";
 import type { CoordinationCore } from "../core/core.js";
-import type { Agent, Harness, Task } from "../core/types.js";
+import type { Agent, Harness, Mission, Task } from "../core/types.js";
 import type { RunManager } from "./run-manager.js";
 import type { IntegrationManager } from "./integration-manager.js";
 import type { MessageRouter } from "./message-router.js";
@@ -15,6 +15,17 @@ import { newId } from "../core/id.js";
 import { buildReviewPrompt } from "./review.js";
 import { buildRescuePrompt, selectRescueTargets, RESCUE_STALL_MS } from "./rescue.js";
 import { buildAgentCard } from "./agent-card.js";
+import {
+  buildTask,
+  extractMessageText,
+  rpcError,
+  rpcResult,
+  validateRpc,
+  RPC_INVALID_PARAMS,
+  RPC_INVALID_REQUEST,
+  RPC_METHOD_NOT_FOUND,
+  type JsonRpcRequest,
+} from "./a2a.js";
 import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type MissionPlan, type TaskDraft } from "./task-planner.js";
 import type { LeadPlannerFn } from "./lead-planner.js";
 
@@ -491,9 +502,12 @@ export function mountRoutes(
   // ----- missions -----
   app.get("/api/missions", (_req, res) => res.json({ missions: core.missions.list() }));
   app.get("/api/workers", (_req, res) => res.json({ workers: runs ? runs.list() : [] }));
-  app.post("/api/missions/launch", async (req, res) => {
-    const body = parse(launchMissionSchema, req, res);
-    if (!body) return;
+  // 启动一次协作的核心流程：建 mission → 拆任务 → 拉起 worker → 推进状态机。
+  // 被 REST /api/missions/launch 与 A2A message/send 复用（同一闭包，直接用上方 helper）。
+  async function runLaunch(
+    body: z.infer<typeof launchMissionSchema>,
+    req: Request,
+  ): Promise<{ mission: Mission; tasks: Task[]; launchedRuns: string[] }> {
     const peers = core.agents.list().filter((a) => a.harness !== "other");
     const onlinePeers = peers.filter((a) => a.status === "online");
     let project = body.projectId ? core.projects.get(body.projectId) : null;
@@ -603,7 +617,38 @@ export function mountRoutes(
     let finalMission = updated ?? mission;
     if (launchedRuns.length > 0) finalMission = core.missions.markRunning(finalMission.id) ?? finalMission;
 
-    res.json({ mission: finalMission, tasks: finalTasks, launchedRuns });
+    return { mission: finalMission, tasks: finalTasks, launchedRuns };
+  }
+
+  app.post("/api/missions/launch", async (req, res) => {
+    const body = parse(launchMissionSchema, req, res);
+    if (!body) return;
+    res.json(await runLaunch(body, req));
+  });
+
+  // M4.2 A2A 端点（JSON-RPC 2.0）：把 Orbit 当作一个 agent 调用。
+  // message/send → 内部 runLaunch 启动协作，返回 A2A Task；tasks/get → 查 mission 进度。
+  app.post("/a2a", async (req, res) => {
+    const invalid = validateRpc(req.body);
+    if (invalid) return res.status(400).json(rpcError(req.body?.id ?? null, RPC_INVALID_REQUEST, invalid));
+    const { id, method, params } = req.body as JsonRpcRequest;
+
+    if (method === "message/send") {
+      const goal = extractMessageText(params);
+      if (!goal) return res.json(rpcError(id, RPC_INVALID_PARAMS, "message must contain non-empty text"));
+      const { mission, tasks } = await runLaunch({ goal }, req);
+      return res.json(rpcResult(id, buildTask(mission, tasks)));
+    }
+
+    if (method === "tasks/get") {
+      const taskId = (params as { id?: string } | undefined)?.id;
+      const mission = taskId ? core.missions.get(taskId) : null;
+      if (!mission) return res.json(rpcError(id, RPC_INVALID_PARAMS, "unknown task id"));
+      const tasks = mission.taskIds.map((t) => core.tasks.get(t)).filter((t): t is Task => Boolean(t));
+      return res.json(rpcResult(id, buildTask(mission, tasks)));
+    }
+
+    return res.json(rpcError(id, RPC_METHOD_NOT_FOUND, `unknown method: ${method}`));
   });
 
   // M3 /cancel：取消 mission——停掉它名下所有在途 worker，再把状态机推进 cancelled。
