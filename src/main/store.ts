@@ -1,6 +1,35 @@
-﻿import { app } from 'electron'
+﻿import { app, safeStorage } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
+
+const ENC_PREFIX = 'enc:v1:'
+
+/**
+ * 用 OS 级 safeStorage（Windows DPAPI / macOS Keychain / Linux libsecret）加密密钥后落盘。
+ * 幂等：已加密的值原样返回，避免重复加密。safeStorage 不可用时回退明文（不阻断功能）。
+ * 注意：safeStorage 须在 app ready 后调用。
+ */
+export function encryptSecret(plain: string): string {
+  if (!plain) return ''
+  if (plain.startsWith(ENC_PREFIX)) return plain
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      return ENC_PREFIX + safeStorage.encryptString(plain).toString('base64')
+    }
+  } catch { /* 回退明文 */ }
+  return plain
+}
+
+/** 解密 encryptSecret 的产物；旧明文（无前缀）原样返回；解密失败返回空串（视为未配置，提示重填）。 */
+export function decryptSecret(stored: string): string {
+  if (!stored) return ''
+  if (!stored.startsWith(ENC_PREFIX)) return stored
+  try {
+    return safeStorage.decryptString(Buffer.from(stored.slice(ENC_PREFIX.length), 'base64'))
+  } catch {
+    return ''
+  }
+}
 
 class AppStore {
   private data: Record<string, any> = {}

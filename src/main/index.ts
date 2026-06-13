@@ -341,6 +341,7 @@ const initialDeepLink = process.argv.find(a => a.startsWith('agenthub://'))
 if (initialDeepLink) pendingDeepLink = parseDeepLink(initialDeepLink)
 
 app.whenReady().then(async () => {
+  providerMgr.unlockSecrets()   // app ready 后解密落盘的 apiKey 到内存（safeStorage 此时可用）
   createWindow()
   createTray()
   await initHub()

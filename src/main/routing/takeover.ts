@@ -18,7 +18,7 @@
 import { readFileSync, writeFileSync, existsSync, copyFileSync, renameSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
-import { store } from '../store'
+import { store, encryptSecret, decryptSecret } from '../store'
 
 const SECTION = '[model_providers.agenthub]'
 
@@ -192,6 +192,8 @@ export function claudeApply(modelRef: string, proxyOrigin: string): TakeoverStat
   if (env.ANTHROPIC_BASE_URL !== proxyOrigin && !store.get('takeover.claude.stash')) {
     const stash: Record<string, string | null> = {}
     for (const k of CLAUDE_KEYS) stash[k] = typeof env[k] === 'string' ? env[k] : null
+    // 原 ANTHROPIC_AUTH_TOKEN 是用户密钥，加密后再存入 electron store
+    if (typeof stash.ANTHROPIC_AUTH_TOKEN === 'string') stash.ANTHROPIC_AUTH_TOKEN = encryptSecret(stash.ANTHROPIC_AUTH_TOKEN)
     store.set('takeover.claude.stash', stash)
   }
   j.env = {
@@ -213,7 +215,9 @@ export function claudeRestore(): TakeoverState {
     const env = j.env || {}
     const stash = (store.get('takeover.claude.stash') || {}) as Record<string, string | null>
     for (const k of CLAUDE_KEYS) {
-      const orig = stash[k]
+      let orig = stash[k]
+      // AUTH_TOKEN 落盘时已加密，还原前解密（旧明文 stash 经 decryptSecret 原样返回，兼容）
+      if (k === 'ANTHROPIC_AUTH_TOKEN' && typeof orig === 'string') orig = decryptSecret(orig)
       if (orig == null) delete env[k]
       else env[k] = orig
     }

@@ -121,6 +121,8 @@ export interface ProvidersConfig {
   routing: RoutingConfig
   /** 当前激活的 Agent 路由（可由 UI 切换） */
   activeBindingId: string | null
+  /** 配置 schema 版本（用于未来迁移；落盘的 apiKey 经 safeStorage 加密） */
+  version?: number
 }
 
 /** 思考展示摘要（消息总线专用） */

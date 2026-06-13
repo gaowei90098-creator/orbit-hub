@@ -8,7 +8,7 @@
  */
 
 import { EventEmitter } from 'events'
-import { store } from '../store'
+import { store, encryptSecret, decryptSecret } from '../store'
 import {
   ProvidersConfig,
   ProviderDefinition,
@@ -20,6 +20,8 @@ import { BUILTIN_PROVIDERS, THINKING_BUDGET_TOKENS } from './presets'
 
 const STORAGE_KEY = 'providers.config.v1'
 
+const CONFIG_VERSION = 1
+
 function defaultConfig(): ProvidersConfig {
   return {
     providers: BUILTIN_PROVIDERS.map(p => ({ ...p, models: p.models.map(m => ({ ...m })) })),
@@ -28,7 +30,8 @@ function defaultConfig(): ProvidersConfig {
       fallbackChain: [],
       strategy: 'single'
     },
-    activeBindingId: null
+    activeBindingId: null,
+    version: CONFIG_VERSION
   }
 }
 
@@ -99,6 +102,7 @@ function defaultBindings(): AgentRouteBinding[] {
 
 export class ProviderManager extends EventEmitter {
   private cfg: ProvidersConfig
+  private secretsUnlocked = false
 
   constructor() {
     super()
@@ -109,13 +113,47 @@ export class ProviderManager extends EventEmitter {
     try {
       const raw = store.get(STORAGE_KEY)
       if (raw) {
-        const merged = this.mergeWithBuiltins(raw)
-        return merged
+        // 防御性修复：局部损坏字段单独回退，避免整体重置误丢 apiKey
+        // 注意：此处保持 apiKey 为落盘形态（可能是 safeStorage 密文）；
+        //       解密延后到 app ready 后的 unlockSecrets()，以免 ready 前调用 safeStorage 失败而清空密钥。
+        const sane = this.sanitize(raw)
+        return this.mergeWithBuiltins(sane)
       }
     } catch (e) {
       console.warn('[Providers] load failed, fallback to defaults:', e)
     }
     return defaultConfig()
+  }
+
+  /** 防御性修复存储配置结构：非数组/缺失字段回退默认，保留可用部分（不因局部损坏整体重置） */
+  private sanitize(raw: any): ProvidersConfig {
+    const d = defaultConfig()
+    if (!raw || typeof raw !== 'object') return d
+    const r: any = (raw.routing && typeof raw.routing === 'object') ? raw.routing : {}
+    return {
+      providers: Array.isArray(raw.providers)
+        ? raw.providers.filter((p: any) => p && typeof p.id === 'string')
+        : d.providers,
+      routing: {
+        bindings: Array.isArray(r.bindings)
+          ? r.bindings.filter((b: any) => b && typeof b.agentId === 'string')
+          : d.routing.bindings,
+        fallbackChain: Array.isArray(r.fallbackChain) ? r.fallbackChain : d.routing.fallbackChain,
+        strategy: r.strategy || d.routing.strategy
+      },
+      activeBindingId: typeof raw.activeBindingId === 'string' ? raw.activeBindingId : null,
+      version: typeof raw.version === 'number' ? raw.version : undefined
+    }
+  }
+
+  /**
+   * 解密内存中的 apiKey（须在 app ready 后调用一次）。
+   * 旧明文配置（无加密前缀）原样保留并在下次 save() 时自动加密（隐式迁移）。
+   */
+  unlockSecrets(): void {
+    if (this.secretsUnlocked) return
+    for (const p of this.cfg.providers) p.apiKey = decryptSecret(p.apiKey || '')
+    this.secretsUnlocked = true
   }
 
   /** 把存储的 config 与最新的内置 Provider 合并（新增内置不丢、删除的清理） */
@@ -164,7 +202,12 @@ export class ProviderManager extends EventEmitter {
   }
 
   private save(): void {
-    store.set(STORAGE_KEY, this.cfg)
+    // 落盘前加密 apiKey（内存 cfg 保持明文供运行时使用）。
+    // encryptSecret 幂等：若 unlockSecrets 尚未执行（cfg 仍为密文），重复加密会被跳过，磁盘不被破坏。
+    const persisted = JSON.parse(JSON.stringify(this.cfg)) as ProvidersConfig
+    persisted.providers = persisted.providers.map(p => ({ ...p, apiKey: encryptSecret(p.apiKey || '') }))
+    persisted.version = CONFIG_VERSION
+    store.set(STORAGE_KEY, persisted)
     this.emit('config:changed', this.cfg)
   }
   // ---- 查询 ----
