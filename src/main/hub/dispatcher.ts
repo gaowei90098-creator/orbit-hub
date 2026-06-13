@@ -260,11 +260,13 @@ export class Dispatcher extends EventEmitter {
     const modelId = binding?.modelId ?? resolved?.model?.id ?? "stdio"
     this.emit("stream", { kind: "start", taskId: task.id, agentId, providerId, modelId, mode: "content" })
     const start = Date.now()
-    const TIMEOUT_MS = 5 * 60 * 1000
+    const TIMEOUT_MS = 5 * 60 * 1000           // 硬超时
     const POLL_MS = 200
-    const SILENCE_MS = 1500
+    // 启动后这么久仍无任何输出且进程未退出 → 判为卡死（GUI/交互式二进制，参见 #1 Marvis）
+    const STARTUP_SILENCE_MS = 60 * 1000
+    // 已产生输出后静默这么久且进程未退出 → 兜底视为已完成（应对输出完却不退出的 CLI）
+    const IDLE_AFTER_OUTPUT_MS = 45 * 1000
     const procField = "proc" // 适配器内部的子进程字段
-    const interactive = adapter.mode === "interactive"
     const self = this
     let settled = false
     let spawnedOnce = false
@@ -299,22 +301,31 @@ export class Dispatcher extends EventEmitter {
         const poll = setInterval(() => {
           if (settled) return
           const proc = adapter[procField]
-          const procGone = spawnedOnce && !proc        // 进程退出（oneshot 的正常完成信号）
-          const tooQuiet = interactive && (Date.now() - lastOutputAt) > SILENCE_MS && content.length > 0
-          const timedOut = (Date.now() - start) > TIMEOUT_MS
+          const idle = Date.now() - lastOutputAt
+          const elapsed = Date.now() - start
+          const hasOutput = content.length > 0
+          const procGone = spawnedOnce && !proc                                   // 进程退出 = oneshot 正常完成
+          const quietDone = hasOutput && idle > IDLE_AFTER_OUTPUT_MS               // 有输出后久静默 → 兜底完成
+          const stalledNoOutput = spawnedOnce && !hasOutput && elapsed > STARTUP_SILENCE_MS // 始终无输出 → 卡死
+          const timedOut = elapsed > TIMEOUT_MS
           const cancelled = (task as any).status === "cancelled"
-          if (procGone || tooQuiet || timedOut || cancelled) {
+          if (procGone || quietDone || stalledNoOutput || timedOut || cancelled) {
             settled = true
             clearInterval(poll)
             cleanup()
-            if (cancelled || timedOut) {
+            if (cancelled || timedOut || stalledNoOutput) {
               try { adapter.stop() } catch { /* noop */ }
             }
-            if (timedOut && !content) {
-              rejectP(new Error("本地 CLI 执行超时（5 分钟）"))
+            // 卡死 / 超时 → 显式报错，绝不把卡住的 banner/动画当作“完成”静默返回
+            if (stalledNoOutput) {
+              rejectP(new Error(`本地 CLI 启动 ${Math.round(STARTUP_SILENCE_MS / 1000)}s 无任何输出，疑似无法用于非交互直连（GUI/REPL）。建议改用 HTTP 绑定。`))
               return
             }
-            resolveP()
+            if (timedOut) {
+              rejectP(new Error("本地 CLI 执行超时（5 分钟）" + (hasOutput ? "，仅收到部分输出" : "")))
+              return
+            }
+            resolveP()  // procGone / quietDone / cancelled → 用已收集内容完成
           }
         }, POLL_MS)
       })
