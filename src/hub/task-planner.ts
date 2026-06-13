@@ -213,34 +213,33 @@ export interface AssignedDraft extends TaskDraft {
 }
 
 export function assignDraftsToAgents(drafts: TaskDraft[], onlineAgents: Agent[]): AssignedDraft[] {
+  // harness === "other" 是操作面板（Operator）注册的身份，不参与任务分配。
   const peers = onlineAgents.filter((a) => a.harness !== "other" && a.status === "online");
 
-  function agentArea(agent: Agent): "frontend" | "backend" | "general" {
+  // 只认操作员显式指派的角色，不按厂商推断方向 —— 任何 Agent 都能做任何类型的任务。
+  function roleArea(agent: Agent): "frontend" | "backend" | null {
     const role = (agent.role ?? "").toLowerCase();
-    if (role) {
-      if (role.includes("前端") || role.includes("ui") || role.includes("front")) return "frontend";
-      if (role.includes("后端") || role.includes("api") || role.includes("back") || role.includes("服务")) return "backend";
-      return "general";
-    }
-    if (agent.harness === "codex") return "frontend";
-    if (agent.harness === "claude-code") return "backend";
-    return "general";
+    if (!role) return null;
+    if (role.includes("前端") || role.includes("ui") || role.includes("front")) return "frontend";
+    if (role.includes("后端") || role.includes("api") || role.includes("back") || role.includes("服务")) return "backend";
+    return null;
   }
 
-  const frontendAgent = peers.find((a) => agentArea(a) === "frontend") ?? null;
-  const backendAgent = peers.find((a) => agentArea(a) === "backend") ?? null;
-  const taken = new Set([frontendAgent?.id, backendAgent?.id].filter((x): x is string => Boolean(x)));
-  const generalAgents = peers.filter((a) => !taken.has(a.id));
-  let generalIdx = 0;
+  const frontendAgent = peers.find((a) => roleArea(a) === "frontend") ?? null;
+  const backendAgent = peers.find((a) => roleArea(a) === "backend") ?? null;
+  const pinned = new Set([frontendAgent?.id, backendAgent?.id].filter((x): x is string => Boolean(x)));
+  // 没被角色固定的 Agent 轮流接任务；若全部被固定，则在所有在线 Agent 间轮流，保证任务有人负责。
+  const pool = peers.filter((a) => !pinned.has(a.id));
+  const rotation = pool.length > 0 ? pool : peers;
+  let rotationIdx = 0;
+  const nextAssignee = (): string | null =>
+    rotation.length > 0 ? rotation[rotationIdx++ % rotation.length]!.id : null;
 
   return drafts.map((draft) => {
     let assignee: string | null = null;
-    if (draft.area === "frontend") assignee = frontendAgent?.id ?? null;
-    else if (draft.area === "backend") assignee = backendAgent?.id ?? null;
-    else if (generalAgents.length > 0) {
-      assignee = generalAgents[generalIdx % generalAgents.length]!.id;
-      generalIdx++;
-    }
+    if (draft.area === "frontend") assignee = frontendAgent?.id ?? nextAssignee();
+    else if (draft.area === "backend") assignee = backendAgent?.id ?? nextAssignee();
+    else assignee = nextAssignee();
     return { ...draft, assignee };
   });
 }
