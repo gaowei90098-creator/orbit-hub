@@ -1,6 +1,7 @@
 import type { CoordinationCore } from "../core/core.js";
 import type { AgentRun, Message } from "../core/types.js";
 import type { RunManager } from "./run-manager.js";
+import { SUPERVISOR_SENDER } from "./supervisor.js";
 
 const TERMINAL = new Set(["done", "failed", "stopped"]);
 
@@ -66,6 +67,8 @@ export class MessageRouter {
   }
 
   private onMessageSent(message: Message): void {
+    // 监督循环的停滞告警是给人看的 UI 消息，不应被注入到各 worker 会话里。
+    if (message.from === SUPERVISOR_SENDER) return;
     const recipients =
       message.to === "all"
         ? this.core.agents.list().map((a) => a.id).filter((id) => id !== message.from)

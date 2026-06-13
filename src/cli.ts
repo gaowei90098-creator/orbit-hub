@@ -90,7 +90,7 @@ function startHub(flags: Map<string, string>): void {
 
   // 生产路径启用 lead planner（claude headless 拆分）；ORBIT_LEAD_PLANNER=0 可关闭。
   const leadPlanner = process.env.ORBIT_LEAD_PLANNER === "0" ? undefined : planWithLead;
-  const { app, core, runs, coordinator, messageRouter, integration } = createHubApp({ dbPath, token, leadPlanner });
+  const { app, core, runs, coordinator, messageRouter, integration, supervisor } = createHubApp({ dbPath, token, leadPlanner });
   const server = app.listen(port, host, () => {
     process.stdout.write(startBanner(port, dbPath, token));
   });
@@ -104,6 +104,7 @@ function startHub(flags: Map<string, string>): void {
     coordinator.stop();
     messageRouter.stop();
     integration.stop();
+    supervisor.stop();
     runs.stopAll();
     server.close();
     core.close();

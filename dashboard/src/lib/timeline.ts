@@ -82,6 +82,7 @@ const WORKER_STATUS_TONE: Record<Worker["status"], Tone> = {
 function agentName(agents: Agent[], id: string | null | undefined): string {
   if (!id) return "未分配";
   if (id === "all") return "全体";
+  if (id === "orbit-supervisor") return "Orbit 监督"; // M3.2c 监督循环的系统告警发送者
   const a = agents.find((x) => x.id === id);
   if (!a) return id;
   if (a.role) return `${a.role}助手`;

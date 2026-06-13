@@ -8,6 +8,7 @@ import { RunManager, type DriverResolver } from "./run-manager.js";
 import { Coordinator } from "./coordinator.js";
 import { MessageRouter } from "./message-router.js";
 import { IntegrationManager, type ValidationRunner } from "./integration-manager.js";
+import { Supervisor } from "./supervisor.js";
 import type { LeadPlannerFn } from "./lead-planner.js";
 
 export interface HubOptions {
@@ -44,6 +45,7 @@ export function createHubApp(options: HubOptions = {}): {
   coordinator: Coordinator;
   messageRouter: MessageRouter;
   integration: IntegrationManager;
+  supervisor: Supervisor;
 } {
   const core = new CoordinationCore(options.dbPath ?? ":memory:");
   const runs = new RunManager(core, options.driverResolver);
@@ -56,6 +58,9 @@ export function createHubApp(options: HubOptions = {}): {
   // 第四阶段：集成、验证、最终 Diff、审批编排。注入 runs 以支持集成冲突自动派回修复。
   const integration = new IntegrationManager(core, options.validationRunner, runs);
   integration.start();
+  // M3.2c：监督循环——周期扫停滞 worker 并发系统告警进时间线。
+  const supervisor = new Supervisor(core, runs);
+  supervisor.start();
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
@@ -77,5 +82,5 @@ export function createHubApp(options: HubOptions = {}): {
     });
   }
 
-  return { app, core, runs, coordinator, messageRouter, integration };
+  return { app, core, runs, coordinator, messageRouter, integration, supervisor };
 }
