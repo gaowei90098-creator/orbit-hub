@@ -28,7 +28,17 @@ const registerSchema = z.object({
   harness: HARNESS.default("other"),
   principal: z.string().optional(),
 });
-const messageSchema = z.object({ from: z.string().min(1), to: z.string().min(1), content: z.string().min(1) });
+const messageSchema = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  content: z.string().min(1),
+  // P2 结构化字段（可选）。
+  missionId: z.string().optional(),
+  taskId: z.string().optional(),
+  kind: z.enum(["normal", "sync", "question"]).optional(),
+  replyTo: z.string().optional(),
+  requiresReply: z.boolean().optional(),
+});
 const createTaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
@@ -637,7 +647,15 @@ export function mountRoutes(
   app.post("/api/messages", (req, res) => {
     const body = parse(messageSchema, req, res);
     if (!body) return;
-    res.json({ message: core.messages.send(body.from, body.to, body.content) });
+    res.json({
+      message: core.messages.send(body.from, body.to, body.content, {
+        missionId: body.missionId,
+        taskId: body.taskId,
+        kind: body.kind,
+        replyTo: body.replyTo,
+        requiresReply: body.requiresReply,
+      }),
+    });
   });
   app.get("/api/messages/inbox", (req, res) => {
     const agent = String(req.query.agent ?? "");

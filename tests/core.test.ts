@@ -78,6 +78,37 @@ describe("messages", () => {
     core.messages.inbox(b.id);
     expect(core.messages.recent(10)).toHaveLength(1);
   });
+
+  it("P2: 普通消息默认 kind=normal、requiresReply=false、绑定字段为空", () => {
+    const a = core.agents.register("A", "claude-code");
+    const b = core.agents.register("B", "codex");
+    core.messages.send(a.id, b.id, "plain");
+    const [m] = core.messages.recent(1);
+    expect(m!.kind).toBe("normal");
+    expect(m!.requiresReply).toBe(false);
+    expect(m!.taskId).toBeNull();
+    expect(m!.replyTo).toBeNull();
+  });
+
+  it("P2: 结构化字段往返持久化（kind/taskId/replyTo/requiresReply）", () => {
+    const a = core.agents.register("A", "claude-code");
+    const b = core.agents.register("B", "codex");
+    const sent = core.messages.send(a.id, b.id, "API 改了", {
+      kind: "sync",
+      taskId: "t-42",
+      missionId: "m-7",
+      replyTo: "m-prev",
+      requiresReply: true,
+    });
+    // 经收件箱（从 DB 读回）验证落库与读取一致。
+    const [got] = core.messages.inbox(b.id);
+    expect(got!.id).toBe(sent.id);
+    expect(got!.kind).toBe("sync");
+    expect(got!.taskId).toBe("t-42");
+    expect(got!.missionId).toBe("m-7");
+    expect(got!.replyTo).toBe("m-prev");
+    expect(got!.requiresReply).toBe(true);
+  });
 });
 
 describe("tasks", () => {

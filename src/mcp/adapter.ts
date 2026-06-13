@@ -100,16 +100,29 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
     "send_message",
     {
       description:
-        "Send a message to another agent. Use this to coordinate — e.g. announce an API/interface change so the other agent stays compatible.",
+        "Send a message to another agent. Use this to coordinate — e.g. announce an API/interface change so the other agent stays compatible. " +
+        'Set kind="sync" when announcing an interface/contract change, kind="question" (with requires_reply=true) when you need an answer to proceed; bind task_id to the relevant task so the message shows up in context.',
       inputSchema: {
         to: z.string().describe('Recipient agent name or id, or "all" to broadcast to everyone.'),
         content: z.string().describe("The message text."),
+        task_id: z.string().optional().describe("Bind this message to a task id for context."),
+        kind: z
+          .enum(["normal", "sync", "question"])
+          .optional()
+          .describe('"normal" coordination, "sync" interface/contract change, "question" needs an answer.'),
+        reply_to: z.string().optional().describe("Message id this is replying to (threads the conversation)."),
+        requires_reply: z.boolean().optional().describe("Set true if you expect a reply before continuing."),
       },
     },
     async (args) =>
       guard(async () => {
         const to = await resolveTarget(args.to);
-        await client.sendMessage(selfId, to, args.content);
+        await client.sendMessage(selfId, to, args.content, {
+          taskId: args.task_id,
+          kind: args.kind,
+          replyTo: args.reply_to,
+          requiresReply: args.requires_reply,
+        });
         return text(`📨 Sent to ${args.to}.`);
       }),
   );

@@ -39,7 +39,12 @@ CREATE TABLE IF NOT EXISTS messages (
   from_id TEXT NOT NULL,
   to_id TEXT NOT NULL,
   content TEXT NOT NULL,
-  ts INTEGER NOT NULL
+  ts INTEGER NOT NULL,
+  mission_id TEXT,
+  task_id TEXT,
+  kind TEXT,
+  reply_to TEXT,
+  requires_reply INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS message_reads (
   message_id TEXT NOT NULL,
@@ -229,6 +234,11 @@ interface MessageRow {
   to_id: string;
   content: string;
   ts: number;
+  mission_id: string | null;
+  task_id: string | null;
+  kind: string | null;
+  reply_to: string | null;
+  requires_reply: number | null;
 }
 interface LockRow {
   path: string;
@@ -277,6 +287,11 @@ const toMessage = (r: MessageRow): Message => ({
   to: r.to_id,
   content: r.content,
   ts: Number(r.ts),
+  missionId: r.mission_id ?? null,
+  taskId: r.task_id ?? null,
+  kind: (r.kind as Message["kind"]) ?? "normal",
+  replyTo: r.reply_to ?? null,
+  requiresReply: Boolean(r.requires_reply),
 });
 const toLock = (r: LockRow): FileLock => ({
   path: r.path,
@@ -567,6 +582,20 @@ export class Store {
         /* column already exists */
       }
     }
+    // 旧库平滑升级到 P2 结构化消息：messages 加 mission_id/task_id/kind/reply_to/requires_reply。
+    for (const col of [
+      "mission_id TEXT",
+      "task_id TEXT",
+      "kind TEXT",
+      "reply_to TEXT",
+      "requires_reply INTEGER NOT NULL DEFAULT 0",
+    ]) {
+      try {
+        this.db.exec(`ALTER TABLE messages ADD COLUMN ${col}`);
+      } catch {
+        /* column already exists */
+      }
+    }
     this.db
       .prepare(
         `INSERT OR IGNORE INTO contract (id, api_contract, design_spec, version, updated_by, updated_at)
@@ -628,8 +657,22 @@ export class Store {
   // ----- messages -----
   insertMessage(m: Message): void {
     this.db
-      .prepare(`INSERT INTO messages (id, from_id, to_id, content, ts) VALUES (?, ?, ?, ?, ?)`)
-      .run(m.id, m.from, m.to, m.content, m.ts);
+      .prepare(
+        `INSERT INTO messages (id, from_id, to_id, content, ts, mission_id, task_id, kind, reply_to, requires_reply)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        m.id,
+        m.from,
+        m.to,
+        m.content,
+        m.ts,
+        m.missionId ?? null,
+        m.taskId ?? null,
+        m.kind ?? "normal",
+        m.replyTo ?? null,
+        m.requiresReply ? 1 : 0,
+      );
   }
   unreadFor(agentId: string): Message[] {
     const rows = this.db

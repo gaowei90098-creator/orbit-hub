@@ -23,12 +23,22 @@ export interface Agent {
 export type MessageTarget = string; // an agent id, or the literal "all" for broadcast
 export const BROADCAST: MessageTarget = "all";
 
+// 消息类型（P2 结构化消息）：普通协调 / 同步接口变更 / 提问（期待回复）。
+// 路由器（P3）据此决定投递优先级：sync/question 比 normal 更值得打断在途 worker。
+export type MessageKind = "normal" | "sync" | "question";
+
 export interface Message {
   id: string;
   from: string; // agent id
   to: MessageTarget; // agent id or "all"
   content: string;
   ts: number;
+  // P2 结构化字段（全部可选、向后兼容）：把消息绑定到任务/会话与回复链，供 P3 路由器与时间线消费。
+  missionId?: string | null;
+  taskId?: string | null;
+  kind?: MessageKind;
+  replyTo?: string | null; // 被回复消息的 id（线程化）
+  requiresReply?: boolean; // 发送方是否期待回复（路由器据此排队/提醒）
 }
 
 export type TaskStatus = "todo" | "claimed" | "in_progress" | "done";

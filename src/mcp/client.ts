@@ -52,8 +52,13 @@ export class HubClient {
     return this.req("GET", "/api/agents");
   }
 
-  sendMessage(from: string, to: string, content: string): Promise<{ message: Message }> {
-    return this.req("POST", "/api/messages", { from, to, content });
+  sendMessage(
+    from: string,
+    to: string,
+    content: string,
+    meta: { taskId?: string; kind?: string; replyTo?: string; requiresReply?: boolean } = {},
+  ): Promise<{ message: Message }> {
+    return this.req("POST", "/api/messages", { from, to, content, ...meta });
   }
   inbox(agentId: string): Promise<{ messages: Message[] }> {
     return this.req("GET", `/api/messages/inbox?agent=${encodeURIComponent(agentId)}`);

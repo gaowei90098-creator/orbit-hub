@@ -24,12 +24,20 @@ export interface Task {
   updatedAt: number;
 }
 
+export type MessageKind = "normal" | "sync" | "question";
+
 export interface Message {
   id: string;
   from: string;
   to: string;
   content: string;
   ts: number;
+  // P2 结构化字段（可选，后端缺省即 normal）。
+  missionId?: string | null;
+  taskId?: string | null;
+  kind?: MessageKind;
+  replyTo?: string | null;
+  requiresReply?: boolean;
 }
 
 export interface FileLock {

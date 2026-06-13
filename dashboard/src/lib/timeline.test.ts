@@ -126,6 +126,18 @@ describe("buildTimeline", () => {
     const tasks = Array.from({ length: 10 }, (_, i) => task({ id: `t${i}`, updatedAt: T0 + i }));
     expect(buildTimeline(input({ tasks }), 5)).toHaveLength(5);
   });
+
+  it("P2: sync/question 消息带前缀与色调，normal 不带", () => {
+    const sync = buildTimeline(input({ messages: [message({ id: "s", kind: "sync" })] }))[0]!;
+    expect(sync.title).toContain("接口同步");
+    expect(sync.tone).toBe("info");
+    const question = buildTimeline(input({ messages: [message({ id: "q", kind: "question" })] }))[0]!;
+    expect(question.title).toContain("提问");
+    expect(question.tone).toBe("warning");
+    const normal = buildTimeline(input({ messages: [message({ id: "n", kind: "normal" })] }))[0]!;
+    expect(normal.title).not.toContain("·");
+    expect(normal.tone).toBe("neutral");
+  });
 });
 
 describe("detectDecisions", () => {
