@@ -7,7 +7,7 @@ import { ConflictsCard } from "./components/ConflictsCard";
 import { IntentsCard } from "./components/IntentsCard";
 import { ActivityCard } from "./components/ActivityCard";
 import { MissionCanvas } from "./components/MissionCanvas";
-import { WorkflowHome } from "./components/WorkflowHome";
+import { ConsoleHome } from "./components/ConsoleHome";
 import { ClipboardList, FileText, PlugZap, Rocket, ShieldAlert, TriangleAlert } from "lucide-react";
 
 const navItems = [
@@ -102,7 +102,7 @@ export function App() {
         />
 
         <main className="app-main">
-          <WorkflowHome
+          <ConsoleHome
             agents={agents}
             tasks={tasks}
             locks={locks}
