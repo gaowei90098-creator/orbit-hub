@@ -90,7 +90,7 @@ function startHub(flags: Map<string, string>): void {
 
   // 生产路径启用 lead planner（claude headless 拆分）；ORBIT_LEAD_PLANNER=0 可关闭。
   const leadPlanner = process.env.ORBIT_LEAD_PLANNER === "0" ? undefined : planWithLead;
-  const { app, core, runs, coordinator, integration } = createHubApp({ dbPath, token, leadPlanner });
+  const { app, core, runs, coordinator, messageRouter, integration } = createHubApp({ dbPath, token, leadPlanner });
   const server = app.listen(port, host, () => {
     process.stdout.write(startBanner(port, dbPath, token));
   });
@@ -102,6 +102,7 @@ function startHub(flags: Map<string, string>): void {
   const shutdown = (): void => {
     clearInterval(reaper);
     coordinator.stop();
+    messageRouter.stop();
     integration.stop();
     runs.stopAll();
     server.close();
@@ -120,9 +121,10 @@ async function startMcp(flags: Map<string, string>): Promise<void> {
   const harness = (HARNESSES as string[]).includes(rawHarness) ? (rawHarness as Harness) : "other";
   const token = flags.get("token") ?? process.env.HUB_TOKEN;
   const principal = flags.get("principal") ?? process.env.AGENT_PRINCIPAL ?? "本机";
+  const runId = flags.get("run-id") ?? process.env.ORBIT_RUN_ID;
 
   try {
-    await startAdapter({ hubUrl, agentName, harness, token, principal });
+    await startAdapter({ hubUrl, agentName, harness, token, principal, runId });
   } catch (err) {
     process.stderr.write(`[orbit] failed to start adapter: ${(err as Error).message}\n`);
     process.exit(1);

@@ -155,6 +155,14 @@ export class RunManager {
     return { ok: true };
   }
 
+  // M2.2 链路：MCP adapter 注册后，把 agentId 绑定到 run，供 MessageRouter 路由。
+  bind(runId: string, agentId: string): AgentRun | null {
+    const run = this.core.store.getAgentRun(runId);
+    if (!run) return null;
+    this.update(runId, { agentId });
+    return this.core.store.getAgentRun(runId);
+  }
+
   // C07 中断：正常终止（SIGTERM→SIGKILL）。终态在 onExit 里收口为 stopped。
   stop(runId: string): AgentRun | null {
     const run = this.core.store.getAgentRun(runId);

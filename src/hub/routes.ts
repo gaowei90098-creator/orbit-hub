@@ -7,9 +7,11 @@ import type { CoordinationCore } from "../core/core.js";
 import type { Agent, Harness, Task } from "../core/types.js";
 import type { RunManager } from "./run-manager.js";
 import type { IntegrationManager } from "./integration-manager.js";
+import type { MessageRouter } from "./message-router.js";
 import { detectEnvironment } from "../drivers/detect.js";
 import { detectCommands } from "../core/projects.js";
 import { launchParts } from "../launch.js";
+import { newId } from "../core/id.js";
 import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type MissionPlan, type TaskDraft } from "./task-planner.js";
 import type { LeadPlannerFn } from "./lead-planner.js";
 
@@ -161,7 +163,7 @@ function cliLaunchParts(): { command: string; baseArgs: string[] } {
   return launchParts(cliPath);
 }
 
-function mcpArgs(name: string, harness: string, url: string, tokenRequired: boolean, principal?: string): string[] {
+function mcpArgs(name: string, harness: string, url: string, tokenRequired: boolean, principal?: string, runId?: string): string[] {
   return [
     ...cliLaunchParts().baseArgs,
     "mcp",
@@ -173,6 +175,7 @@ function mcpArgs(name: string, harness: string, url: string, tokenRequired: bool
     url,
     ...(principal ? ["--principal", principal] : []),
     ...(tokenRequired ? ["--token", "<TOKEN>"] : []),
+    ...(runId ? ["--run-id", runId] : []),
   ];
 }
 
@@ -269,6 +272,7 @@ export function mountRoutes(
   options: RouteOptions = {},
   runs?: RunManager,
   integration?: IntegrationManager,
+  messageRouter?: MessageRouter,
 ): void {
   app.get("/healthz", (_req, res) => res.json({ ok: true }));
   app.get("/api/snapshot", (_req, res) => res.json(core.snapshot()));
@@ -384,6 +388,25 @@ export function mountRoutes(
     }
     res.json({ run: result.run });
   });
+  // M2.2 绑定 run ↔ agentId（worker adapter 注册后回调）。
+  app.post("/api/agent-runs/:id/bind", (req, res) => {
+    if (!runs) return res.status(503).json({ error: "runs_unavailable" });
+    const { agentId } = req.body as { agentId?: string };
+    if (!agentId || typeof agentId !== "string") return res.status(400).json({ error: "missing_agentId" });
+    const run = runs.bind(req.params.id, agentId);
+    if (!run) return res.status(404).json({ error: "not_found" });
+    res.json({ run });
+  });
+
+  // M2.2 orbit_wait 长轮询：等待未读消息到达（或超时），返回消息列表并标记已读。
+  app.post("/api/agents/:id/wait", async (req, res) => {
+    const agentId = req.params.id;
+    const timeoutMs = Math.min(Number(req.body?.timeoutMs ?? 30_000), 60_000);
+    if (messageRouter) await messageRouter.wait(agentId, timeoutMs);
+    const messages = core.messages.inbox(agentId);
+    res.json({ messages });
+  });
+
   app.get("/api/connect", (req, res) => res.json(connectInfo(req, Boolean(options.tokenRequired), principalFromQuery(req))));
   app.post("/api/connect/install/codex", (req, res) => {
     const info = connectInfo(req, Boolean(options.tokenRequired), principalFromQuery(req));
@@ -528,7 +551,9 @@ export function mountRoutes(
         // 撞 already_claimed 直接退出（实测的"自动执行没人开工"根因之一）→ 先释放。
         if (task?.assignee) core.tasks.release(task.id);
         const workerName = `自动助手·${task ? task.id.slice(-4) : harness}`;
+        const runId = newId("run");
         runs.start({
+          runId,
           harness,
           missionId,
           taskId: task?.id ?? null,
@@ -541,7 +566,7 @@ export function mountRoutes(
           verifyCommand: task?.verifyCommand,
           interfaceRef: task?.interfaceRef,
           projectPath: resolvedPath,
-          mcp: { command, args: mcpArgs(workerName, harness, url, Boolean(options.tokenRequired)) },
+          mcp: { command, args: mcpArgs(workerName, harness, url, Boolean(options.tokenRequired), undefined, runId) },
           // 1.3 worker 规格（dashboard 可配）；不传用 Driver/环境默认值。
           model: body.workerSpec?.model,
           budgetUsd: body.workerSpec?.budgetUsd,

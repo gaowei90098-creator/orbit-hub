@@ -24,6 +24,7 @@ export interface AdapterConfig {
   harness: Harness;
   token?: string;
   principal?: string; // 归属方(人/团队), 多 principal 协作用
+  runId?: string; // M2.2：Orbit 拉起的 worker 携带，注册后自动绑定 run ↔ agentId
 }
 
 type ToolResult = { content: { type: "text"; text: string }[]; isError?: boolean };
@@ -47,6 +48,12 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
   const { agent } = await client.registerAgent(config.agentName, config.harness, config.principal);
   const selfId = agent.id;
   process.stderr.write(`[orbit] registered "${agent.name}" (${selfId}) with hub at ${config.hubUrl}\n`);
+
+  // M2.2：Orbit worker 启动时携带 --run-id，注册后立即绑定 agentId → run，
+  // 让 MessageRouter 可以通过 agentId 找到 run 并路由消息。
+  if (config.runId) {
+    await client.bindRun(config.runId, selfId).catch(() => {});
+  }
 
   // Keep presence fresh; unref so it never holds the process open on its own.
   const heartbeat = setInterval(() => {
@@ -133,6 +140,33 @@ export async function createAgentServer(config: AdapterConfig): Promise<{ server
     async () =>
       guard(async () => {
         const [{ messages }, { agents }] = await Promise.all([client.inbox(selfId), client.listAgents()]);
+        return text(renderInbox(messages, buildNameMap(agents)));
+      }),
+  );
+
+  server.registerTool(
+    "orbit_wait",
+    {
+      description:
+        "Block until a message arrives in your inbox (or the timeout elapses), then return all unread messages. " +
+        "Use this at a natural checkpoint when you expect a reply or a sync signal from another agent — " +
+        "the hub will wake you up the moment a message arrives rather than making you poll. " +
+        "Prefer orbit_wait over a get_messages loop; only fall back to get_messages for a one-shot check.",
+      inputSchema: {
+        timeout_ms: z
+          .number()
+          .int()
+          .min(1_000)
+          .max(60_000)
+          .optional()
+          .describe("Max milliseconds to wait (default 30 000, max 60 000)."),
+      },
+    },
+    async (args) =>
+      guard(async () => {
+        const { messages } = await client.waitMessages(selfId, args.timeout_ms ?? 30_000);
+        if (messages.length === 0) return text("⏳ No new messages (timed out).");
+        const { agents } = await client.listAgents();
         return text(renderInbox(messages, buildNameMap(agents)));
       }),
   );

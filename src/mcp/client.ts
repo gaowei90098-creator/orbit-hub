@@ -45,6 +45,14 @@ export class HubClient {
   registerAgent(name: string, harness: string, principal?: string): Promise<{ agent: Agent }> {
     return this.req("POST", "/api/agents", { name, harness, principal });
   }
+  // M2.2：把 agentId 绑定到 worker run，供 MessageRouter 路由。
+  bindRun(runId: string, agentId: string): Promise<{ run: unknown }> {
+    return this.req("POST", `/api/agent-runs/${encodeURIComponent(runId)}/bind`, { agentId });
+  }
+  // M2.2 orbit_wait：长轮询等待未读消息，返回消息列表（已标记已读）。
+  waitMessages(agentId: string, timeoutMs: number): Promise<{ messages: Message[] }> {
+    return this.req("POST", `/api/agents/${encodeURIComponent(agentId)}/wait`, { timeoutMs });
+  }
   heartbeat(id: string): Promise<{ agent: Agent }> {
     return this.req("POST", `/api/agents/${encodeURIComponent(id)}/heartbeat`);
   }

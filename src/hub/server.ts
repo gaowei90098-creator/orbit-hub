@@ -6,6 +6,7 @@ import { mountRoutes } from "./routes.js";
 import { mountSse } from "./sse.js";
 import { RunManager, type DriverResolver } from "./run-manager.js";
 import { Coordinator } from "./coordinator.js";
+import { MessageRouter } from "./message-router.js";
 import { IntegrationManager, type ValidationRunner } from "./integration-manager.js";
 import type { LeadPlannerFn } from "./lead-planner.js";
 
@@ -41,6 +42,7 @@ export function createHubApp(options: HubOptions = {}): {
   core: CoordinationCore;
   runs: RunManager;
   coordinator: Coordinator;
+  messageRouter: MessageRouter;
   integration: IntegrationManager;
 } {
   const core = new CoordinationCore(options.dbPath ?? ":memory:");
@@ -48,6 +50,9 @@ export function createHubApp(options: HubOptions = {}): {
   // E02/E04：契约更新自动注入另一 Agent 会话。订阅自身事件总线。
   const coordinator = new Coordinator(core, runs);
   coordinator.start();
+  // M2.2：消息路由——主动推送给目标 worker（orbit_wait + resume 双通道）。
+  const messageRouter = new MessageRouter(core, runs);
+  messageRouter.start();
   // 第四阶段：集成、验证、最终 Diff、审批编排。注入 runs 以支持集成冲突自动派回修复。
   const integration = new IntegrationManager(core, options.validationRunner, runs);
   integration.start();
@@ -56,7 +61,7 @@ export function createHubApp(options: HubOptions = {}): {
 
   if (options.token) app.use(authMiddleware(options.token));
 
-  mountRoutes(app, core, { tokenRequired: Boolean(options.token), leadPlanner: options.leadPlanner }, runs, integration);
+  mountRoutes(app, core, { tokenRequired: Boolean(options.token), leadPlanner: options.leadPlanner }, runs, integration, messageRouter);
   mountSse(app, core);
 
   // Serve the built dashboard if present, with SPA fallback for client-side routing.
@@ -72,5 +77,5 @@ export function createHubApp(options: HubOptions = {}): {
     });
   }
 
-  return { app, core, runs, coordinator, integration };
+  return { app, core, runs, coordinator, messageRouter, integration };
 }
