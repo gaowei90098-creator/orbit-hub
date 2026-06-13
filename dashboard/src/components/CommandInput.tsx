@@ -152,6 +152,15 @@ export function CommandInput({
         } else if (cmd === "/review") {
           await actions.reviewMission(mission!.id);
           setResult({ text: "已派出审查助手，结论会以消息出现在时间线。", tone: "success" });
+        } else if (cmd === "/rescue") {
+          const { rescued, skipped, scanned } = await actions.rescueMission(mission!.id);
+          if (rescued.length === 0 && skipped.length === 0) {
+            setResult({ text: `扫描了 ${scanned} 个 Agent，没有发现需要救援的停滞 Agent。`, tone: "info" });
+          } else {
+            const parts = [`已唤醒 ${rescued.length} 个停滞 Agent`];
+            if (skipped.length > 0) parts.push(`${skipped.length} 个仍在运行、暂时无法打断`);
+            setResult({ text: parts.join("，") + "。", tone: rescued.length > 0 ? "success" : "info" });
+          }
         } else if (cmd === "/cancel") {
           const { stoppedRuns, transitioned } = await actions.cancelMission(mission!.id);
           const head = transitioned ? "已取消该协作" : "该协作已是终态，无需取消";

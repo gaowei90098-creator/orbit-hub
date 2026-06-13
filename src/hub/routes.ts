@@ -13,6 +13,7 @@ import { detectCommands } from "../core/projects.js";
 import { launchParts } from "../launch.js";
 import { newId } from "../core/id.js";
 import { buildReviewPrompt } from "./review.js";
+import { buildRescuePrompt, selectRescueTargets, RESCUE_STALL_MS } from "./rescue.js";
 import { planTasks, planWithTemplate, listTemplates, assignDraftsToAgents, type MissionPlan, type TaskDraft } from "./task-planner.js";
 import type { LeadPlannerFn } from "./lead-planner.js";
 
@@ -652,6 +653,26 @@ export function mountRoutes(
       mcp: { command, args: mcpArgs(workerName, harness, url, Boolean(options.tokenRequired), undefined, runId) },
     });
     res.json({ ok: true, runId });
+  });
+
+  // M3.2 /rescue：救援该 mission 下停滞/受阻的 worker。对每个看起来卡住的 worker（等待输入、
+  // 失败、或长时间无活动）注入救援提示让它报告进度并继续；进程仍在跑的无法安全打断，记为 skipped。
+  app.post("/api/missions/:id/rescue", (req, res) => {
+    if (!runs) return res.status(503).json({ error: "runs_unavailable" });
+    const mission = core.missions.get(req.params.id);
+    if (!mission) return res.status(404).json({ error: "unknown_mission" });
+    const now = Date.now();
+    const mineWorkers = runs.list().filter((r) => r.missionId === mission.id);
+    const targets = selectRescueTargets(mineWorkers, now, RESCUE_STALL_MS);
+    const prompt = buildRescuePrompt();
+    const rescued: string[] = [];
+    const skipped: { runId: string; reason: string }[] = [];
+    for (const t of targets) {
+      const r = runs.resume(t.id, prompt);
+      if (r.ok) rescued.push(t.id);
+      else skipped.push({ runId: t.id, reason: r.reason ?? "unknown" });
+    }
+    res.json({ rescued, skipped, scanned: mineWorkers.length });
   });
 
   // ----- 第四阶段：集成、验证、最终 Diff、人工审批 -----

@@ -88,6 +88,9 @@ export interface HubActions {
   dispatchTask: (taskId: string, harness?: "claude-code" | "codex") => Promise<void>;
   cancelMission: (missionId: string) => Promise<{ stoppedRuns: string[]; transitioned: boolean }>;
   reviewMission: (missionId: string) => Promise<{ ok: boolean; runId?: string }>;
+  rescueMission: (
+    missionId: string,
+  ) => Promise<{ rescued: string[]; skipped: { runId: string; reason: string }[]; scanned: number }>;
 }
 
 export interface HubState {
@@ -390,6 +393,14 @@ export function useHubState(): HubState {
     });
   }, []);
 
+  const rescueMission = useCallback(async (missionId: string) => {
+    const r = await api<{ rescued: string[]; skipped: { runId: string; reason: string }[]; scanned: number }>(
+      `/api/missions/${missionId}/rescue`,
+      { method: "POST", body: "{}" },
+    );
+    return { rescued: r.rescued ?? [], skipped: r.skipped ?? [], scanned: r.scanned ?? 0 };
+  }, []);
+
   const updateContract = useCallback(
     async (fields: { apiContract?: string; designSpec?: string; expectedVersion?: number }) => {
       const r = await api<{ ok: boolean }>("/api/contract", {
@@ -440,6 +451,7 @@ export function useHubState(): HubState {
       dispatchTask,
       cancelMission,
       reviewMission,
+      rescueMission,
     },
   };
 }

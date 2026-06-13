@@ -325,6 +325,24 @@ describe("mission review (M3.2 /review)", () => {
   });
 });
 
+describe("mission rescue (M3.2 /rescue)", () => {
+  it("404s for an unknown mission", async () => {
+    const res = await request(app).post("/api/missions/nope/rescue").send();
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("unknown_mission");
+  });
+
+  it("reports nothing to rescue when a mission has no stuck workers", async () => {
+    const launch = await request(app).post("/api/missions/launch").send({ goal: "做个登录页" });
+    const missionId = launch.body.mission.id as string;
+    const res = await request(app).post(`/api/missions/${missionId}/rescue`).send();
+    expect(res.status).toBe(200);
+    expect(res.body.rescued).toEqual([]);
+    expect(res.body.skipped).toEqual([]);
+    expect(res.body.scanned).toBe(0);
+  });
+});
+
 describe("hub auth", () => {
   it("rejects /api without token and accepts with it", async () => {
     const secured = createHubApp({ dbPath: ":memory:", token: "secret" }).app;
