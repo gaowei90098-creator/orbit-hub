@@ -78,7 +78,14 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: useShell,
       cwd: homedir(),
-      env: { ...process.env },
+      // 本地 CLI 以管道方式 spawn（非真实终端）。显式声明“非交互纯文本管道”：
+      // - TERM=dumb / NO_COLOR：让基于 prompt_toolkit / rich / curses 的 CLI 退化为纯文本，
+      //   而不是去查询 Windows 控制台屏幕缓冲区导致 NoConsoleScreenBufferError 崩溃
+      //   （Hermes 等 Python TUI 继承到 TERM=xterm-256color 时正是这样崩的），同时避免 ANSI
+      //   颜色码污染聊天气泡；
+      // - PYTHONUNBUFFERED：Python CLI 实时回流输出（更好的流式体验）；
+      // - PYTHONIOENCODING=utf-8：修正 Windows 下 Python 输出的 GBK 乱码。
+      env: { ...process.env, TERM: 'dumb', NO_COLOR: '1', PYTHONUNBUFFERED: '1', PYTHONIOENCODING: 'utf-8' },
       windowsHide: true
     })
     this.status = 'busy'
