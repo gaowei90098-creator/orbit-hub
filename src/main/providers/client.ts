@@ -83,23 +83,28 @@ export class ProviderClient {
   // ---- OpenAI 兼容（含 OpenAI / DeepSeek / OpenRouter / 自定义） ----
   private async streamOpenAICompat(provider: ProviderDefinition, model: ModelDefinition, messages: ChatCompletionMessage[], opts: CallOptions, thinking: ThinkingConfig, cb: StreamCallbacks, signal?: AbortSignal): Promise<void> {
     const url = `${provider.baseUrl.replace(/\/$/, '')}/chat/completions`
-    const body = this.buildRequest(messages, opts.systemPrompt, thinking)
+    const body: any = this.buildRequest(messages, opts.systemPrompt, thinking)
+    body.stream_options = { include_usage: true }   // 让上游在末尾 chunk 返回 usage
     const headers = this.headersFor(provider)
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
     if (!res.ok || !res.body) {
       const txt = await res.text().catch(() => '')
       throw new Error(`HTTP ${res.status} from ${provider.name}: ${txt.slice(0, 200)}`)
     }
+    let content = ''
+    let usage: any = undefined
     await this.readSse(res.body, (evt) => {
       if (!evt || evt === '[DONE]') return
       try {
         const chunk: ChatCompletionChunk = JSON.parse(evt)
+        const u = (chunk as any).usage
+        if (u) usage = normalizeUsage(u)
         const delta = chunk.choices?.[0]?.delta
-        if (delta?.content) cb.onContent?.(delta.content)
+        if (delta?.content) { content += delta.content; cb.onContent?.(delta.content) }
         if (delta?.reasoning_content) cb.onThinking?.(delta.reasoning_content)
       } catch {}
     })
-    cb.onDone?.({ content: '', usage: undefined })
+    cb.onDone?.({ content, usage })
   }
 
   // ---- Anthropic Messages ----
@@ -130,6 +135,8 @@ export class ProviderClient {
     let content = ''
     let thinkingTxt = ''
     let thinkingStartedAt: number | null = null
+    let inputTokens = 0
+    let outputTokens = 0
     await this.readSse(res.body, (evt) => {
       if (!evt) return
       // anthropic event-stream: lines like "event: content_block_delta" then "data: {...}"
@@ -151,6 +158,14 @@ export class ProviderClient {
             cb.onContent?.(obj.delta.text)
           }
         }
+        // usage：message_start 带 input_tokens，message_delta 带累计 output_tokens
+        if (obj.type === 'message_start' && obj.message?.usage) {
+          inputTokens = obj.message.usage.input_tokens ?? inputTokens
+          outputTokens = obj.message.usage.output_tokens ?? outputTokens
+        }
+        if (obj.type === 'message_delta' && obj.usage) {
+          outputTokens = obj.usage.output_tokens ?? outputTokens
+        }
         if (obj.type === 'message_stop') {
           // end
         }
@@ -159,6 +174,7 @@ export class ProviderClient {
 
     cb.onDone?.({
       content,
+      usage: normalizeUsage({ input_tokens: inputTokens, output_tokens: outputTokens }),
       thinking: thinkingTxt ? {
         enabled: true,
         level: thinking.level,
@@ -195,6 +211,7 @@ export class ProviderClient {
 
     let content = ''
     let thinkingTxt = ''
+    let usageMeta: any = undefined
     await this.readSse(res.body, (evt) => {
       if (!evt) return
       const dataLine = evt.split('\n').find(l => l.startsWith('data: '))
@@ -202,6 +219,7 @@ export class ProviderClient {
       const payload = dataLine.slice(6).trim()
       try {
         const obj = JSON.parse(payload)
+        if (obj.usageMetadata) usageMeta = obj.usageMetadata
         const parts = obj.candidates?.[0]?.content?.parts || []
         for (const part of parts) {
           if (part.text && part.thought) {
@@ -216,6 +234,7 @@ export class ProviderClient {
     })
     cb.onDone?.({
       content,
+      usage: normalizeUsage(usageMeta),
       thinking: thinkingTxt ? {
         enabled: true,
         level: thinking.level,
@@ -248,6 +267,20 @@ export class ProviderClient {
       }
     }
   }
+}
+
+/**
+ * 把各家 usage 归一为 OpenAI 形状 { prompt_tokens, completion_tokens, total_tokens }。
+ * 兼容 OpenAI(prompt/completion/total)、Anthropic(input/output)、Gemini(promptTokenCount…)。
+ * 全为空时返回 undefined（表示上游未提供用量）。
+ */
+function normalizeUsage(u: any): { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined {
+  if (!u) return undefined
+  const prompt = u.prompt_tokens ?? u.input_tokens ?? u.promptTokenCount
+  const completion = u.completion_tokens ?? u.output_tokens ?? u.candidatesTokenCount
+  const total = u.total_tokens ?? u.totalTokenCount ?? (prompt !== undefined || completion !== undefined ? (prompt ?? 0) + (completion ?? 0) : undefined)
+  if (prompt === undefined && completion === undefined && total === undefined) return undefined
+  return { prompt_tokens: prompt ?? 0, completion_tokens: completion ?? 0, total_tokens: total ?? 0 }
 }
 
 export function buildProviderClient(resolved: ResolvedCall): ProviderClient {
