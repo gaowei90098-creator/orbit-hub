@@ -123,10 +123,38 @@ function scanClaudeHome(): string | null {
   return hits.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0]
 }
 
+/**
+ * 扫描 Claude Code 桌面版自带 CLI（GUI 客户端会把可用的 `claude.exe` 解到这两处，
+ * 按版本号建子目录，自动更新时会多版本共存）：
+ *   %APPDATA%\Claude\claude-code\<ver>\claude.exe   （Roaming，通常最新）
+ *   %LOCALAPPDATA%\Claude-3p\claude-code\<ver>\claude.exe
+ * 多版本按 mtime 取最新在前；返回全部供 UI 选择。
+ */
+function scanClaudeCodeApp(): AgentBinaryCandidate[] {
+  const roots = [
+    process.env.APPDATA ? join(process.env.APPDATA, 'Claude', 'claude-code') : '',
+    join(process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'Claude-3p', 'claude-code')
+  ].filter(Boolean)
+  const hits: string[] = []
+  for (const root of roots) {
+    if (!existsSync(root)) continue
+    try {
+      for (const ver of readdirSync(root)) {
+        const exe = join(root, ver, 'claude.exe')
+        if (existsSync(exe)) hits.push(exe)
+      }
+    } catch { /* noop */ }
+  }
+  return hits
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+    .map((p): AgentBinaryCandidate => ({ source: 'desktop', label: '桌面版 (Claude Code)', path: p }))
+}
+
 export function claudeCandidates(): AgentBinaryCandidate[] {
   const local = scanClaudeHome()
   return dedupe([
     envCandidate('CLAUDE_PATH'),
+    ...scanClaudeCodeApp(),
     npmCandidate('claude'),
     { source: 'terminal', label: '终端版 (本地安装器)', path: join(homedir(), '.local', 'bin', 'claude.exe') },
     { source: 'terminal', label: '终端版 (本地安装器)', path: join(homedir(), '.local', 'bin', 'claude') },
