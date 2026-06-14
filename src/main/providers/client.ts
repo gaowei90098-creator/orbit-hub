@@ -18,7 +18,7 @@ import { THINKING_BUDGET_TOKENS } from './presets'
 export interface StreamCallbacks {
   onContent?: (delta: string) => void
   onThinking?: (delta: string) => void
-  onDone?: (final: { content: string; thinking?: ThinkingSummary; usage?: any }) => void
+  onDone?: (final: { content: string; thinking?: ThinkingSummary; usage?: any; finishReason?: string }) => void
   onError?: (err: Error) => void
 }
 
@@ -93,18 +93,21 @@ export class ProviderClient {
     }
     let content = ''
     let usage: any = undefined
+    let finishReason: string | undefined
     await this.readSse(res.body, (evt) => {
       if (!evt || evt === '[DONE]') return
       try {
         const chunk: ChatCompletionChunk = JSON.parse(evt)
         const u = (chunk as any).usage
         if (u) usage = normalizeUsage(u)
+        const fr = chunk.choices?.[0]?.finish_reason
+        if (fr) finishReason = normFinish(fr)
         const delta = chunk.choices?.[0]?.delta
         if (delta?.content) { content += delta.content; cb.onContent?.(delta.content) }
         if (delta?.reasoning_content) cb.onThinking?.(delta.reasoning_content)
       } catch {}
     })
-    cb.onDone?.({ content, usage })
+    cb.onDone?.({ content, usage, finishReason })
   }
 
   // ---- Anthropic Messages ----
@@ -137,6 +140,7 @@ export class ProviderClient {
     let thinkingStartedAt: number | null = null
     let inputTokens = 0
     let outputTokens = 0
+    let stopReason: string | undefined
     await this.readSse(res.body, (evt) => {
       if (!evt) return
       // anthropic event-stream: lines like "event: content_block_delta" then "data: {...}"
@@ -163,8 +167,9 @@ export class ProviderClient {
           inputTokens = obj.message.usage.input_tokens ?? inputTokens
           outputTokens = obj.message.usage.output_tokens ?? outputTokens
         }
-        if (obj.type === 'message_delta' && obj.usage) {
-          outputTokens = obj.usage.output_tokens ?? outputTokens
+        if (obj.type === 'message_delta') {
+          if (obj.usage) outputTokens = obj.usage.output_tokens ?? outputTokens
+          if (obj.delta?.stop_reason) stopReason = obj.delta.stop_reason
         }
         if (obj.type === 'message_stop') {
           // end
@@ -175,6 +180,7 @@ export class ProviderClient {
     cb.onDone?.({
       content,
       usage: normalizeUsage({ input_tokens: inputTokens, output_tokens: outputTokens }),
+      finishReason: normFinish(stopReason),
       thinking: thinkingTxt ? {
         enabled: true,
         level: thinking.level,
@@ -212,6 +218,7 @@ export class ProviderClient {
     let content = ''
     let thinkingTxt = ''
     let usageMeta: any = undefined
+    let geminiFinish: string | undefined
     await this.readSse(res.body, (evt) => {
       if (!evt) return
       const dataLine = evt.split('\n').find(l => l.startsWith('data: '))
@@ -220,6 +227,8 @@ export class ProviderClient {
       try {
         const obj = JSON.parse(payload)
         if (obj.usageMetadata) usageMeta = obj.usageMetadata
+        const fr = obj.candidates?.[0]?.finishReason
+        if (fr) geminiFinish = normFinish(fr)
         const parts = obj.candidates?.[0]?.content?.parts || []
         for (const part of parts) {
           if (part.text && part.thought) {
@@ -235,6 +244,7 @@ export class ProviderClient {
     cb.onDone?.({
       content,
       usage: normalizeUsage(usageMeta),
+      finishReason: geminiFinish,
       thinking: thinkingTxt ? {
         enabled: true,
         level: thinking.level,
@@ -274,6 +284,17 @@ export class ProviderClient {
  * 兼容 OpenAI(prompt/completion/total)、Anthropic(input/output)、Gemini(promptTokenCount…)。
  * 全为空时返回 undefined（表示上游未提供用量）。
  */
+/** 把各家结束原因归一为 OpenAI 取向的中性值：stop | length | tool_calls | content_filter。 */
+function normFinish(raw: any): string | undefined {
+  if (!raw) return undefined
+  const s = String(raw).toLowerCase()
+  if (s === 'max_tokens' || s === 'length') return 'length'
+  if (s === 'tool_use' || s === 'tool_calls' || s === 'function_call') return 'tool_calls'
+  if (s === 'content_filter' || s === 'safety' || s === 'recitation') return 'content_filter'
+  // end_turn / stop / stop_sequence / STOP / 其它 → stop
+  return 'stop'
+}
+
 function normalizeUsage(u: any): { prompt_tokens: number; completion_tokens: number; total_tokens: number } | undefined {
   if (!u) return undefined
   const prompt = u.prompt_tokens ?? u.input_tokens ?? u.promptTokenCount

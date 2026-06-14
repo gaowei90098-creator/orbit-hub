@@ -396,35 +396,56 @@ export class LocalProxy extends EventEmitter {
     let started = false
 
     return new Promise<void>((resolve, reject) => {
+      const controller = new AbortController()
+      let settled = false
+      const FIRST_BYTE_MS = 45000   // 首字节超时：连上却久不出字 → 中止并故障转移
+      const IDLE_MS = 90000         // 流中空闲超时：长时间无新增 → 中止
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const arm = (ms: number) => { if (timer) clearTimeout(timer); timer = setTimeout(() => { if (!settled) controller.abort() }, ms) }
+      const onClose = () => { if (!settled) controller.abort() }   // 客户端断开 → 中止上游，不再写死 socket
+      res.on("close", onClose)
+      const cleanup = () => { if (timer) { clearTimeout(timer); timer = null } res.off("close", onClose) }
+      arm(FIRST_BYTE_MS)
+
       client.stream(
-        { messages, systemPrompt, thinkingOverride: cand.thinking },
+        { messages, systemPrompt, thinkingOverride: cand.thinking, signal: controller.signal },
         {
           onContent: (delta) => {
             content += delta
+            arm(IDLE_MS)
             if (noStream) return
             if (!started) { started = true; emitter.begin() }
             emitter.content(delta)
           },
           onThinking: (delta) => {
             thinkingTxt += delta
+            arm(IDLE_MS)
             if (noStream) return
             if (!started) { started = true; emitter.begin() }
             emitter.thinking(delta)
           },
           onDone: (final) => {
+            if (settled) return
+            settled = true; cleanup()
             if (noStream) {
-              emitter.json(content, thinkingTxt, final.usage)
+              emitter.json(content, thinkingTxt, final.usage, final.finishReason)
             } else {
               if (!started) { started = true; emitter.begin() }
-              emitter.done(final.usage)
+              emitter.done(final.usage, final.finishReason)
             }
             resolve()
           },
           onError: (err) => {
+            if (settled) return
+            settled = true; cleanup()
             reject(Object.assign(err instanceof Error ? err : new Error(String(err)), { afterOutput: started }))
           }
         }
-      ).catch((e) => reject(Object.assign(e instanceof Error ? e : new Error(String(e)), { afterOutput: started })))
+      ).catch((e) => {
+        if (settled) return
+        settled = true; cleanup()
+        reject(Object.assign(e instanceof Error ? e : new Error(String(e)), { afterOutput: started }))
+      })
     })
   }
 
@@ -508,8 +529,8 @@ class OpenAIWire {
   content(d: string): void { this.chunk({ content: d }) }
   thinking(d: string): void { this.chunk({ reasoning_content: d }) }
 
-  done(usage: any): void {
-    this.chunk({}, "stop")
+  done(usage: any, finishReason?: string): void {
+    this.chunk({}, finishReason || "stop")   // 归一值 stop|length|tool_calls|content_filter 即 OpenAI 格式
     if (usage) {
       this.res.write("data: " + JSON.stringify({
         id: this.id, object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000),
@@ -520,14 +541,14 @@ class OpenAIWire {
     this.res.end()
   }
 
-  json(content: string, thinking: string, usage: any): void {
+  json(content: string, thinking: string, usage: any, finishReason?: string): void {
     this.res.writeHead(200, { "content-type": "application/json" })
     this.res.end(JSON.stringify({
       id: this.id,
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
       model: this.model,
-      choices: [{ index: 0, message: { role: "assistant", content, ...(thinking ? { reasoning_content: thinking } : {}) }, finish_reason: "stop" }],
+      choices: [{ index: 0, message: { role: "assistant", content, ...(thinking ? { reasoning_content: thinking } : {}) }, finish_reason: finishReason || "stop" }],
       usage
     }))
   }
@@ -588,25 +609,25 @@ class AnthropicWire {
     this.ev("content_block_delta", { type: "content_block_delta", index: this.blockIndex, delta: { type: "text_delta", text: d } })
   }
 
-  done(usage: any): void {
+  done(usage: any, finishReason?: string): void {
     this.closeBlock()
     this.ev("message_delta", {
       type: "message_delta",
-      delta: { stop_reason: "end_turn", stop_sequence: null },
+      delta: { stop_reason: anthropicStop(finishReason), stop_sequence: null },
       usage: { output_tokens: usage?.completion_tokens ?? usage?.output_tokens ?? 0 }
     })
     this.ev("message_stop", { type: "message_stop" })
     this.res.end()
   }
 
-  json(content: string, thinking: string, usage: any): void {
+  json(content: string, thinking: string, usage: any, finishReason?: string): void {
     this.res.writeHead(200, { "content-type": "application/json" })
     const blocks: any[] = []
     if (thinking) blocks.push({ type: "thinking", thinking })
     blocks.push({ type: "text", text: content })
     this.res.end(JSON.stringify({
       id: this.id, type: "message", role: "assistant", model: this.model,
-      content: blocks, stop_reason: "end_turn", stop_sequence: null,
+      content: blocks, stop_reason: anthropicStop(finishReason), stop_sequence: null,
       usage: {
         input_tokens: usage?.prompt_tokens ?? usage?.input_tokens ?? 0,
         output_tokens: usage?.completion_tokens ?? usage?.output_tokens ?? 0
@@ -616,6 +637,13 @@ class AnthropicWire {
 }
 
 /* ============ 工具函数 ============ */
+
+/** 中性结束原因 → Anthropic stop_reason */
+function anthropicStop(fr?: string): string {
+  if (fr === "length") return "max_tokens"
+  if (fr === "tool_calls") return "tool_use"
+  return "end_turn"
+}
 
 function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
