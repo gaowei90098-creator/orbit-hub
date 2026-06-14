@@ -8,6 +8,21 @@ import { Icon, IC, AgentMark, Enter, Seg, SectionTitle, Collapse, TaskStatusBadg
 import { TaskItem, fmtDur, sumTokens, fmtTokens, usageTotal, sumCost, costOf, fmtCost } from '../glass/meta'
 import { tr, modeLabel } from '../glass/i18n'
 
+/** 结果一键复制（带 1.2s “已复制”反馈） */
+function CopyBtn({ text }: { text: string }) {
+  const [done, setDone] = useState(false)
+  return (
+    <button className="ah-btn sm" title={tr('复制结果', 'Copy result')}
+      style={{ flex: 'none', padding: '4px 9px' }}
+      onClick={(e) => {
+        e.stopPropagation()
+        try { navigator.clipboard?.writeText(text); setDone(true); setTimeout(() => setDone(false), 1200) } catch { /* noop */ }
+      }}>
+      <Icon d={done ? IC.check : IC.copy} size={12} /> {done ? tr('已复制', 'Copied') : tr('复制', 'Copy')}
+    </button>
+  )
+}
+
 export function TasksScreen({ tasks, search, onCancelTask }: {
   tasks: TaskItem[]
   search: string
@@ -78,12 +93,14 @@ export function TasksScreen({ tasks, search, onCancelTask }: {
                     <div key={agentId} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                       <AgentMark id={agentId} size={24} radius={7} />
                       <div style={{ flex: 1, fontSize: 13, color: 'var(--tx-2)', background: 'rgba(0,0,0,0.18)', borderRadius: 10, padding: '9px 13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content}</div>
+                      {content && <CopyBtn text={content} />}
                     </div>
                   ))}
                   {t.errors && Object.entries(t.errors).map(([agentId, err]) => (
                     <div key={agentId} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                       <AgentMark id={agentId} size={24} radius={7} />
                       <div style={{ flex: 1, fontSize: 12.5, color: 'var(--st-error)', background: 'rgba(232,112,106,0.08)', border: '1px solid rgba(232,112,106,0.2)', borderRadius: 10, padding: '9px 13px', fontFamily: 'var(--font-mono)' }}>{err}</div>
+                      {err && <CopyBtn text={err} />}
                     </div>
                   ))}
                 </div>

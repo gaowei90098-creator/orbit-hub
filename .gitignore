@@ -21,3 +21,6 @@ Desktop.ini
 *.swo
 coverage/
 *.tsbuildinfo
+
+# AI 会话协作白板（本地实时协调，不进版本库）
+COLLAB.md
