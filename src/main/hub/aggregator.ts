@@ -1,4 +1,6 @@
-﻿export interface AggregatedResult {
+﻿import { agentName } from './agents'
+
+export interface AggregatedResult {
   taskId: string
   results: Array<{
     agentId: string
@@ -42,12 +44,6 @@ export class Aggregator {
   }
 
   private getAgentName(id: string): string {
-    const names: Record<string, string> = {
-      codex: 'Codex CLI',
-      claude: 'Claude Code',
-      hermes: 'Hermes',
-      openclaw: 'OpenClaw'
-    }
-    return names[id] || id
+    return agentName(id)
   }
 }

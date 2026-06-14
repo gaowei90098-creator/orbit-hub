@@ -11,6 +11,7 @@ import { detectAgentsAsync } from "./hub/agent-detector"
 import { getProviderManager } from "./providers/manager"
 import { getLocalProxy } from "./routing/proxy"
 import { createAdapter } from "./hub/adapters/base"
+import { agentName, agentCaps } from "./hub/agents"
 import { locateAgentCandidates } from "./hub/agent-locator"
 import { takeoverStatus, takeoverApply, takeoverRestore } from "./routing/takeover"
 
@@ -24,24 +25,6 @@ const aggregator = new Aggregator()
 const providerMgr = getProviderManager()
 let dispatcher: Dispatcher | null = null
 const proxy = getLocalProxy()
-
-const AGENT_CAPS: Record<string, string[]> = {
-  codex: ["coding", "debug", "refactor", "api"],
-  claude: ["analysis", "writing", "translation", "research"],
-  openclaw: ["automation", "deploy", "pipeline", "script"],
-  hermes: ["tools", "system", "automation"],
-  marvis: ["knowledge", "browser", "android", "office"],
-  "minimax-code": ["coding", "agentic", "tools", "review"]
-}
-
-const AGENT_NAMES: Record<string, string> = {
-  codex: "Codex CLI",
-  claude: "Claude Code",
-  openclaw: "OpenClaw",
-  hermes: "Hermes",
-  marvis: "Marvis",
-  "minimax-code": "MiniMax Code"
-}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -95,8 +78,8 @@ function registerAgentsFromBindings(): void {
   const bindings = providerMgr.getBindings()
   for (const b of bindings) {
     const existing = registry.get(b.agentId)
-    const name = AGENT_NAMES[b.agentId] || b.agentId
-    const caps = AGENT_CAPS[b.agentId] || []
+    const name = agentName(b.agentId)
+    const caps = agentCaps(b.agentId)
     const protocol = (b as any).protocol || "http"
     const binary = (b as any).binary as string | undefined
     const argsStr = ((b as any).args as string | undefined) || ""

@@ -1,4 +1,5 @@
 ﻿import { AgentInfo } from './registry'
+import { AGENTS } from './agents'
 
 interface RouteRule {
   patterns: string[]
@@ -14,26 +15,12 @@ export class KeywordRouter {
   }
 
   private initDefaultRules(): void {
-    this.addRule({
-      patterns: ['写代码', 'debug', '修复', '重构', '实现', '函数', 'api', 'bug', 'coding', 'implement', 'fix'],
-      targetId: 'codex',
-      priority: 10
-    })
-    this.addRule({
-      patterns: ['分析', '总结', '解释', '文档', '写作', '翻译', '报告', 'analyze', 'summary', 'explain', 'document'],
-      targetId: 'claude',
-      priority: 10
-    })
-    this.addRule({
-      patterns: ['自动化', '部署', '运行', '脚本', '任务', '流程', 'pipeline', 'deploy', 'automation', 'script'],
-      targetId: 'openclaw',
-      priority: 10
-    })
-    this.addRule({
-      patterns: ['工具', '调用', '系统', '操作', '命令', '配置', '检测', 'tool', 'system', 'command', 'config'],
-      targetId: 'hermes',
-      priority: 10
-    })
+    // 路由关键词派生自 agents manifest（单一事实源，自动覆盖全部 agent）
+    for (const a of AGENTS) {
+      if (a.routeKeywords.length) {
+        this.addRule({ patterns: a.routeKeywords, targetId: a.id, priority: 10 })
+      }
+    }
   }
 
   addRule(rule: RouteRule): void {

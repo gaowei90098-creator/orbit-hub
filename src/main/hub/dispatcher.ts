@@ -4,6 +4,7 @@ import { EventPipeline } from "./pipeline"
 import { KeywordRouter } from "./router"
 import { getProviderManager } from "../providers/manager"
 import { buildProviderClient } from "../providers/client"
+import { agentSystemPrompt } from "./agents"
 import { ChatCompletionMessage, ThinkingConfig } from "../providers/types"
 
 export type DispatchMode = "auto" | "broadcast" | "chain"
@@ -216,15 +217,7 @@ export class Dispatcher extends EventEmitter {
   }
 
   private systemPromptFor(agentId: string): string {
-    const map: Record<string, string> = {
-      codex: "You are Codex, an expert software engineer focused on coding, debugging and refactoring. Be precise and produce working code.",
-      claude: "You are Claude Code, an analytical assistant focused on writing, research and clear explanations.",
-      hermes: "You are Hermes, a system automation agent specialised in tooling, configuration and command execution.",
-      openclaw: "You are OpenClaw, an automation and deployment agent specialised in pipelines, scripts and runtime tasks.",
-      marvis: "You are Marvis, Tencent's intelligent assistant specialised in knowledge management, browser automation, office workflows and Android device control.",
-      "minimax-code": "You are MiniMax Code, an agentic coding assistant built on OpenCode. Be precise, write working code and explain briefly."
-    }
-    return map[agentId] || "You are AgentHub agent " + agentId + ". Be concise and helpful."
+    return agentSystemPrompt(agentId)
   }
 
   cancel(taskId: string): boolean {

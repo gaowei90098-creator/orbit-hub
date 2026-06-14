@@ -3,6 +3,7 @@
  */
 import { execSync } from "child_process";
 import { getProviderManager } from "../providers/manager";
+import { AGENTS } from "./agents";
 
 export interface DetectedAgent {
   id: string;
@@ -19,16 +20,18 @@ export interface DetectedAgent {
   error?: string | null;
 }
 
-const CLI_PROBES = [
-  { id: "codex", name: "Codex CLI", binary: "codex", caps: ["coding", "debug", "refactor", "api"] },
-  { id: "claude", name: "Claude Code", binary: "claude", caps: ["analysis", "writing", "translation", "research"] },
-  { id: "openclaw", name: "OpenClaw", binary: "openclaw", caps: ["automation", "deploy", "pipeline", "script"] },
-  { id: "hermes", name: "Hermes", binary: "hermes", caps: ["tools", "system", "automation"] },
+// 已知 agent 的探测项派生自 manifest（有 probeBinary 的）；marvis 无 CLI 不参与探测。
+// 额外的发现型 CLI（非 AgentHub 内置 agent）单列，用于扫描机器上还装了哪些工具。
+const EXTRA_PROBES = [
   { id: "aider", name: "Aider", binary: "aider", caps: ["coding", "pair-programming"] },
   { id: "goose", name: "Goose", binary: "goose", caps: ["automation", "coding"] },
-  { id: "opencode", name: "OpenCode", binary: "opencode", caps: ["coding", "terminal"] },
   { id: "gemini", name: "Gemini CLI", binary: "gemini", caps: ["analysis", "coding"] },
   { id: "copilot", name: "Copilot CLI", binary: "copilot", caps: ["coding", "cli"] }
+];
+
+const CLI_PROBES = [
+  ...AGENTS.filter(a => a.probeBinary).map(a => ({ id: a.id, name: a.name, binary: a.probeBinary as string, caps: a.caps })),
+  ...EXTRA_PROBES
 ];
 
 function probe(probe: typeof CLI_PROBES[0]) {
