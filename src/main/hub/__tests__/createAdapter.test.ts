@@ -42,7 +42,7 @@ describe("createAdapter", () => {
     expect(o).toBeInstanceOf(OpenClawAdapter)
     expect(h.mode).toBe("oneshot")
     expect(o.mode).toBe("oneshot")
-    expect((h as any).execArgs).toEqual([])                                    // hermes: stdin 模式
+    expect((h as any).execArgs).toEqual(["-z", "{prompt}"])                    // hermes: 官方 oneshot(-z)，裸 hermes 会进 TUI 崩溃
     expect((o as any).execArgs).toEqual(["crestodian", "--message", "{prompt}"]) // openclaw: 官方 oneshot 用法
   })
   it("applies custom binary path on stdio adapters", () => {
