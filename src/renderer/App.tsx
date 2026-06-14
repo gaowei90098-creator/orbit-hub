@@ -163,7 +163,11 @@ export default function App() {
           ? { ...m, replies: m.replies.map(r => r.agentId === e.agentId ? { ...r, done: true } : r) }
           : m))
         setTasks(ts => ts.map(t => t.id === localId
-          ? { ...t, results: { ...(t.results || {}), [e.agentId]: e.content } }
+          ? {
+              ...t,
+              results: { ...(t.results || {}), [e.agentId]: e.content },
+              usage: e.usage ? { ...(t.usage || {}), [e.agentId]: e.usage } : t.usage
+            }
           : t))
       } else if (e.kind === 'error') {
         setBusyOverride(o => ({ ...o, [e.agentId]: undefined }))

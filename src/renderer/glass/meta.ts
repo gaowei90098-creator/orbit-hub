@@ -110,6 +110,8 @@ export const DEFAULT_STDIO_ARGS: Record<string, string> = {
   'minimax-code': 'run {prompt}'
 }
 
+export interface TokenUsage { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+
 export interface TaskItem {
   id: string
   text: string
@@ -120,7 +122,23 @@ export interface TaskItem {
   createdAt: string
   results?: Record<string, string>
   errors?: Record<string, string>
+  /** 每 agent 的 token 用量（来自 dispatch done 事件） */
+  usage?: Record<string, TokenUsage>
 }
+
+/** 单条 usage 的总 token（缺 total 时用 prompt+completion 兜底） */
+export const usageTotal = (u?: TokenUsage): number =>
+  u ? (u.total_tokens || (u.prompt_tokens || 0) + (u.completion_tokens || 0)) : 0
+
+/** 任务级 token 合计（各 agent 求和） */
+export const sumTokens = (m?: Record<string, TokenUsage>): number =>
+  m ? Object.values(m).reduce((s, u) => s + usageTotal(u), 0) : 0
+
+/** 紧凑显示 token 数：1234→1.2k，1234567→1.2M */
+export const fmtTokens = (n: number): string =>
+  n >= 1_000_000 ? (n / 1_000_000).toFixed(1) + 'M'
+  : n >= 1000 ? (n / 1000).toFixed(n >= 10_000 ? 0 : 1) + 'k'
+  : String(n)
 
 export interface ReplyState {
   agentId: string

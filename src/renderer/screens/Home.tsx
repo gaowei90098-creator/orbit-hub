@@ -6,7 +6,7 @@
 
 import React from 'react'
 import { Icon, IC, AgentMark, StatusDot, Enter, SectionTitle, TaskStatusBadge } from '../glass/ui'
-import { AGENT_META, AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem } from '../glass/meta'
+import { AGENT_META, AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, sumTokens, fmtTokens } from '../glass/meta'
 import { tr, statusLabel, modeLabel, agentDesc } from '../glass/i18n'
 
 function greeting(): string {
@@ -27,6 +27,9 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
   const onlineCount = AGENT_IDS.filter(id => (agents[id]?.status ?? 'off') !== 'off').length
   const runningCount = tasks.filter(t => t.status === 'running').length
   const doneToday = tasks.filter(t => t.status === 'completed').length
+  const sessionTokens = tasks.reduce((s, t) => s + sumTokens(t.usage), 0)
+  const tokZh = sessionTokens > 0 ? ` · 本次 Token ${fmtTokens(sessionTokens)}` : ''
+  const tokEn = sessionTokens > 0 ? ` · ${fmtTokens(sessionTokens)} tokens` : ''
 
   return (
     <div data-screen-label="总览" style={{ padding: '6px 4px 30px' }}>
@@ -34,8 +37,8 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.01em' }}>{greeting()}</h1>
           <div style={{ color: 'var(--tx-2)', marginTop: 3 }}>
-            {tr(`${onlineCount} 个 Agent 在线 · ${runningCount} 个任务运行中 · 今日完成 ${doneToday} 个`,
-                `${onlineCount} agents online · ${runningCount} running · ${doneToday} done today`)}
+            {tr(`${onlineCount} 个 Agent 在线 · ${runningCount} 个任务运行中 · 今日完成 ${doneToday} 个${tokZh}`,
+                `${onlineCount} agents online · ${runningCount} running · ${doneToday} done today${tokEn}`)}
           </div>
         </div>
         <button className="ah-btn primary" onClick={() => goChat(null)}>
