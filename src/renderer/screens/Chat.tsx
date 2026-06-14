@@ -19,12 +19,25 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
 }) {
   const [mode, setMode] = useState<DispatchMode>('auto')
   const [input, setInput] = useState('')
+  const [routeHint, setRouteHint] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [messages])
+
+  // B2：智能路由模式下，随输入(防抖)预览将路由到哪个 agent（IPC 由 Codex 主进程提供）
+  useEffect(() => {
+    if (mode !== 'auto' || activeAgent || !input.trim()) { setRouteHint(null); return }
+    const timer = setTimeout(async () => {
+      try {
+        const scores = await (window.electronAPI as any)?.hub?.routePreview?.(input)
+        setRouteHint(Array.isArray(scores) && scores[0] ? scores[0].id : null)
+      } catch { setRouteHint(null) }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [input, mode, activeAgent])
 
   const send = () => {
     const text = input.trim()
@@ -59,6 +72,12 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
         <div style={{ flex: 1 }}></div>
         {activeAgent && <span className="ah-hint">{tr(`→ 仅派发给 ${AGENT_META[activeAgent].name}`, `→ dispatch to ${AGENT_META[activeAgent].name} only`)}</span>}
         {mode === 'chain' && !activeAgent && <span className="ah-hint">{tr('Codex → Claude，前者输出作为后者输入', 'Codex → Claude, output of the first feeds the second')}</span>}
+        {mode === 'auto' && !activeAgent && routeHint && AGENT_META[routeHint] && (
+          <span className="ah-hint" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Icon d={IC.bolt} size={12} style={{ color: AGENT_META[routeHint].colorRaw }} />
+            {tr(`将路由 → ${AGENT_META[routeHint].name}`, `Routes → ${AGENT_META[routeHint].name}`)}
+          </span>
+        )}
       </div>
 
       {/* 消息区 */}
