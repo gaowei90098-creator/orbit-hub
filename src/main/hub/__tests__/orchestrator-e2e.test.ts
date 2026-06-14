@@ -10,7 +10,6 @@ import { HttpAgentAdapter } from '../adapters/base'
 import { ORCHESTRATOR_LEAD_SYSTEM } from '../orchestrator'
 
 type Kind = 'decompose' | 'verify' | 'synthesis' | 'subtask'
-interface Call { agentId: string; kind: Kind; prompt: string; attempt: number }
 type Reply = string | { content?: string; error?: string }
 
 const h = vi.hoisted(() => {
@@ -81,7 +80,6 @@ function makeDispatcher() {
   return { dispatcher, events, registry }
 }
 
-const orch = (events: StreamEvent[]) => events.filter(e => (e.kind as string).startsWith('orchestrate:'))
 const byKind = (events: StreamEvent[], kind: string) => events.filter(e => e.kind === kind)
 
 // 标准两子任务计划：1→codex，2→claude
