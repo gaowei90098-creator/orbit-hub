@@ -4,10 +4,59 @@
    + 最近任务（前 4 条）
    ============================================================ */
 
-import React from 'react'
+import React, { useState } from 'react'
 import { Icon, IC, AgentMark, StatusDot, Enter, SectionTitle, TaskStatusBadge } from '../glass/ui'
 import { AGENT_META, AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, sumTokens, fmtTokens } from '../glass/meta'
 import { tr, statusLabel, modeLabel, agentDesc } from '../glass/i18n'
+import { useBudget, setBudget, budgetLevel } from '../glass/budget'
+
+/** 本次会话 Token 预算条：进度 + 分级告警（ok/warn≥80%/over≥100%）+ 可编辑上限 */
+function BudgetBar({ used }: { used: number }) {
+  const limit = useBudget()
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+  const level = budgetLevel(used, limit)
+  const color = level === 'over' ? 'var(--st-error)' : level === 'warn' ? 'var(--st-busy)' : 'var(--mint)'
+  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0
+  const commit = () => {
+    const n = Number(val.replace(/[,_\s]/g, ''))
+    setBudget(Number.isFinite(n) ? n : 0)
+    setEditing(false); setVal('')
+  }
+  return (
+    <div className="glass" style={{ padding: '11px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+      <Icon d={IC.bolt} size={15} style={{ color }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: limit > 0 ? 5 : 0 }}>
+          <span style={{ color: 'var(--tx-2)' }}>
+            {tr('本次 Token 预算', 'Session token budget')}
+            {level === 'over' && <span style={{ color: 'var(--st-error)', marginLeft: 8 }}>· {tr('已超预算', 'Over budget')}</span>}
+            {level === 'warn' && <span style={{ color: 'var(--st-busy)', marginLeft: 8 }}>· {tr('接近预算', 'Near limit')}</span>}
+          </span>
+          <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--tx-3)' }}>
+            {fmtTokens(used)}{limit > 0 ? ` / ${fmtTokens(limit)}` : tr(' · 未设', ' · not set')}
+          </span>
+        </div>
+        {limit > 0 && (
+          <div style={{ height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: pct + '%', background: color, transition: 'width 0.3s' }} />
+          </div>
+        )}
+      </div>
+      {editing ? (
+        <input className="ah-input mono" autoFocus style={{ width: 150, fontSize: 12, padding: '4px 8px' }}
+          value={val} placeholder={tr('如 200000，空=关', 'e.g. 200000, empty=off')}
+          onChange={e => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit() }} />
+      ) : (
+        <button className="ah-btn sm" onClick={() => { setVal(limit ? String(limit) : ''); setEditing(true) }}>
+          {limit > 0 ? tr('改预算', 'Edit') : tr('设预算', 'Set budget')}
+        </button>
+      )}
+    </div>
+  )
+}
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -45,6 +94,8 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
           <Icon d={IC.bolt} size={15} /> {tr('新建派发', 'New dispatch')}
         </button>
       </div>
+
+      <BudgetBar used={sessionTokens} />
 
       {/* Agent 卡片网格 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>

@@ -11,13 +11,14 @@ import { Sidebar, PageId } from './glass/Sidebar'
 import { Enter } from './glass/ui'
 import {
   AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, ChatMessage,
-  DispatchMode, nowHHMM
+  DispatchMode, nowHHMM, sumTokens
 } from './glass/meta'
 import { HomeScreen } from './screens/Home'
 import { ChatScreen } from './screens/Chat'
 import { TasksScreen } from './screens/Tasks'
 import { SettingsScreen, MotionLevel } from './screens/Settings'
-import { useLang } from './glass/i18n'
+import { useLang, tr } from './glass/i18n'
+import { getBudget } from './glass/budget'
 
 type AgentMap = Record<string, { status: AgentUIStatus }>
 
@@ -200,6 +201,12 @@ export default function App() {
 
   const onSend = useCallback(async (text: string, mode: DispatchMode, targetAgent: string | null) => {
     if (streaming) return
+    // 预算软上限：本次会话 token 已达上限时确认后才继续（A2）
+    const budget = getBudget()
+    if (budget > 0 && tasks.reduce((s, t) => s + sumTokens(t.usage), 0) >= budget &&
+        !window.confirm(tr('本次会话 Token 用量已达预算上限，仍要继续派发吗？', 'Session token usage reached the budget limit. Dispatch anyway?'))) {
+      return
+    }
     const msgId = 'm' + Date.now()
     const localId = 'local-' + Date.now()
     const gen = cancelGen.current
@@ -262,7 +269,7 @@ export default function App() {
     } catch (e: any) {
       if (cancelGen.current === gen) finalize('failed', e?.message || String(e))
     }
-  }, [streaming, bindings, runDispatch, refreshStatus])
+  }, [streaming, bindings, runDispatch, refreshStatus, tasks])
 
   const onCancel = useCallback(() => {
     cancelGen.current++
