@@ -1,4 +1,4 @@
-import { Menu, Wifi, WifiOff } from "lucide-react";
+import { Wifi, WifiOff } from "lucide-react";
 import type { Agent } from "../types";
 import { isOperator } from "../util";
 
@@ -6,25 +6,15 @@ export function Header({
   agents,
   connected,
   conflicts,
-  onToggleSidebar,
 }: {
   agents: Agent[];
   connected: boolean;
   conflicts: number;
-  onToggleSidebar: () => void;
 }) {
   const online = agents.filter((a) => !isOperator(a) && a.status === "online").length;
   return (
     <header className="top-header">
       <div className="top-left">
-        <button
-          className="icon-button sidebar-toggle"
-          type="button"
-          onClick={onToggleSidebar}
-          aria-label="切换侧边栏"
-        >
-          <Menu size={18} />
-        </button>
         <span className="top-breadcrumb">协作控制台</span>
       </div>
 

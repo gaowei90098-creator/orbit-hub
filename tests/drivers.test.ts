@@ -219,12 +219,15 @@ describe("driver command construction (C01/C02)", () => {
     expect(env.ANTHROPIC_BASE_URL).toBe("https://gw.example");
   });
 
-  it("codex buildStart uses `codex exec --json --full-auto`", () => {
+  it("codex buildStart uses `codex exec --json --sandbox workspace-write`", () => {
     const spec = codexDriver.buildStart(baseInput({ harness: "codex", projectPath: "/y" }));
     expect(spec.command).toMatch(/codex/i); // PATH 命令名或 macOS 桌面 App 绝对路径，均含 codex
     expect(spec.args[0]).toBe("exec");
     expect(spec.args).toContain("--json");
-    expect(spec.args).toContain("--full-auto");
+    // --full-auto 已废弃，改用 --sandbox workspace-write。
+    expect(spec.args).toContain("--sandbox");
+    expect(spec.args).toContain("workspace-write");
+    expect(spec.args).not.toContain("--full-auto");
     expect(spec.args).toContain("--cd");
     expect(spec.args).toContain("/y");
     expect(spec.args.at(-1)).toContain("实现一个功能"); // prompt 末尾

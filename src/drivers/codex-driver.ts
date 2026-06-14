@@ -160,7 +160,8 @@ export function parseCodexLine(line: string): AgentRunEvent[] {
 }
 
 function commonArgs(input: StartRunInput): string[] {
-  const args = ["--json", "--cd", input.projectPath, "--full-auto"];
+  // --full-auto 已废弃；新版 Codex 用 --sandbox workspace-write（工作区内可读写、自动批准）。
+  const args = ["--json", "--cd", input.projectPath, "--sandbox", "workspace-write"];
   if (input.model) args.push("-m", input.model);
   return args;
 }
