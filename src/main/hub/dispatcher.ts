@@ -102,6 +102,8 @@ export class Dispatcher extends EventEmitter {
           for (const t of targets) {
             const res = await this.sendToAgent(task, t.agentId, currentText, opts)
             if ((task as any).status === "cancelled") break
+            // 链式：上游失败则中断，不把空内容喂给下游（错误已记入 task.errors 并外显）
+            if (res.error) break
             currentText = res.content
           }
         } else {
