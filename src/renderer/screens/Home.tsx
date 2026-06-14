@@ -9,6 +9,7 @@ import { Icon, IC, AgentMark, StatusDot, Enter, SectionTitle, TaskStatusBadge } 
 import { AGENT_META, AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, sumTokens, fmtTokens, sumCost, fmtCost } from '../glass/meta'
 import { tr, statusLabel, modeLabel, agentDesc } from '../glass/i18n'
 import { useBudget, setBudget, useBudgetMode, setBudgetMode, budgetLevel } from '../glass/budget'
+import { ConnectionState, ConnectionSummary, SetupTab } from '../glass/connection-status'
 
 /** 本次会话预算条：口径切换(Token/$) + 进度 + 分级告警(ok/warn≥80%/over≥100%) + 可编辑上限 */
 function BudgetBar({ tokens, cost }: { tokens: number; cost: number }) {
@@ -74,14 +75,15 @@ function greeting(): string {
   return tr('晚上好', 'Good evening')
 }
 
-export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
+export function HomeScreen({ agents, bindings, providers, tasks, goChat, connectionSummary, openSetup }: {
   agents: Record<string, { status: AgentUIStatus }>
   bindings: BindingDef[]
   providers: ProviderDef[]
   tasks: TaskItem[]
   goChat: (agentId: string | null) => void
+  connectionSummary: ConnectionSummary
+  openSetup: (tab?: SetupTab) => void
 }) {
-  const onlineCount = AGENT_IDS.filter(id => (agents[id]?.status ?? 'off') !== 'off').length
   const runningCount = tasks.filter(t => t.status === 'running').length
   const doneToday = tasks.filter(t => t.status === 'completed').length
   const sessionTokens = tasks.reduce((s, t) => s + sumTokens(t.usage), 0)
@@ -96,8 +98,8 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.01em' }}>{greeting()}</h1>
           <div style={{ color: 'var(--tx-2)', marginTop: 3 }}>
-            {tr(`${onlineCount} 个 Agent 在线 · ${runningCount} 个任务运行中 · 今日完成 ${doneToday} 个${tokZh}`,
-                `${onlineCount} agents online · ${runningCount} running · ${doneToday} done today${tokEn}`)}
+            {tr(`${connectionSummary.headlineZh} · ${runningCount} 个任务运行中 · 今日完成 ${doneToday} 个${tokZh}`,
+                `${connectionSummary.headlineEn} · ${runningCount} running · ${doneToday} done today${tokEn}`)}
           </div>
         </div>
         <button className="ah-btn primary" onClick={() => goChat(null)}>
@@ -106,6 +108,8 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
       </div>
 
       <BudgetBar tokens={sessionTokens} cost={sessionCost} />
+
+      <FirstRunPanel summary={connectionSummary} openSetup={openSetup} goChat={goChat} />
 
       {/* Agent 卡片网格 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>
@@ -116,6 +120,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
           const prov = providers.find(p => p.id === b?.providerId)
           const model = prov?.models.find(m => m.id === b?.modelId)
           const isStdio = b?.protocol === 'stdio-plain'
+          const connection = connectionSummary.items.find(item => item.agentId === id)
           return (
             <Enter key={id} delay={idx * 70} style={{ display: 'flex' }}>
               <div className="glass hover-glow" style={{ flex: 1, padding: 18, display: 'flex', flexDirection: 'column', gap: 13, transition: 'border-color 0.2s, transform 0.2s', cursor: 'default' }}
@@ -128,7 +133,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
                     <div className="ah-hint" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agentDesc(id, meta.desc)}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--tx-2)', flex: 'none' }}>
-                    <StatusDot status={a.status} />{statusLabel(a.status)}
+                    <StatusDot status={a.status} />{connection ? connectionStateLabel(connection.state) : statusLabel(a.status)}
                   </div>
                 </div>
 
@@ -146,11 +151,21 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignContent: 'flex-start', flex: 1, minHeight: 24 }}>
                   {meta.caps.map(c => <span key={c} className="ah-chip">{c}</span>)}
                 </div>
+                {connection && connection.state !== 'usable' && connection.state !== 'busy' && (
+                  <div className="ah-hint" style={{ lineHeight: 1.5 }}>
+                    {tr(connection.detailZh, connection.detailEn)}
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
                   <button className="ah-btn sm" style={{ flex: 1 }} onClick={() => goChat(id)}>
                     <Icon d={IC.send} size={13} /> {tr('派发任务', 'Dispatch')}
                   </button>
+                  {connection?.action && (
+                    <button className="ah-btn sm primary" onClick={() => openSetup(connection.action!.tab)}>
+                      {tr(connection.action.labelZh, connection.action.labelEn)}
+                    </button>
+                  )}
                 </div>
               </div>
             </Enter>
@@ -181,6 +196,55 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
           ))}
         </div>
       </Enter>
+    </div>
+  )
+}
+
+function connectionStateLabel(state: ConnectionState): string {
+  const labels: Record<ConnectionState, string> = {
+    usable: tr('可用', 'Ready'),
+    busy: tr('运行中', 'Running'),
+    error: tr('异常', 'Error'),
+    'needs-provider': tr('缺 Key', 'Needs key'),
+    'needs-install': tr('待安装', 'Needs install'),
+    off: tr('未启用', 'Off')
+  }
+  return labels[state]
+}
+
+function FirstRunPanel({ summary, openSetup, goChat }: {
+  summary: ConnectionSummary
+  openSetup: (tab?: SetupTab) => void
+  goChat: (agentId: string | null) => void
+}) {
+  const ready = summary.counts.usable + summary.counts.busy
+  const firstUsable = summary.items.find(item => item.state === 'usable')?.agentId ?? null
+  const firstAction = summary.firstAction
+  return (
+    <div className="glass" style={{ padding: 16, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+      <div style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: ready ? 'var(--mint-soft)' : 'rgba(232,179,77,0.12)', color: ready ? 'var(--mint)' : 'var(--st-busy)', flex: 'none' }}>
+        <Icon d={ready ? IC.check : IC.bolt} size={17} />
+      </div>
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>
+          {ready ? tr('已具备可派发 Agent', 'At least one agent is ready') : tr('完成首次连接', 'Finish first connection')}
+        </div>
+        <div className="ah-hint" style={{ lineHeight: 1.55 }}>
+          {ready
+            ? tr('可以先发送一条试跑任务；其他 Agent 可随后继续补 Key 或 CLI 路径。', 'Send a test task now; add keys or CLI paths for the remaining agents later.')
+            : tr('先配置一个 Provider Key 或选择一个本地 CLI 路径，再回到会话页发送第一条任务。', 'Configure one provider key or choose one local CLI path, then return to Chat and send the first task.')}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {firstAction && (
+          <button className="ah-btn sm primary" onClick={() => openSetup(firstAction.tab)}>
+            {tr(firstAction.labelZh, firstAction.labelEn)}
+          </button>
+        )}
+        <button className="ah-btn sm" disabled={!ready} onClick={() => goChat(firstUsable)}>
+          <Icon d={IC.send} size={13} /> {tr('发送试跑任务', 'Send test task')}
+        </button>
+      </div>
     </div>
   )
 }

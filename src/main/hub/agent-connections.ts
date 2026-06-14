@@ -15,15 +15,19 @@ export function parseStdioArgs(argsStr?: string): string[] | undefined {
   let quote: "'" | '"' | null = null
   let escaping = false
 
-  for (const ch of input) {
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i]
     if (escaping) {
       current += ch
       escaping = false
       continue
     }
     if (ch === "\\" && quote === '"') {
-      escaping = true
-      continue
+      const next = input[i + 1]
+      if (next === '"' || next === "\\") {
+        escaping = true
+        continue
+      }
     }
     if ((ch === "'" || ch === '"') && !quote) {
       quote = ch

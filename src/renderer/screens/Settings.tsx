@@ -7,10 +7,11 @@ import React, { useState, useEffect } from 'react'
 import { Icon, IC, AgentMark, Enter, Seg, SectionTitle, Switch } from '../glass/ui'
 import { AGENT_META, AGENT_IDS, DEFAULT_STDIO_ARGS, BindingDef, ProviderDef } from '../glass/meta'
 import { tr, agentDesc, getLang, setLang, Lang } from '../glass/i18n'
+import { ConnectionSummary, SetupTab } from '../glass/connection-status'
 
 export type MotionLevel = 'off' | 'subtle' | 'rich'
 
-export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, onSetBinding, fallbackChain, onSetFallback, onReload, onUpsertProvider, onDeleteProvider, motion, setMotion }: {
+export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, onSetBinding, fallbackChain, onSetFallback, onReload, onUpsertProvider, onDeleteProvider, motion, setMotion, initialTab, connectionSummary, goChat }: {
   providers: ProviderDef[]
   bindings: BindingDef[]
   onSetEnabled: (id: string, enabled: boolean) => void
@@ -23,17 +24,23 @@ export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, on
   onDeleteProvider: (id: string) => void
   motion: MotionLevel
   setMotion: (m: MotionLevel) => void
+  initialTab: SetupTab | 'appearance'
+  connectionSummary: ConnectionSummary
+  goChat: (agentId: string | null) => void
+  openSetup: (tab?: SetupTab | 'appearance') => void
 }) {
-  const [tab, setTab] = useState('providers')
+  const [tab, setTab] = useState<SetupTab | 'appearance'>(initialTab)
+  useEffect(() => setTab(initialTab), [initialTab])
   return (
     <div data-screen-label="设置" style={{ padding: '6px 4px 30px' }}>
       <SectionTitle right={
-        <Seg value={tab} onChange={setTab} options={[
+        <Seg value={tab} onChange={v => setTab(v as SetupTab | 'appearance')} options={[
           { value: 'providers', label: tr('提供商', 'Providers') }, { value: 'routing', label: tr('路由', 'Routing') },
           { value: 'proxy', label: tr('代理', 'Proxy') }, { value: 'sites', label: tr('Agent 官网', 'Agent sites') },
           { value: 'appearance', label: tr('外观', 'Appearance') }
         ]} />
       }>{tr('设置', 'Settings')}</SectionTitle>
+      <SetupNextStep summary={connectionSummary} onTab={setTab} goChat={goChat} />
       {tab === 'providers' && <ProvidersTab providers={providers} onSetEnabled={onSetEnabled} onSetKey={onSetKey} onReload={onReload}
         onUpsert={onUpsertProvider} onDelete={onDeleteProvider} />}
       {tab === 'routing' && <RoutingTab providers={providers} bindings={bindings} onSetBinding={onSetBinding} />}
@@ -41,6 +48,46 @@ export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, on
       {tab === 'sites' && <AgentSitesTab />}
       {tab === 'appearance' && <AppearanceTab motion={motion} setMotion={setMotion} />}
     </div>
+  )
+}
+
+function SetupNextStep({ summary, onTab, goChat }: {
+  summary: ConnectionSummary
+  onTab: (tab: SetupTab | 'appearance') => void
+  goChat: (agentId: string | null) => void
+}) {
+  const readyAgent = summary.items.find(item => item.state === 'usable')?.agentId ?? null
+  const next = summary.items.find(item => item.action)
+  return (
+    <Enter className="glass" style={{ padding: 16, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <div style={{
+        width: 34, height: 34, borderRadius: 10, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: readyAgent ? 'var(--mint-soft)' : 'rgba(232,179,77,0.12)',
+        color: readyAgent ? 'var(--mint)' : 'var(--st-busy)'
+      }}>
+        <Icon d={readyAgent ? IC.check : IC.bolt} size={16} />
+      </div>
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>
+          {readyAgent ? tr('推荐下一步：发送一条试跑任务', 'Recommended next step: send a test task') : tr('推荐下一步：完成一个 Agent 连接', 'Recommended next step: connect one agent')}
+        </div>
+        <div className="ah-hint" style={{ lineHeight: 1.55 }}>
+          {readyAgent
+            ? tr('已有可用 Agent。试跑成功后，再继续补齐其他 Provider Key 或本地 CLI 路径。', 'At least one agent is ready. After a successful test, fill in the remaining provider keys or local CLI paths.')
+            : next
+            ? tr(next.detailZh, next.detailEn)
+            : tr('先从 Provider Key 或 StdIO CLI 路径开始，完成后即可回到会话页派发。', 'Start with a provider key or StdIO CLI path, then return to Chat to dispatch.')}
+        </div>
+      </div>
+      {next?.action && (
+        <button className="ah-btn sm primary" onClick={() => onTab(next.action!.tab)}>
+          {tr(next.action.labelZh, next.action.labelEn)}
+        </button>
+      )}
+      <button className="ah-btn sm" disabled={!readyAgent} onClick={() => goChat(readyAgent)}>
+        <Icon d={IC.send} size={13} /> {tr('去试跑', 'Run test')}
+      </button>
+    </Enter>
   )
 }
 

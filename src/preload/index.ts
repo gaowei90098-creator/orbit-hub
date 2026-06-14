@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 const api = {
   hub: {
     getStatus: () => ipcRenderer.invoke('hub:status'),
+    routePreview: (text: string) => ipcRenderer.invoke('hub:routePreview', text),
     dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any }) =>
       ipcRenderer.invoke('hub:dispatch', { text, mode: mode || 'auto', targetAgent, thinking: opts?.thinking }),
     cancel: (taskId: string) => ipcRenderer.invoke('hub:cancel', taskId),

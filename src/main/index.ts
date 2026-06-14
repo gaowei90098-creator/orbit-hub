@@ -13,6 +13,7 @@ import { getLocalProxy } from "./routing/proxy"
 import { locateAgentCandidates } from "./hub/agent-locator"
 import { takeoverStatus, takeoverApply, takeoverRestore } from "./routing/takeover"
 import { syncRegistryFromBindings } from "./hub/agent-connections"
+import { routePreview } from "./hub/route-preview"
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -162,6 +163,7 @@ ipcMain.handle("hub:status", () => ({
 ipcMain.handle("hub:dispatch", async (_event, payload) => {
   return dispatcher?.dispatch(payload.text, payload.mode || "auto", payload.targetAgent, { thinking: payload.thinking })
 })
+ipcMain.handle("hub:routePreview", async (_event, text: string) => routePreview(text, registry, router))
 
 ipcMain.handle("hub:rescan", async () => {
   const agents = await detectAgentsAsync()
@@ -200,7 +202,7 @@ ipcMain.handle("providers:healthAll", async () => {
   return results
 })
 ipcMain.handle("routing:setBinding", async (_e, b) => { providerMgr.upsertBinding(b); registerAgentsFromBindings(); return providerMgr.getBindings() })
-ipcMain.handle("routing:removeBinding", async (_e, agentId) => { providerMgr.removeBinding(agentId); return providerMgr.getBindings() })
+ipcMain.handle("routing:removeBinding", async (_e, agentId) => { providerMgr.removeBinding(agentId); registerAgentsFromBindings(); return providerMgr.getBindings() })
 ipcMain.handle("routing:setFallback", async (_e, chain) => { providerMgr.setFallbackChain(chain); return providerMgr.getConfig().routing })
 ipcMain.handle("routing:setStrategy", async (_e, s) => { providerMgr.setStrategy(s); return providerMgr.getConfig().routing })
 ipcMain.handle("routing:setBindingThinking", async (_e, agentId, t) => { providerMgr.setBindingThinking(agentId, t); return providerMgr.getBindings() })

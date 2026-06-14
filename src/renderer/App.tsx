@@ -19,6 +19,7 @@ import { TasksScreen } from './screens/Tasks'
 import { SettingsScreen, MotionLevel } from './screens/Settings'
 import { useLang, tr } from './glass/i18n'
 import { getBudget, getBudgetMode } from './glass/budget'
+import { SetupTab, summarizeAgentConnections } from './glass/connection-status'
 
 type AgentMap = Record<string, { status: AgentUIStatus }>
 
@@ -33,6 +34,7 @@ export default function App() {
   const [page, setPage] = useState<PageId>('home')
   const [search, setSearch] = useState('')
   const [activeAgent, setActiveAgent] = useState<string | null>(null)
+  const [settingsTab, setSettingsTab] = useState<SetupTab | 'appearance'>('providers')
   const [hubRunning, setHubRunning] = useState(false)
   const [proxyHost, setProxyHost] = useState('127.0.0.1:9528')
   const [hubAgents, setHubAgents] = useState<Record<string, string>>({})   // 注册表原始状态
@@ -353,7 +355,8 @@ export default function App() {
     const isStdio = b?.protocol === 'stdio-plain'
     const providerUsable = !!prov && prov.enabled && !!prov.apiKey
     let st: AgentUIStatus
-    if (!isStdio && b && !providerUsable) st = 'off'
+    if (isStdio && !b?.binary?.trim()) st = 'off'
+    else if (!isStdio && b && !providerUsable) st = 'off'
     else {
       const hub = hubAgents[id]
       st = hub === 'busy' ? 'busy' : hub === 'error' ? 'error' : hub === 'offline' ? 'off' : 'idle'
@@ -363,7 +366,13 @@ export default function App() {
     agents[id] = { status: st }
   }
 
+  const connectionSummary = summarizeAgentConnections({ agents, bindings, providers })
+
   const goChat = (agentId: string | null) => { setActiveAgent(agentId); setPage('chat') }
+  const openSetup = (tab: SetupTab | 'appearance' = 'providers') => {
+    setSettingsTab(tab)
+    setPage('settings')
+  }
 
   const lang = useLang() // 语言切换时整树重挂载（key），组件内 tr() 直接生效
 
@@ -378,15 +387,19 @@ export default function App() {
             providerCount={providers.length || 4} proxyHost={proxyHost} />
           <div style={{ flex: 1, minWidth: 0, padding: '0 18px 14px 16px', overflowY: page === 'chat' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
             <Enter key={page} style={page === 'chat' ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : undefined}>
-              {page === 'home' && <HomeScreen agents={agents} bindings={bindings} providers={providers} tasks={tasks} goChat={goChat} />}
+              {page === 'home' && <HomeScreen agents={agents} bindings={bindings} providers={providers} tasks={tasks} goChat={goChat}
+                connectionSummary={connectionSummary} openSetup={openSetup} />}
               {page === 'chat' && <ChatScreen activeAgent={activeAgent} setActiveAgent={setActiveAgent}
-                messages={messages} streaming={streaming} onSend={onSend} onCancel={onCancel} />}
-              {page === 'tasks' && <TasksScreen tasks={tasks} search={search} onCancelTask={onCancelTask} />}
+                messages={messages} streaming={streaming} onSend={onSend} onCancel={onCancel}
+                connectionSummary={connectionSummary} openSetup={openSetup} />}
+              {page === 'tasks' && <TasksScreen tasks={tasks} search={search} onCancelTask={onCancelTask}
+                openSetup={openSetup} />}
               {page === 'settings' && <SettingsScreen providers={providers} bindings={bindings}
                 onSetEnabled={onSetEnabled} onSetKey={onSetKey} onSetBinding={onSetBinding}
                 fallbackChain={fallbackChain} onSetFallback={onSetFallback} onReload={loadConfig}
                 onUpsertProvider={onUpsertProvider} onDeleteProvider={onDeleteProvider}
-                motion={motion} setMotion={setMotion} />}
+                motion={motion} setMotion={setMotion} initialTab={settingsTab}
+                connectionSummary={connectionSummary} goChat={goChat} openSetup={openSetup} />}
             </Enter>
           </div>
         </div>

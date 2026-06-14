@@ -7,6 +7,7 @@ import React, { useState } from 'react'
 import { Icon, IC, AgentMark, Enter, Seg, SectionTitle, Collapse, TaskStatusBadge } from '../glass/ui'
 import { TaskItem, fmtDur, sumTokens, fmtTokens, usageTotal, sumCost, costOf, fmtCost } from '../glass/meta'
 import { tr, modeLabel } from '../glass/i18n'
+import { SetupTab, firstRunActionForError } from '../glass/connection-status'
 
 /** 结果一键复制（带 1.2s “已复制”反馈） */
 function CopyBtn({ text }: { text: string }) {
@@ -23,10 +24,11 @@ function CopyBtn({ text }: { text: string }) {
   )
 }
 
-export function TasksScreen({ tasks, search, onCancelTask }: {
+export function TasksScreen({ tasks, search, onCancelTask, openSetup }: {
   tasks: TaskItem[]
   search: string
   onCancelTask: (id: string) => void
+  openSetup: (tab?: SetupTab) => void
 }) {
   const [open, setOpen] = useState<string | null>(null)
   const [filter, setFilter] = useState('all')
@@ -96,13 +98,21 @@ export function TasksScreen({ tasks, search, onCancelTask }: {
                       {content && <CopyBtn text={content} />}
                     </div>
                   ))}
-                  {t.errors && Object.entries(t.errors).map(([agentId, err]) => (
-                    <div key={agentId} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                      <AgentMark id={agentId} size={24} radius={7} />
-                      <div style={{ flex: 1, fontSize: 12.5, color: 'var(--st-error)', background: 'rgba(232,112,106,0.08)', border: '1px solid rgba(232,112,106,0.2)', borderRadius: 10, padding: '9px 13px', fontFamily: 'var(--font-mono)' }}>{err}</div>
-                      {err && <CopyBtn text={err} />}
-                    </div>
-                  ))}
+                  {t.errors && Object.entries(t.errors).map(([agentId, err]) => {
+                    const action = firstRunActionForError(err)
+                    return (
+                      <div key={agentId} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        <AgentMark id={agentId} size={24} radius={7} />
+                        <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--st-error)', background: 'rgba(232,112,106,0.08)', border: '1px solid rgba(232,112,106,0.2)', borderRadius: 10, padding: '9px 13px', fontFamily: 'var(--font-mono)' }}>{err}</div>
+                        {action && (
+                          <button className="ah-btn sm primary" onClick={() => openSetup(action.tab)}>
+                            {tr(action.labelZh, action.labelEn)}
+                          </button>
+                        )}
+                        {err && <CopyBtn text={err} />}
+                      </div>
+                    )
+                  })}
                 </div>
               </Collapse>
             </Enter>

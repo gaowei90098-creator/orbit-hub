@@ -8,14 +8,17 @@ import React, { useState, useRef, useEffect, ReactNode } from 'react'
 import { Icon, IC, AgentMark, Enter, Seg, Collapse } from '../glass/ui'
 import { AGENT_META, AGENT_IDS, DispatchMode, ChatMessage, ReplyState } from '../glass/meta'
 import { tr, modeLabel } from '../glass/i18n'
+import { ConnectionSummary, SetupTab, firstRunActionForError } from '../glass/connection-status'
 
-export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, onSend, onCancel }: {
+export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, onSend, onCancel, connectionSummary, openSetup }: {
   activeAgent: string | null
   setActiveAgent: (id: string | null) => void
   messages: ChatMessage[]
   streaming: boolean
   onSend: (text: string, mode: DispatchMode, targetAgent: string | null) => void
   onCancel: () => void
+  connectionSummary: ConnectionSummary
+  openSetup: (tab?: SetupTab) => void
 }) {
   const [mode, setMode] = useState<DispatchMode>('auto')
   const [input, setInput] = useState('')
@@ -39,9 +42,20 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
     return () => clearTimeout(timer)
   }, [input, mode, activeAgent])
 
+  const targetItem = activeAgent
+    ? connectionSummary.items.find(item => item.agentId === activeAgent)
+    : routeHint
+    ? connectionSummary.items.find(item => item.agentId === routeHint)
+    : mode === 'chain'
+    ? connectionSummary.items.find(item => ['codex', 'claude'].includes(item.agentId) && item.state !== 'usable')
+    : mode === 'broadcast' && connectionSummary.counts.usable === 0
+    ? connectionSummary.items.find(item => item.action)
+    : null
+  const blocked = !!targetItem && targetItem.state !== 'usable' && targetItem.state !== 'busy'
+
   const send = () => {
     const text = input.trim()
-    if (!text || streaming) return
+    if (!text || streaming || blocked) return
     setInput('')
     onSend(text, activeAgent ? 'auto' : mode, activeAgent)
   }
@@ -76,6 +90,9 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
           <span className="ah-hint" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <Icon d={IC.bolt} size={12} style={{ color: AGENT_META[routeHint].colorRaw }} />
             {tr(`将路由 → ${AGENT_META[routeHint].name}`, `Routes → ${AGENT_META[routeHint].name}`)}
+            {targetItem && targetItem.state !== 'usable' && targetItem.state !== 'busy' && (
+              <span style={{ color: 'var(--st-busy)' }}>{tr('· 需要配置', '· setup needed')}</span>
+            )}
           </span>
         )}
       </div>
@@ -96,13 +113,27 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
               <span className="ah-hint">{modeLabel(m.mode)}{m.mode === 'chain' ? '' : m.replies.length > 1 ? tr(` · ${m.replies.length} 个 Agent`, ` · ${m.replies.length} agents`) : ''}</span>
             </div>
             <div style={{ display: 'grid', gap: 10, gridTemplateColumns: m.replies.length > 1 ? 'repeat(auto-fit, minmax(300px, 1fr))' : '1fr' }}>
-              {m.replies.map((r, idx) => <ReplyBubble key={r.agentId} r={r} chainIdx={m.mode === 'chain' ? idx : null} delay={idx * 90} />)}
+              {m.replies.map((r, idx) => <ReplyBubble key={r.agentId} r={r} chainIdx={m.mode === 'chain' ? idx : null} delay={idx * 90} openSetup={openSetup} />)}
             </div>
           </Enter>
         ))}
       </div>
 
       {/* 输入区 */}
+      {blocked && targetItem && (
+        <div className="glass" style={{ flex: 'none', padding: '10px 13px', display: 'flex', alignItems: 'center', gap: 10, borderColor: 'rgba(232,179,77,0.28)' }}>
+          <Icon d={IC.pulse} size={14} style={{ color: 'var(--st-busy)', flex: 'none' }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, color: 'var(--tx-1)' }}>{tr(targetItem.titleZh, targetItem.titleEn)}</div>
+            <div className="ah-hint">{tr(targetItem.detailZh, targetItem.detailEn)}</div>
+          </div>
+          {targetItem.action && (
+            <button className="ah-btn sm primary" onClick={() => openSetup(targetItem.action!.tab)}>
+              {tr(targetItem.action.labelZh, targetItem.action.labelEn)}
+            </button>
+          )}
+        </div>
+      )}
       <div className="glass-strong" style={{ flex: 'none', display: 'flex', alignItems: 'flex-end', gap: 10, padding: 10, borderRadius: 18 }}>
         <textarea value={input} rows={1}
           onChange={e => setInput(e.target.value)}
@@ -114,15 +145,16 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
           }} />
         {streaming
           ? <button className="ah-btn danger" onClick={onCancel}><Icon d={IC.stop} size={14} /> {tr('停止', 'Stop')}</button>
-          : <button className="ah-btn primary" onClick={send} disabled={!input.trim()}><Icon d={IC.send} size={14} /> {tr('发送', 'Send')}</button>}
+          : <button className="ah-btn primary" onClick={send} disabled={!input.trim() || blocked}><Icon d={IC.send} size={14} /> {tr('发送', 'Send')}</button>}
       </div>
     </div>
   )
 }
 
-function ReplyBubble({ r, chainIdx, delay = 0 }: { r: ReplyState; chainIdx: number | null; delay?: number }) {
+function ReplyBubble({ r, chainIdx, delay = 0, openSetup }: { r: ReplyState; chainIdx: number | null; delay?: number; openSetup: (tab?: SetupTab) => void }) {
   const meta = AGENT_META[r.agentId]
   const [thinkOpen, setThinkOpen] = useState(false)
+  const errorAction = firstRunActionForError(r.error)
   return (
     <Enter delay={delay} className="glass" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 9, borderRadius: 16, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -151,10 +183,17 @@ function ReplyBubble({ r, chainIdx, delay = 0 }: { r: ReplyState; chainIdx: numb
         </div>
       )}
       {r.error && (
-        <div style={{
-          fontSize: 12.5, color: 'var(--st-error)', background: 'rgba(232,112,106,0.08)',
-          border: '1px solid rgba(232,112,106,0.2)', borderRadius: 10, padding: '9px 13px', fontFamily: 'var(--font-mono)'
-        }}>{r.error}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{
+            flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--st-error)', background: 'rgba(232,112,106,0.08)',
+            border: '1px solid rgba(232,112,106,0.2)', borderRadius: 10, padding: '9px 13px', fontFamily: 'var(--font-mono)'
+          }}>{r.error}</div>
+          {errorAction && (
+            <button className="ah-btn sm primary" onClick={() => openSetup(errorAction.tab)}>
+              {tr(errorAction.labelZh, errorAction.labelEn)}
+            </button>
+          )}
+        </div>
       )}
       <div style={{ fontSize: 13.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         {renderRichText(r.text)}
