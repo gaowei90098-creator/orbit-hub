@@ -150,24 +150,25 @@ export class Dispatcher extends EventEmitter {
    * 渲染层在编排消息上忽略，只用 orchestrate:* 驱动 OrchestrateView）。
    */
   private async runOrchestrate(task: DispatchTask, text: string, opts: DispatchOptions): Promise<void> {
-    const mgr = getProviderManager()
-    const bindings = mgr.getBindings()
-    if (bindings.length === 0) throw new Error("No agent bound. Open Settings -> Routing to bind an agent.")
-
-    const router = new KeywordRouter()
-    const available = this.registry.getAll().map(a => ({
-      id: a.id, name: a.name, status: a.status, mode: a.mode, protocol: a.protocol,
-      adapter: a.adapter, capabilities: a.capabilities, lastActive: a.lastActive, errorCount: a.errorCount
-    }))
-    const bound = new Set(bindings.map(b => b.agentId))
-    const routed = router.route(text, available)
-    const leadId = (routed && bound.has(routed)) ? routed : bindings[0].agentId
-
     try {
+      const mgr = getProviderManager()
+      const bindings = mgr.getBindings()
+      if (bindings.length === 0) throw new Error("No agent bound. Open Settings -> Routing to bind an agent.")
+
+      const router = new KeywordRouter()
+      const available = this.registry.getAll().map(a => ({
+        id: a.id, name: a.name, status: a.status, mode: a.mode, protocol: a.protocol,
+        adapter: a.adapter, capabilities: a.capabilities, lastActive: a.lastActive, errorCount: a.errorCount
+      }))
+      const bound = new Set(bindings.map(b => b.agentId))
+      const routed = router.route(text, available)
+      const leadId = (routed && bound.has(routed)) ? routed : bindings[0].agentId
+
       this.emit("stream", { kind: "orchestrate:plan", taskId: task.id, leadAgentId: leadId, subtasks: [] })
 
-      // 1. 分解
+      // 1. 分解（分解阶段 provider 报错 → 直接外显失败，不拿空内容硬跑）
       const planRes = await this.sendToAgent(task, leadId, decompositionPrompt(text), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })
+      if (planRes.error) throw new Error("分解阶段失败: " + planRes.error)
       let plan = parsePlan(planRes.content)
       if (!plan || plan.subtasks.length === 0) {
         plan = { subtasks: [{ id: "1", title: text.slice(0, 40), detail: text }] }
@@ -196,9 +197,14 @@ export class Dispatcher extends EventEmitter {
           try {
             const prompt = attempt === 1 ? (st.detail || st.title) : retryPrompt(st.detail || st.title, lastNote)
             const r = await this.sendToAgent(task, st.agentId!, prompt, opts)
+            // 失败外显：provider 报错绝不伪装成 done(空内容)，发 error 状态并退出该子任务
+            if (r.error) {
+              this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "error", content: r.error })
+              return { title: st.title, agentId: st.agentId, content: "", error: r.error }
+            }
             content = r.content
             this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "done", content })
-            // 校验：用 lead 作为 verify agent
+            // 校验：用 lead 作为 verify agent（verify 自身报错时 content 为空 → parseVerdict 宽松判过，避免死循环）
             const verifyRaw = (await this.sendToAgent(task, leadId, verifyPrompt(st.title, st.detail, content), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })).content
             const v = parseVerdict(verifyRaw)
             this.emit("stream", { kind: "orchestrate:verdict", taskId: task.id, subtaskId: st.id, pass: v.pass, note: v.note, attempt })
@@ -216,9 +222,10 @@ export class Dispatcher extends EventEmitter {
 
       if ((task as any).status === "cancelled") return
 
-      // 3. lead 汇总
+      // 3. lead 汇总（汇总阶段 provider 报错 → 外显失败，不得静默以空内容标记完成）
       this.emit("stream", { kind: "orchestrate:synthesizing", taskId: task.id })
       const synth = await this.sendToAgent(task, leadId, synthesisPrompt(text, parts), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })
+      if (synth.error) throw new Error("汇总阶段失败: " + synth.error)
       this.emit("stream", { kind: "orchestrate:final", taskId: task.id, content: synth.content })
       task.results.set("orchestrate", synth.content)
       task.status = "completed"
@@ -228,7 +235,7 @@ export class Dispatcher extends EventEmitter {
     }
   }
 
-  private async sendToAgent(task: DispatchTask, agentId: string, text: string, opts: DispatchOptions): Promise<{ content: string }> {
+  private async sendToAgent(task: DispatchTask, agentId: string, text: string, opts: DispatchOptions): Promise<{ content: string; error?: string }> {
     const mgr = getProviderManager()
     const resolved = mgr.resolveBinding(agentId)
  // stdio routing: 若 registry 注册的是 stdio adapter(非 http),则走本地 CLI 子进程
@@ -241,7 +248,7 @@ export class Dispatcher extends EventEmitter {
       const err = "No available provider for agent " + agentId
       task.errors.set(agentId, err)
       this.emit("stream", { kind: "error", taskId: task.id, agentId, error: err })
-      return { content: "" }
+      return { content: "", error: err }
     }
     this.registry.setStatus(agentId, "busy")
     const messages: ChatCompletionMessage[] = [{ role: "user", content: text }]
@@ -306,7 +313,7 @@ export class Dispatcher extends EventEmitter {
     } catch (e: any) {
       task.errors.set(agentId, e.message)
       this.emit("stream", { kind: "error", taskId: task.id, agentId, providerId: resolved.provider.id, modelId: resolved.model.id, error: e.message })
-      return { content: "" }
+      return { content, error: e.message }
     } finally {
       this.registry.setStatus(agentId, "idle")
     }
@@ -340,7 +347,7 @@ export class Dispatcher extends EventEmitter {
    * interactive 适配器保留输出静默判定; 任务被取消时 kill 子进程.
    * 注意: stdio 不依赖 HTTP provider, resolved 可为 null.
    */
-  private async sendToAgentStdio(task: DispatchTask, agentId: string, text: string, _opts: DispatchOptions, resolved: any, adapter: any, binding?: any): Promise<{ content: string }> {
+  private async sendToAgentStdio(task: DispatchTask, agentId: string, text: string, _opts: DispatchOptions, resolved: any, adapter: any, binding?: any): Promise<{ content: string; error?: string }> {
     this.registry.setStatus(agentId, "busy")
     let content = ""
     // stdio 直连本地 CLI：用绑定自身的 provider/model 做标注（而非 HTTP 回退结果，
@@ -424,7 +431,7 @@ export class Dispatcher extends EventEmitter {
     } catch (e: any) {
       task.errors.set(agentId, e.message)
       this.emit("stream", { kind: "error", taskId: task.id, agentId, providerId, modelId, error: e.message })
-      return { content: "" }
+      return { content, error: e.message }
     } finally {
       try { await adapter.stop() } catch { /* noop */ }
       this.registry.setStatus(agentId, "idle")

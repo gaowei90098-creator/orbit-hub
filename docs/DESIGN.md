@@ -88,6 +88,8 @@ src/
 3. **接管可还原**：任何 takeover 都必须留 `.agenthub-bak` 并能精确还原。
 4. **IPC 唯一通道**：渲染层不再使用 WebSocket；`server.ts`（9527）为遗留服务，若保留需加鉴权（参见安全待办）。
 5. **失败外显**：adapter 的 `onError` 必须转成 `error` 流事件，dispatcher 不得吞错。
+   - `sendToAgent` / `sendToAgentStdio` 出错时返回 `{ content, error }`（`error` 非空即失败），调用方据此判断，**绝不能把空内容当成成功**。
+   - 编排模式（`runOrchestrate`）：① 子任务 provider 报错 → 发 `orchestrate:subtask status:error`，不得发 `done`（空内容）伪装成功；② 分解/汇总阶段报错 → 发 `orchestrate:error` 且 `task.status='failed'`，不得静默 `completed`；③ 未绑定任何 agent → 同样发 `orchestrate:error`。契约由 `orchestrator-e2e.test.ts` 锁定。
 
 ## 9. 构建与质量门
 
