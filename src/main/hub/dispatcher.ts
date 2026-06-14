@@ -5,7 +5,7 @@ import { KeywordRouter } from "./router"
 import { getProviderManager } from "../providers/manager"
 import { buildProviderClient } from "../providers/client"
 import { agentSystemPrompt } from "./agents"
-import { decompositionPrompt, parsePlan, synthesisPrompt, ORCHESTRATOR_LEAD_SYSTEM } from "./orchestrator"
+import { decompositionPrompt, parsePlan, synthesisPrompt, verifyPrompt, parseVerdict, retryPrompt, ORCHESTRATOR_LEAD_SYSTEM } from "./orchestrator"
 import { ChatCompletionMessage, ThinkingConfig } from "../providers/types"
 
 export type DispatchMode = "auto" | "broadcast" | "chain" | "orchestrate"
@@ -38,6 +38,7 @@ export type StreamEvent =
   // 编排模式（Orchestrator）
   | { kind: "orchestrate:plan"; taskId: string; leadAgentId?: string; subtasks: Array<{ id: string; title: string; detail?: string; agentId?: string }> }
   | { kind: "orchestrate:subtask"; taskId: string; subtaskId: string; agentId?: string; status: "pending" | "running" | "done" | "error"; content?: string }
+  | { kind: "orchestrate:verdict"; taskId: string; subtaskId: string; pass: boolean; note?: string; attempt: number }
   | { kind: "orchestrate:synthesizing"; taskId: string }
   | { kind: "orchestrate:final"; taskId: string; content: string }
   | { kind: "orchestrate:error"; taskId: string; error: string }
@@ -183,19 +184,34 @@ export class Dispatcher extends EventEmitter {
         subtasks: plan.subtasks.map(s => ({ id: s.id, title: s.title, detail: s.detail, agentId: s.agentId }))
       })
 
-      // 2. 并行执行子任务
+      // 2. 并行执行子任务（O3：测试 agent 校验 + 有界回环修复，最多 2 次尝试）
+      const MAX_ATTEMPTS = 2
       const parts = await Promise.all(plan.subtasks.map(async (st) => {
         if ((task as any).status === "cancelled") return { title: st.title, agentId: st.agentId, content: "", error: "cancelled" }
-        this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "running" })
-        try {
-          const r = await this.sendToAgent(task, st.agentId!, st.detail || st.title, opts)
-          this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "done", content: r.content })
-          return { title: st.title, agentId: st.agentId, content: r.content }
-        } catch (e: any) {
-          const err = e?.message || String(e)
-          this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "error", content: err })
-          return { title: st.title, agentId: st.agentId, content: "", error: err }
+        let content = ""
+        let lastNote: string | undefined
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+          if ((task as any).status === "cancelled") break
+          this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "running" })
+          try {
+            const prompt = attempt === 1 ? (st.detail || st.title) : retryPrompt(st.detail || st.title, lastNote)
+            const r = await this.sendToAgent(task, st.agentId!, prompt, opts)
+            content = r.content
+            this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "done", content })
+            // 校验：用 lead 作为 verify agent
+            const verifyRaw = (await this.sendToAgent(task, leadId, verifyPrompt(st.title, st.detail, content), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })).content
+            const v = parseVerdict(verifyRaw)
+            this.emit("stream", { kind: "orchestrate:verdict", taskId: task.id, subtaskId: st.id, pass: v.pass, note: v.note, attempt })
+            if (v.pass) return { title: st.title, agentId: st.agentId, content }
+            lastNote = v.note
+            if (attempt >= MAX_ATTEMPTS) return { title: st.title, agentId: st.agentId, content, error: "校验未通过: " + (v.note || "结果不达标") }
+          } catch (e: any) {
+            const err = e?.message || String(e)
+            this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "error", content: err })
+            return { title: st.title, agentId: st.agentId, content: "", error: err }
+          }
         }
+        return { title: st.title, agentId: st.agentId, content }
       }))
 
       if ((task as any).status === "cancelled") return

@@ -83,3 +83,35 @@ export function synthesisPrompt(
     blocks
   ].join('\n')
 }
+
+/** 让 verify agent 判定子任务结果是否达成目标的提示（要求单行 PASS / FAIL:原因） */
+export function verifyPrompt(title: string, detail: string | undefined, result: string): string {
+  return [
+    'You are a strict reviewer. Decide whether the RESULT adequately accomplishes the SUBTASK.',
+    'Reply with ONLY one line: "PASS" if it does, or "FAIL: <short reason>" if it does not.',
+    '',
+    'SUBTASK: ' + title + (detail ? ' — ' + detail : ''),
+    '',
+    'RESULT:',
+    result || '(empty)'
+  ].join('\n')
+}
+
+/** 解析 verify 输出：显式 PASS→通过；含 FAIL→不通过(带原因);否则宽松判通过(避免歧义致死循环)。 */
+export function parseVerdict(raw: string): { pass: boolean; note?: string } {
+  const s = (raw || '').trim()
+  if (/^\s*PASS\b/i.test(s)) return { pass: true }
+  const fm = s.match(/FAIL\s*[:：]?\s*(.{0,200})/i)
+  if (fm) return { pass: false, note: (fm[1] || '').trim() || undefined }
+  return { pass: true }
+}
+
+/** 重试时把上一次失败原因拼到子任务提示前，引导修复 */
+export function retryPrompt(detail: string, note: string | undefined): string {
+  return [
+    'A previous attempt at this subtask was judged inadequate' + (note ? (': ' + note) : '') + '.',
+    'Redo it, fixing that problem.',
+    '',
+    detail
+  ].join('\n')
+}

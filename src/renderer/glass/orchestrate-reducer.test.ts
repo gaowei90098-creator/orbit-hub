@@ -36,6 +36,14 @@ describe('orchestrate reducer', () => {
     expect(s.subtasks.find(t => t.id === 'x')?.status).toBe('running')
   })
 
+  it('verdict 事件写入子任务校验结论', () => {
+    let s = applyOrchestrateEvent(undefined, { kind: 'orchestrate:plan', subtasks: [{ id: 'a', title: 'A' }] })
+    s = applyOrchestrateEvent(s, { kind: 'orchestrate:verdict', subtaskId: 'a', pass: false, note: '缺测试', attempt: 1 })
+    expect(s.subtasks.find(t => t.id === 'a')?.verdict).toEqual({ pass: false, note: '缺测试' })
+    s = applyOrchestrateEvent(s, { kind: 'orchestrate:verdict', subtaskId: 'a', pass: true, attempt: 2 })
+    expect(s.subtasks.find(t => t.id === 'a')?.verdict?.pass).toBe(true)
+  })
+
   it('final 事件进入 done 并记录合成结果', () => {
     const s = applyOrchestrateEvent(initialOrchestrateState(), { kind: 'orchestrate:final', content: '汇总完成' })
     expect(s.phase).toBe('done')

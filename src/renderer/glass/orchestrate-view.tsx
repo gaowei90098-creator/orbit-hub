@@ -20,6 +20,8 @@ export interface OrchestrateSubtask {
   agentId?: string
   status: OrchestrateSubtaskStatus
   content?: string
+  /** O3：测试 agent 校验结论 */
+  verdict?: { pass: boolean; note?: string }
 }
 
 export interface OrchestrateState {
@@ -63,6 +65,13 @@ function SubtaskRow({ st, index }: { st: OrchestrateSubtask; index: number }) {
           <span className="ah-hint" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             <span className={'ah-dot ' + DOT[st.status]}></span>{statusText(st.status)}
           </span>
+          {st.verdict && (
+            <span className="ah-hint" style={{ color: st.verdict.pass ? 'var(--mint)' : 'var(--st-error)' }}>
+              {st.verdict.pass
+                ? tr('✓ 校验通过', '✓ Verified')
+                : (tr('✗ 校验未过', '✗ Failed review') + (st.verdict.note ? ': ' + st.verdict.note : ''))}
+            </span>
+          )}
         </div>
         {st.detail && <div className="ah-hint" style={{ marginTop: 2 }}>{st.detail}</div>}
         {st.content && (

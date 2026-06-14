@@ -47,6 +47,12 @@ export function applyOrchestrateEvent(prev: OrchestrateState | undefined, ev: an
       return { ...state, subtasks }
     }
 
+    case 'orchestrate:verdict': {
+      const subtasks = state.subtasks.map(s =>
+        s.id === String(ev.subtaskId) ? { ...s, verdict: { pass: !!ev.pass, note: ev.note } } : s)
+      return { ...state, subtasks }
+    }
+
     case 'orchestrate:synthesizing':
       return { ...state, phase: 'synthesizing' }
 
