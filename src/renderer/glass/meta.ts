@@ -3,6 +3,8 @@
    （与 design_handoff_glass_ui/app/store.jsx 的 AGENT_META 一致）
    ============================================================ */
 
+import type { OrchestrateState } from './orchestrate-view'
+
 export interface AgentMeta {
   name: string
   nameZh: string
@@ -58,7 +60,7 @@ export const STATUS_ZH: Record<AgentUIStatus, string> = {
   idle: '空闲', busy: '运行中', error: '异常', off: '未启用'
 }
 
-export type DispatchMode = 'auto' | 'broadcast' | 'chain'
+export type DispatchMode = 'auto' | 'broadcast' | 'chain' | 'orchestrate'
 
 export const MODE_ZH: Record<string, string> = { auto: '智能路由', broadcast: '广播', chain: '链式' }
 
@@ -198,6 +200,8 @@ export interface ChatMessage {
   mode: DispatchMode
   taskId: string
   replies: ReplyState[]
+  /** 编排模式：由 orchestrate:* 事件经 reducer 聚合 */
+  orchestration?: OrchestrateState
 }
 
 export const fmtDur = (ms: number | null): string =>

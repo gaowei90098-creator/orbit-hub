@@ -47,8 +47,8 @@ export function statusLabel(s: AgentUIStatus): string {
 }
 
 const MODE_LABELS: Record<Lang, Record<string, string>> = {
-  zh: { auto: '智能路由', broadcast: '广播', chain: '链式' },
-  en: { auto: 'Auto route', broadcast: 'Broadcast', chain: 'Chain' }
+  zh: { auto: '智能路由', broadcast: '广播', chain: '链式', orchestrate: '编排' },
+  en: { auto: 'Auto route', broadcast: 'Broadcast', chain: 'Chain', orchestrate: 'Orchestrate' }
 }
 
 export function modeLabel(m: string): string {

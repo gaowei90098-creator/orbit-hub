@@ -9,6 +9,7 @@ import { Icon, IC, AgentMark, Enter, Seg, Collapse } from '../glass/ui'
 import { AGENT_META, AGENT_IDS, DispatchMode, ChatMessage, ReplyState } from '../glass/meta'
 import { tr, modeLabel } from '../glass/i18n'
 import { ConnectionSummary, SetupTab, firstRunActionForError } from '../glass/connection-status'
+import { OrchestrateView } from '../glass/orchestrate-view'
 
 export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, onSend, onCancel, connectionSummary, openSetup }: {
   activeAgent: string | null
@@ -68,7 +69,8 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
           options={[
             { value: 'auto', label: tr('智能路由', 'Auto route') },
             { value: 'broadcast', label: tr('广播全部', 'Broadcast') },
-            { value: 'chain', label: tr('链式接力', 'Chain relay') }
+            { value: 'chain', label: tr('链式接力', 'Chain relay') },
+            { value: 'orchestrate', label: tr('编排', 'Orchestrate') }
           ]} />
         <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }}></div>
         <span className="ah-label">{tr('指定：', 'Target:')}</span>
@@ -112,9 +114,11 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
               <div className="glass-strong" style={{ padding: '10px 16px', borderRadius: '18px 18px 5px 18px', fontSize: 13.5 }}>{m.text}</div>
               <span className="ah-hint">{modeLabel(m.mode)}{m.mode === 'chain' ? '' : m.replies.length > 1 ? tr(` · ${m.replies.length} 个 Agent`, ` · ${m.replies.length} agents`) : ''}</span>
             </div>
-            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: m.replies.length > 1 ? 'repeat(auto-fit, minmax(300px, 1fr))' : '1fr' }}>
-              {m.replies.map((r, idx) => <ReplyBubble key={r.agentId} r={r} chainIdx={m.mode === 'chain' ? idx : null} delay={idx * 90} openSetup={openSetup} />)}
-            </div>
+            {m.mode === 'orchestrate'
+              ? <OrchestrateView state={m.orchestration ?? { phase: 'planning', subtasks: [] }} />
+              : <div style={{ display: 'grid', gap: 10, gridTemplateColumns: m.replies.length > 1 ? 'repeat(auto-fit, minmax(300px, 1fr))' : '1fr' }}>
+                  {m.replies.map((r, idx) => <ReplyBubble key={r.agentId} r={r} chainIdx={m.mode === 'chain' ? idx : null} delay={idx * 90} openSetup={openSetup} />)}
+                </div>}
           </Enter>
         ))}
       </div>

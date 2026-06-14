@@ -5,9 +5,10 @@ import { KeywordRouter } from "./router"
 import { getProviderManager } from "../providers/manager"
 import { buildProviderClient } from "../providers/client"
 import { agentSystemPrompt } from "./agents"
+import { decompositionPrompt, parsePlan, synthesisPrompt, ORCHESTRATOR_LEAD_SYSTEM } from "./orchestrator"
 import { ChatCompletionMessage, ThinkingConfig } from "../providers/types"
 
-export type DispatchMode = "auto" | "broadcast" | "chain"
+export type DispatchMode = "auto" | "broadcast" | "chain" | "orchestrate"
 
 export interface DispatchTask {
   id: string
@@ -34,6 +35,12 @@ export type StreamEvent =
   | { kind: "delta"; taskId: string; agentId: string; providerId: string; modelId: string; channel: "content" | "thinking"; text: string }
   | { kind: "done"; taskId: string; agentId: string; providerId: string; modelId: string; content: string; thinking?: string; summary?: { level?: string; budget?: number; preview?: string }; durationMs: number; usage?: any }
   | { kind: "error"; taskId: string; agentId: string; providerId?: string; modelId?: string; error: string }
+  // 编排模式（Orchestrator）
+  | { kind: "orchestrate:plan"; taskId: string; leadAgentId?: string; subtasks: Array<{ id: string; title: string; detail?: string; agentId?: string }> }
+  | { kind: "orchestrate:subtask"; taskId: string; subtaskId: string; agentId?: string; status: "pending" | "running" | "done" | "error"; content?: string }
+  | { kind: "orchestrate:synthesizing"; taskId: string }
+  | { kind: "orchestrate:final"; taskId: string; content: string }
+  | { kind: "orchestrate:error"; taskId: string; error: string }
 
 export class Dispatcher extends EventEmitter {
   private tasks: Map<string, DispatchTask> = new Map()
@@ -83,21 +90,25 @@ export class Dispatcher extends EventEmitter {
 
     task.status = "running"
     try {
-      const targets = this.resolveTargets(task, mode, targetAgent)
-      if (targets.length === 0) throw new Error("No available provider for the requested routing. Open Settings -> Providers to configure API keys.")
-
-      if (mode === "chain") {
-        let currentText = text
-        for (const t of targets) {
-          const res = await this.sendToAgent(task, t.agentId, currentText, opts)
-          if ((task as any).status === "cancelled") break
-          currentText = res.content
-        }
+      if (mode === "orchestrate") {
+        await this.runOrchestrate(task, text, opts)
       } else {
-        await Promise.all(targets.map(t => this.sendToAgent(task, t.agentId, text, opts)))
-      }
+        const targets = this.resolveTargets(task, mode, targetAgent)
+        if (targets.length === 0) throw new Error("No available provider for the requested routing. Open Settings -> Providers to configure API keys.")
 
-      if ((task as any).status !== "cancelled") task.status = task.errors.size === targets.length && targets.length > 0 ? "failed" : "completed"
+        if (mode === "chain") {
+          let currentText = text
+          for (const t of targets) {
+            const res = await this.sendToAgent(task, t.agentId, currentText, opts)
+            if ((task as any).status === "cancelled") break
+            currentText = res.content
+          }
+        } else {
+          await Promise.all(targets.map(t => this.sendToAgent(task, t.agentId, text, opts)))
+        }
+
+        if ((task as any).status !== "cancelled") task.status = task.errors.size === targets.length && targets.length > 0 ? "failed" : "completed"
+      }
     } catch (e: any) {
       task.status = "failed"
       task.error = e.message
@@ -130,6 +141,75 @@ export class Dispatcher extends EventEmitter {
     })))
     if (routed && bindings.find(b => b.agentId === routed)) return [{ agentId: routed }]
     return bindings.length > 0 ? [{ agentId: bindings[0].agentId }] : []
+  }
+
+  /**
+   * 编排模式：lead agent 分解任务 → 各 agent 并行执行子任务 → lead 汇总。
+   * 复用 sendToAgent 执行；额外发 orchestrate:* 事件供 UI 渲染（其内部 start/delta/done 事件
+   * 渲染层在编排消息上忽略，只用 orchestrate:* 驱动 OrchestrateView）。
+   */
+  private async runOrchestrate(task: DispatchTask, text: string, opts: DispatchOptions): Promise<void> {
+    const mgr = getProviderManager()
+    const bindings = mgr.getBindings()
+    if (bindings.length === 0) throw new Error("No agent bound. Open Settings -> Routing to bind an agent.")
+
+    const router = new KeywordRouter()
+    const available = this.registry.getAll().map(a => ({
+      id: a.id, name: a.name, status: a.status, mode: a.mode, protocol: a.protocol,
+      adapter: a.adapter, capabilities: a.capabilities, lastActive: a.lastActive, errorCount: a.errorCount
+    }))
+    const bound = new Set(bindings.map(b => b.agentId))
+    const routed = router.route(text, available)
+    const leadId = (routed && bound.has(routed)) ? routed : bindings[0].agentId
+
+    try {
+      this.emit("stream", { kind: "orchestrate:plan", taskId: task.id, leadAgentId: leadId, subtasks: [] })
+
+      // 1. 分解
+      const planRes = await this.sendToAgent(task, leadId, decompositionPrompt(text), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })
+      let plan = parsePlan(planRes.content)
+      if (!plan || plan.subtasks.length === 0) {
+        plan = { subtasks: [{ id: "1", title: text.slice(0, 40), detail: text }] }
+      }
+      // 指派：lead 未指定或不可用时按 routeScores 选可用 agent，兜底用 lead
+      for (const st of plan.subtasks) {
+        if (!st.agentId || !bound.has(st.agentId)) {
+          const scored = router.routeScores(st.detail || st.title, available).filter(s => bound.has(s.id))
+          st.agentId = scored[0]?.id || leadId
+        }
+      }
+      this.emit("stream", {
+        kind: "orchestrate:plan", taskId: task.id, leadAgentId: leadId,
+        subtasks: plan.subtasks.map(s => ({ id: s.id, title: s.title, detail: s.detail, agentId: s.agentId }))
+      })
+
+      // 2. 并行执行子任务
+      const parts = await Promise.all(plan.subtasks.map(async (st) => {
+        if ((task as any).status === "cancelled") return { title: st.title, agentId: st.agentId, content: "", error: "cancelled" }
+        this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "running" })
+        try {
+          const r = await this.sendToAgent(task, st.agentId!, st.detail || st.title, opts)
+          this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "done", content: r.content })
+          return { title: st.title, agentId: st.agentId, content: r.content }
+        } catch (e: any) {
+          const err = e?.message || String(e)
+          this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "error", content: err })
+          return { title: st.title, agentId: st.agentId, content: "", error: err }
+        }
+      }))
+
+      if ((task as any).status === "cancelled") return
+
+      // 3. lead 汇总
+      this.emit("stream", { kind: "orchestrate:synthesizing", taskId: task.id })
+      const synth = await this.sendToAgent(task, leadId, synthesisPrompt(text, parts), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })
+      this.emit("stream", { kind: "orchestrate:final", taskId: task.id, content: synth.content })
+      task.results.set("orchestrate", synth.content)
+      task.status = "completed"
+    } catch (e: any) {
+      this.emit("stream", { kind: "orchestrate:error", taskId: task.id, error: e?.message || String(e) })
+      throw e
+    }
   }
 
   private async sendToAgent(task: DispatchTask, agentId: string, text: string, opts: DispatchOptions): Promise<{ content: string }> {

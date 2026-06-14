@@ -19,6 +19,7 @@ import { TasksScreen } from './screens/Tasks'
 import { SettingsScreen, MotionLevel } from './screens/Settings'
 import { useLang, tr } from './glass/i18n'
 import { getBudget, getBudgetMode } from './glass/budget'
+import { applyOrchestrateEvent } from './glass/orchestrate-reducer'
 import { SetupTab, summarizeAgentConnections } from './glass/connection-status'
 
 type AgentMap = Record<string, { status: AgentUIStatus }>
@@ -58,6 +59,7 @@ export default function App() {
   const localTaskId = useRef<Map<string, string>>(new Map()) // 后端 taskId → 本地任务行 id
   const currentMsgId = useRef<string | null>(null)
   const cancelGen = useRef(0)
+  const orchestrateTasks = useRef<Set<string>>(new Set())  // 编排模式任务 id（其内部 agent 事件不渲染气泡）
 
   /* 动效档位 → html[data-motion] */
   useEffect(() => {
@@ -139,6 +141,21 @@ export default function App() {
       }
       if (!msgId || ignoredMsgs.current.has(msgId)) return
       const localId = localTaskId.current.get(tid) ?? tid
+
+      // 编排模式：orchestrate:* 事件经 reducer 聚合到该消息的 orchestration；标记该任务
+      if (typeof e.kind === 'string' && e.kind.startsWith('orchestrate:')) {
+        orchestrateTasks.current.add(tid)
+        setMessages(ms => ms.map(m => m.id === msgId
+          ? { ...m, orchestration: applyOrchestrateEvent(m.orchestration, e) } : m))
+        if (e.kind === 'orchestrate:final' || e.kind === 'orchestrate:error') {
+          setBusyOverride(o => ({ ...o }))
+          setTasks(ts => ts.map(t => t.id === localId
+            ? { ...t, results: { ...(t.results || {}), orchestrate: e.content || t.results?.orchestrate || '' } } : t))
+        }
+        return
+      }
+      // 编排任务的内部 agent 事件（lead 分解/子任务/汇总）不渲染为普通气泡
+      if (orchestrateTasks.current.has(tid)) return
 
       if (e.kind === 'start') {
         setBusyOverride(o => ({ ...o, [e.agentId]: 'busy' }))
