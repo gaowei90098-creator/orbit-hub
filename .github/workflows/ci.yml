@@ -14,7 +14,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 与开发环境一致(Node 24 / npm 11)：npm 11 才会正确跳过 esbuild 平台 optional 依赖；
+          # Node 20/npm 10 会对 @esbuild/<其它平台> 报 EBADPLATFORM。
+          node-version: 24
           cache: npm
 
       - name: Install dependencies
