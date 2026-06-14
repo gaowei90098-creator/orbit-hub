@@ -1,6 +1,7 @@
 ﻿import { app, safeStorage } from 'electron'
 import { join } from 'path'
 import * as fs from 'fs'
+import { randomBytes } from 'crypto'
 
 const ENC_PREFIX = 'enc:v1:'
 
@@ -81,3 +82,18 @@ class AppStore {
 
 const appStore = new AppStore()
 export { appStore as store }
+
+const TOKEN_KEY = 'local.token'
+
+/**
+ * 每安装一份的本机令牌：用于 Hub WebSocket(9527) 连接鉴权等本机内部场景。
+ * 首次调用时生成并持久化。仅本机使用，不外发。
+ */
+export function getLocalToken(): string {
+  let t = appStore.get(TOKEN_KEY)
+  if (!t || typeof t !== 'string') {
+    t = randomBytes(24).toString('hex')
+    appStore.set(TOKEN_KEY, t)
+  }
+  return t
+}

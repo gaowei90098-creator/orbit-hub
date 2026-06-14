@@ -1,5 +1,6 @@
 ﻿import { EventEmitter } from 'events'
 import { AgentRegistry } from './registry'
+import { getLocalToken } from '../store'
 
 // @ts-ignore - Electron main process has require
 const WebSocket = require('ws')
@@ -21,9 +22,20 @@ export class HubServer extends EventEmitter {
   }
 
   start(): void {
-    this.wss = new WebSocket.WebSocketServer({ port: this.port })
+    this.wss = new WebSocket.WebSocketServer({
+      port: this.port,
+      host: '127.0.0.1',                       // 仅绑本机，避免全网暴露（此前默认 0.0.0.0）
+      verifyClient: (info: any, cb: any) => {
+        // 必须携带 ?token=<本机令牌>；阻断未授权连接（渲染层走 IPC，不依赖此 WS）
+        try {
+          const u = new URL(info.req?.url || '/', 'http://127.0.0.1:' + this.port)
+          if (u.searchParams.get('token') === getLocalToken()) return cb(true)
+        } catch { /* noop */ }
+        cb(false, 401, 'Unauthorized')
+      }
+    })
     this.wss.on('connection', (ws: any) => this.handleConnection(ws))
-    console.log('[Hub] WebSocket server started on ws://localhost:' + this.port)
+    console.log('[Hub] WebSocket server started on ws://127.0.0.1:' + this.port)
   }
 
   stop(): void {

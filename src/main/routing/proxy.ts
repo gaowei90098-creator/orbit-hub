@@ -81,18 +81,28 @@ export class LocalProxy extends EventEmitter {
 
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url || "/", "http://127.0.0.1:" + this.port)
-    const cors = {
-      "access-control-allow-origin": "*",
+    const origin = typeof req.headers.origin === "string" ? req.headers.origin : ""
+    // 仅放行本机来源（含无 Origin 的 CLI 客户端）；跨站浏览器请求被 CORS + 显式 403 双重拦截
+    const isLocalOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)
+    const cors: Record<string, string> = {
       "access-control-allow-methods": "GET,POST,OPTIONS",
       "access-control-allow-headers": "content-type,authorization,x-api-key,anthropic-version,anthropic-beta",
-      "access-control-max-age": "86400"
+      "access-control-max-age": "86400",
+      "vary": "Origin"
     }
+    if (origin && isLocalOrigin) cors["access-control-allow-origin"] = origin
     if (req.method === "OPTIONS") {
       res.writeHead(204, cors)
       res.end()
       return
     }
-    for (const k of Object.keys(cors)) res.setHeader(k, cors[k as keyof typeof cors])
+    // 防御 CSRF：拒绝带非本机 Origin 的请求（恶意网页 fetch 127.0.0.1）；CLI 无 Origin 不受影响
+    if (!isLocalOrigin) {
+      res.writeHead(403, { "content-type": "application/json" })
+      res.end(JSON.stringify({ error: { message: "forbidden: cross-site origin not allowed" } }))
+      return
+    }
+    for (const k of Object.keys(cors)) res.setHeader(k, cors[k])
 
     try {
       if (url.pathname === "/v1/models" && req.method === "GET") return this.listModels(res)
