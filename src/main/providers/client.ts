@@ -18,7 +18,9 @@ import { THINKING_BUDGET_TOKENS } from './presets'
 export interface StreamCallbacks {
   onContent?: (delta: string) => void
   onThinking?: (delta: string) => void
-  onDone?: (final: { content: string; thinking?: ThinkingSummary; usage?: any; finishReason?: string }) => void
+  /** 上游 OpenAI 兼容流的 tool_calls 增量（原样 OpenAI 格式，供 wire 1:1 重编码） */
+  onToolCallDelta?: (toolCalls: any[]) => void
+  onDone?: (final: { content: string; thinking?: ThinkingSummary; usage?: any; finishReason?: string; toolCalls?: any[] }) => void
   onError?: (err: Error) => void
 }
 
@@ -32,6 +34,9 @@ export interface CallOptions {
   /** 临时覆盖 provider（来自 UI 切换） */
   providerOverride?: ProviderDefinition
   signal?: AbortSignal
+  /** 工具定义（OpenAI 格式）；仅 OpenAI 兼容上游会转发，anthropic/gemini 忽略 */
+  tools?: any[]
+  toolChoice?: any
 }
 
 export interface ResolvedCall {
@@ -85,6 +90,10 @@ export class ProviderClient {
     const url = `${provider.baseUrl.replace(/\/$/, '')}/chat/completions`
     const body: any = this.buildRequest(messages, opts.systemPrompt, thinking)
     body.stream_options = { include_usage: true }   // 让上游在末尾 chunk 返回 usage
+    if (opts.tools && opts.tools.length) {           // 工具透传（仅 OpenAI 兼容上游，1:1 转发）
+      body.tools = opts.tools
+      if (opts.toolChoice !== undefined) body.tool_choice = opts.toolChoice
+    }
     const headers = this.headersFor(provider)
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
     if (!res.ok || !res.body) {
@@ -94,6 +103,7 @@ export class ProviderClient {
     let content = ''
     let usage: any = undefined
     let finishReason: string | undefined
+    const toolAcc: any[] = []   // 按 index 累积流式 tool_calls（id/name 仅首帧，arguments 拼接）
     await this.readSse(res.body, (evt) => {
       if (!evt || evt === '[DONE]') return
       try {
@@ -105,9 +115,13 @@ export class ProviderClient {
         const delta = chunk.choices?.[0]?.delta
         if (delta?.content) { content += delta.content; cb.onContent?.(delta.content) }
         if (delta?.reasoning_content) cb.onThinking?.(delta.reasoning_content)
+        if (delta?.tool_calls && delta.tool_calls.length) {
+          accumulateToolCalls(toolAcc, delta.tool_calls)
+          cb.onToolCallDelta?.(delta.tool_calls)
+        }
       } catch {}
     })
-    cb.onDone?.({ content, usage, finishReason })
+    cb.onDone?.({ content, usage, finishReason, toolCalls: toolAcc.length ? toolAcc : undefined })
   }
 
   // ---- Anthropic Messages ----
@@ -284,6 +298,18 @@ export class ProviderClient {
  * 兼容 OpenAI(prompt/completion/total)、Anthropic(input/output)、Gemini(promptTokenCount…)。
  * 全为空时返回 undefined（表示上游未提供用量）。
  */
+/** 按 index 合并 OpenAI 流式 tool_calls 增量：id/type/name 取首个非空，arguments 逐帧拼接。 */
+function accumulateToolCalls(acc: any[], deltas: any[]): void {
+  for (const d of deltas) {
+    const i = typeof d.index === 'number' ? d.index : acc.length
+    if (!acc[i]) acc[i] = { index: i, id: d.id, type: d.type || 'function', function: { name: '', arguments: '' } }
+    if (d.id) acc[i].id = d.id
+    if (d.type) acc[i].type = d.type
+    if (d.function?.name) acc[i].function.name = d.function.name
+    if (typeof d.function?.arguments === 'string') acc[i].function.arguments += d.function.arguments
+  }
+}
+
 /** 把各家结束原因归一为 OpenAI 取向的中性值：stop | length | tool_calls | content_filter。 */
 function normFinish(raw: any): string | undefined {
   if (!raw) return undefined

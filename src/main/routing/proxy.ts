@@ -36,6 +36,9 @@ interface Candidate {
 interface InboundOverrides {
   temperature?: number
   maxTokens?: number
+  /** 入站工具定义（OpenAI 格式）；透传给 OpenAI 兼容上游 */
+  tools?: any[]
+  toolChoice?: any
 }
 
 const BREAK_AFTER_FAILS = 3
@@ -247,9 +250,10 @@ export class LocalProxy extends EventEmitter {
       res.end(JSON.stringify({ error: { message: "no usable provider. Configure API keys in AgentHub → 设置 → 提供商" } }))
       return
     }
+    const tools = Array.isArray((parsed as any).tools) && (parsed as any).tools.length ? (parsed as any).tools : undefined
     await this.streamWithFailover(res, "openai", noStream, parsed.model || candidates[0].model.id, candidates, rest,
       sysParts.length ? sysParts.join("\n\n") : undefined,
-      { temperature: parsed.temperature, maxTokens: parsed.max_tokens })
+      { temperature: parsed.temperature, maxTokens: parsed.max_tokens, tools, toolChoice: (parsed as any).tool_choice })
   }
 
   /* ---------------- Anthropic 原生入站（Claude Code 接管） ---------------- */
@@ -408,7 +412,7 @@ export class LocalProxy extends EventEmitter {
       arm(FIRST_BYTE_MS)
 
       client.stream(
-        { messages, systemPrompt, thinkingOverride: cand.thinking, signal: controller.signal },
+        { messages, systemPrompt, thinkingOverride: cand.thinking, signal: controller.signal, tools: overrides.tools, toolChoice: overrides.toolChoice },
         {
           onContent: (delta) => {
             content += delta
@@ -424,11 +428,18 @@ export class LocalProxy extends EventEmitter {
             if (!started) { started = true; emitter.begin() }
             emitter.thinking(delta)
           },
+          onToolCallDelta: (tc) => {
+            arm(IDLE_MS)
+            // 工具流重编码仅用于 OpenAI 入站；anthropic 入站未转发工具，不会到这
+            if (noStream || wire !== "openai") return
+            if (!started) { started = true; emitter.begin() }
+            ;(emitter as OpenAIWire).toolCallDelta(tc)
+          },
           onDone: (final) => {
             if (settled) return
             settled = true; cleanup()
             if (noStream) {
-              emitter.json(content, thinkingTxt, final.usage, final.finishReason)
+              emitter.json(content, thinkingTxt, final.usage, final.finishReason, final.toolCalls)
             } else {
               if (!started) { started = true; emitter.begin() }
               emitter.done(final.usage, final.finishReason)
@@ -528,6 +539,7 @@ class OpenAIWire {
 
   content(d: string): void { this.chunk({ content: d }) }
   thinking(d: string): void { this.chunk({ reasoning_content: d }) }
+  toolCallDelta(tc: any[]): void { this.chunk({ tool_calls: tc }) }   // 1:1 透传 OpenAI 工具流增量
 
   done(usage: any, finishReason?: string): void {
     this.chunk({}, finishReason || "stop")   // 归一值 stop|length|tool_calls|content_filter 即 OpenAI 格式
@@ -541,14 +553,14 @@ class OpenAIWire {
     this.res.end()
   }
 
-  json(content: string, thinking: string, usage: any, finishReason?: string): void {
+  json(content: string, thinking: string, usage: any, finishReason?: string, toolCalls?: any[]): void {
     this.res.writeHead(200, { "content-type": "application/json" })
     this.res.end(JSON.stringify({
       id: this.id,
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
       model: this.model,
-      choices: [{ index: 0, message: { role: "assistant", content, ...(thinking ? { reasoning_content: thinking } : {}) }, finish_reason: finishReason || "stop" }],
+      choices: [{ index: 0, message: { role: "assistant", content, ...(thinking ? { reasoning_content: thinking } : {}), ...(toolCalls && toolCalls.length ? { tool_calls: toolCalls } : {}) }, finish_reason: finishReason || "stop" }],
       usage
     }))
   }
@@ -620,7 +632,7 @@ class AnthropicWire {
     this.res.end()
   }
 
-  json(content: string, thinking: string, usage: any, finishReason?: string): void {
+  json(content: string, thinking: string, usage: any, finishReason?: string, _toolCalls?: any[]): void {
     this.res.writeHead(200, { "content-type": "application/json" })
     const blocks: any[] = []
     if (thinking) blocks.push({ type: "thinking", thinking })
