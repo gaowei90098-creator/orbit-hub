@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ListTree, Columns2, Settings2 } from "lucide-react";
+import { ListTree, Columns2, Settings2, TerminalSquare } from "lucide-react";
 import type { HubActions } from "../api";
 import type {
   Agent,
@@ -18,6 +18,7 @@ import { CommandInput } from "./CommandInput";
 import { DecisionStrip } from "./DecisionStrip";
 import { Timeline } from "./Timeline";
 import { WorkerColumns } from "./WorkerColumns";
+import { TerminalPanel } from "./TerminalPanel";
 import { WorkflowHome } from "./WorkflowHome";
 
 interface ConsoleHomeProps {
@@ -35,7 +36,7 @@ interface ConsoleHomeProps {
   actions: HubActions;
 }
 
-type View = "timeline" | "columns";
+type View = "timeline" | "columns" | "terminal";
 
 // M1 统一控制台：左侧 Agent 名册，中间决策卡 + 时间线/并行栏，底部统一命令框。
 // 现有整页 WorkflowHome（连接/工作区/拆分/集成/全部面板）原样收进底部「设置与经典视图」，功能零丢失。
@@ -96,13 +97,23 @@ export function ConsoleHome(props: ConsoleHomeProps) {
               <Columns2 size={14} />
               并行对比
             </button>
+            <button
+              type="button"
+              className={view === "terminal" ? "active" : ""}
+              onClick={() => setView("terminal")}
+            >
+              <TerminalSquare size={14} />
+              终端
+            </button>
           </div>
         </div>
 
-        <DecisionStrip decisions={decisions} actions={actions} onOpenSetup={openSetup} />
+        {view !== "terminal" && <DecisionStrip decisions={decisions} actions={actions} onOpenSetup={openSetup} />}
 
         <div className="console-content">
-          {view === "timeline" ? (
+          {view === "terminal" ? (
+            <TerminalPanel workspace={workspace} />
+          ) : view === "timeline" ? (
             <Timeline events={events} />
           ) : columnWorkers.length > 0 ? (
             <WorkerColumns workers={columnWorkers} actions={actions} />
@@ -111,7 +122,9 @@ export function ConsoleHome(props: ConsoleHomeProps) {
           )}
         </div>
 
-        <CommandInput agents={agents} missions={missions} workers={workers} workspace={workspace} actions={actions} />
+        {view !== "terminal" && (
+          <CommandInput agents={agents} missions={missions} workers={workers} workspace={workspace} actions={actions} />
+        )}
       </div>
 
       <details className="console-setup" ref={setupRef} open={setupOpen}>

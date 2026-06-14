@@ -15,6 +15,7 @@ import { newId } from "../core/id.js";
 import { buildReviewPrompt } from "./review.js";
 import { buildRescuePrompt, selectRescueTargets, RESCUE_STALL_MS } from "./rescue.js";
 import { buildAgentCard } from "./agent-card.js";
+import type { TerminalManager } from "./terminal-manager.js";
 import {
   buildTask,
   extractMessageText,
@@ -287,12 +288,83 @@ export function mountRoutes(
   runs?: RunManager,
   integration?: IntegrationManager,
   messageRouter?: MessageRouter,
+  terminals?: TerminalManager,
 ): void {
   app.get("/healthz", (_req, res) => res.json({ ok: true }));
 
   // M4.2 A2A 服务发现：公开的 Agent Card（不在 /api 下，故免鉴权）。外部 A2A 客户端
   // 据此把 Orbit 当作一个标准 agent 来调用。
   app.get("/.well-known/agent.json", (req, res) => res.json(buildAgentCard(hubUrl(req))));
+
+  // ----- 嵌入式终端（node-pty 真伪终端，跑你已登录的交互式 claude/codex）-----
+  const terminalCreateSchema = z.object({
+    command: z.enum(["claude", "codex"]),
+    cwd: z.string().optional(),
+    cols: z.number().int().positive().max(1000).optional(),
+    rows: z.number().int().positive().max(1000).optional(),
+  });
+
+  app.get("/api/terminals", async (_req, res) => {
+    if (!terminals) return res.json({ available: false, sessions: [] });
+    res.json({ available: await terminals.available(), sessions: terminals.list() });
+  });
+
+  app.post("/api/terminals", async (req, res) => {
+    if (!terminals) return res.status(503).json({ error: "terminal_unavailable" });
+    const body = parse(terminalCreateSchema, req, res);
+    if (!body) return;
+    const cwd = body.cwd?.trim() || core.store.getSetting("workspace_path") || process.cwd();
+    try {
+      // 无参数启动 = 交互式 TUI，用你 shell 里登录好的会话认证（绕开 headless 401）。
+      const session = await terminals.create({ command: body.command, cwd, cols: body.cols, rows: body.rows });
+      res.json({ id: session.id, command: session.command, cwd: session.cwd });
+    } catch (err) {
+      res.status(503).json({ error: "terminal_unavailable", detail: (err as Error).message });
+    }
+  });
+
+  // SSE：把 PTY 原始输出（base64 编码，避开 ANSI 换行破坏 SSE 帧）推给前端 xterm。
+  app.get("/api/terminals/:id/stream", (req, res) => {
+    if (!terminals) return res.status(503).json({ error: "terminal_unavailable" });
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    const unsubscribe = terminals.subscribe(
+      req.params.id,
+      (chunk) => res.write(`event: data\ndata: ${Buffer.from(chunk, "utf8").toString("base64")}\n\n`),
+      (code) => res.write(`event: exit\ndata: ${code}\n\n`),
+    );
+    if (!unsubscribe) {
+      res.write(`event: error\ndata: unknown_session\n\n`);
+      return res.end();
+    }
+    const ping = setInterval(() => res.write(`: ping\n\n`), 15_000);
+    req.on("close", () => {
+      clearInterval(ping);
+      unsubscribe();
+    });
+  });
+
+  app.post("/api/terminals/:id/input", (req, res) => {
+    if (!terminals) return res.status(503).json({ error: "terminal_unavailable" });
+    const data = typeof req.body?.data === "string" ? req.body.data : "";
+    const ok = terminals.write(req.params.id, data);
+    res.json({ ok });
+  });
+
+  app.post("/api/terminals/:id/resize", (req, res) => {
+    if (!terminals) return res.status(503).json({ error: "terminal_unavailable" });
+    const cols = Number(req.body?.cols) || 80;
+    const rows = Number(req.body?.rows) || 30;
+    res.json({ ok: terminals.resize(req.params.id, cols, rows) });
+  });
+
+  app.delete("/api/terminals/:id", (req, res) => {
+    if (!terminals) return res.status(503).json({ error: "terminal_unavailable" });
+    res.json({ ok: terminals.kill(req.params.id) });
+  });
   app.get("/api/snapshot", (_req, res) => res.json(core.snapshot()));
 
   // ----- A01/A02 环境与登录检测 -----

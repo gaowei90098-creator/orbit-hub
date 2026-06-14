@@ -161,7 +161,9 @@ export function parseCodexLine(line: string): AgentRunEvent[] {
 
 function commonArgs(input: StartRunInput): string[] {
   // --full-auto 已废弃；新版 Codex 用 --sandbox workspace-write（工作区内可读写、自动批准）。
-  const args = ["--json", "--cd", input.projectPath, "--sandbox", "workspace-write"];
+  // --skip-git-repo-check：worker 工作区常不是 git 仓库（或隔离 worktree），不跳过的话
+  // Codex 会以「Not inside a trusted directory」拒跑。
+  const args = ["--json", "--cd", input.projectPath, "--sandbox", "workspace-write", "--skip-git-repo-check"];
   if (input.model) args.push("-m", input.model);
   return args;
 }

@@ -2942,6 +2942,45 @@ body {
 .command-result.tone-success { border-color: var(--teal); }
 .command-result.tone-danger { border-color: var(--danger); color: var(--danger); }
 
+/* 嵌入式终端（xterm） */
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 420px;
+  gap: 8px;
+}
+.terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.terminal-title { font-weight: 600; color: var(--text); }
+.terminal-hint { font-size: 12px; color: var(--muted-2); }
+.terminal-actions { margin-left: auto; display: flex; gap: 6px; }
+.terminal-host {
+  flex: 1;
+  min-height: 360px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md, 8px);
+  background: #0b0e14;
+  padding: 8px;
+  overflow: hidden;
+}
+.terminal-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md, 8px);
+  color: var(--danger);
+}
+.terminal-error b { display: block; }
+.terminal-error span { color: var(--muted); font-size: 12px; }
+.terminal-status { font-size: 12px; color: var(--muted-2); }
+
 /* 并行 worker 栏 */
 .worker-columns {
   display: grid;

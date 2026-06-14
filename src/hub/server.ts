@@ -9,6 +9,7 @@ import { Coordinator } from "./coordinator.js";
 import { MessageRouter } from "./message-router.js";
 import { IntegrationManager, type ValidationRunner } from "./integration-manager.js";
 import { Supervisor } from "./supervisor.js";
+import { TerminalManager } from "./terminal-manager.js";
 import type { LeadPlannerFn } from "./lead-planner.js";
 
 export interface HubOptions {
@@ -48,6 +49,7 @@ export function createHubApp(options: HubOptions = {}): {
   messageRouter: MessageRouter;
   integration: IntegrationManager;
   supervisor: Supervisor;
+  terminals: TerminalManager;
 } {
   const core = new CoordinationCore(options.dbPath ?? ":memory:");
   const runs = new RunManager(core, options.driverResolver);
@@ -63,12 +65,14 @@ export function createHubApp(options: HubOptions = {}): {
   // M3.2c：监督循环——周期扫停滞 worker 并发系统告警进时间线。
   const supervisor = new Supervisor(core, runs);
   supervisor.start();
+  // 嵌入式终端：node-pty 真伪终端跑交互式 claude/codex（用你登录态，绕开 headless 401）。
+  const terminals = new TerminalManager();
   const app = express();
   app.use(express.json({ limit: "1mb" }));
 
   if (options.token) app.use(authMiddleware(options.token));
 
-  mountRoutes(app, core, { tokenRequired: Boolean(options.token), leadPlanner: options.leadPlanner }, runs, integration, messageRouter);
+  mountRoutes(app, core, { tokenRequired: Boolean(options.token), leadPlanner: options.leadPlanner }, runs, integration, messageRouter, terminals);
   mountSse(app, core);
 
   // Serve the built dashboard if present, with SPA fallback for client-side routing.
@@ -84,5 +88,5 @@ export function createHubApp(options: HubOptions = {}): {
     });
   }
 
-  return { app, core, runs, coordinator, messageRouter, integration, supervisor };
+  return { app, core, runs, coordinator, messageRouter, integration, supervisor, terminals };
 }

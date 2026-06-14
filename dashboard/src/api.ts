@@ -49,6 +49,54 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+// ---- 嵌入式终端（node-pty + xterm）----
+export type TerminalCommand = "claude" | "codex";
+
+export async function terminalsAvailable(): Promise<boolean> {
+  try {
+    const r = await api<{ available: boolean }>("/api/terminals");
+    return r.available;
+  } catch {
+    return false;
+  }
+}
+
+export async function createTerminal(
+  command: TerminalCommand,
+  opts: { cwd?: string; cols?: number; rows?: number } = {},
+): Promise<{ id: string } | { error: string; detail?: string }> {
+  try {
+    return await api<{ id: string }>("/api/terminals", { method: "POST", body: JSON.stringify({ command, ...opts }) });
+  } catch (e) {
+    return { error: "create_failed", detail: (e as Error).message };
+  }
+}
+
+// EventSource 不能带 Authorization 头，故走 ?token= 查询参数（authMiddleware 同时认这个）。
+export function terminalStreamUrl(id: string): string {
+  return `/api/terminals/${id}/stream${qs()}`;
+}
+
+export async function sendTerminalInput(id: string, data: string): Promise<void> {
+  await api(`/api/terminals/${id}/input`, { method: "POST", body: JSON.stringify({ data }) });
+}
+
+export async function resizeTerminal(id: string, cols: number, rows: number): Promise<void> {
+  try {
+    await api(`/api/terminals/${id}/resize`, { method: "POST", body: JSON.stringify({ cols, rows }) });
+  } catch {
+    /* resize 失败不致命 */
+  }
+}
+
+export async function killTerminal(id: string): Promise<void> {
+  try {
+    await api(`/api/terminals/${id}`, { method: "DELETE" });
+  } catch {
+    /* 已退出 */
+  }
+}
+
 function upsert<T extends { id: string }>(arr: T[], item: T): T[] {
   const i = arr.findIndex((x) => x.id === item.id);
   if (i === -1) return [...arr, item];
