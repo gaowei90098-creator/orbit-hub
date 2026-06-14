@@ -1,33 +1,50 @@
 /* ============================================================
-   AgentHub — 本次会话 Token 预算（前端持久化，advisory + 软上限）
-   照 i18n.ts 的 useSyncExternalStore + localStorage 模式。
-   limit = 0 表示未设预算。
+   AgentHub — 本次会话预算（前端持久化，advisory + 软上限）
+   支持两种计量口径：tokens（确定）或 cost（按估算费用 USD）。
+   两种口径各自保存上限，切换不互相覆盖。limit = 0 表示未设。
    ============================================================ */
 
 import { useSyncExternalStore } from 'react'
 
-let limit: number = (() => {
-  try {
-    const v = Number(localStorage.getItem('ah-budget-tokens'))
-    return Number.isFinite(v) && v > 0 ? Math.floor(v) : 0
-  } catch { return 0 }
-})()
+export type BudgetMode = 'tokens' | 'cost'
 
-const listeners = new Set<() => void>()
-
-export function getBudget(): number { return limit }
-
-export function setBudget(n: number): void {
-  limit = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
-  try { localStorage.setItem('ah-budget-tokens', String(limit)) } catch { /* noop */ }
-  listeners.forEach(f => f())
+const read = (k: string): number => {
+  try { const v = Number(localStorage.getItem(k)); return Number.isFinite(v) && v > 0 ? v : 0 } catch { return 0 }
 }
 
+let mode: BudgetMode = (() => {
+  try { return localStorage.getItem('ah-budget-mode') === 'cost' ? 'cost' : 'tokens' } catch { return 'tokens' }
+})()
+let tokenLimit = read('ah-budget-tokens')   // tokens
+let costLimit = read('ah-budget-cost')       // USD
+
+const listeners = new Set<() => void>()
+const notify = () => listeners.forEach(f => f())
+const subscribe = (cb: () => void) => { listeners.add(cb); return () => listeners.delete(cb) }
+
+export function getBudgetMode(): BudgetMode { return mode }
+export function setBudgetMode(m: BudgetMode): void {
+  mode = m === 'cost' ? 'cost' : 'tokens'
+  try { localStorage.setItem('ah-budget-mode', mode) } catch { /* noop */ }
+  notify()
+}
+
+/** 当前口径下的上限（tokens 或 USD） */
+export function getBudget(): number { return mode === 'cost' ? costLimit : tokenLimit }
+
+export function setBudget(n: number): void {
+  const v = Number.isFinite(n) && n > 0 ? (mode === 'cost' ? n : Math.floor(n)) : 0
+  if (mode === 'cost') { costLimit = v; try { localStorage.setItem('ah-budget-cost', String(v)) } catch { /* noop */ } }
+  else { tokenLimit = v; try { localStorage.setItem('ah-budget-tokens', String(v)) } catch { /* noop */ } }
+  notify()
+}
+
+/** 当前口径下的上限（基元快照，避免对象快照导致的重渲染循环） */
 export function useBudget(): number {
-  return useSyncExternalStore(
-    cb => { listeners.add(cb); return () => listeners.delete(cb) },
-    () => limit
-  )
+  return useSyncExternalStore(subscribe, getBudget)
+}
+export function useBudgetMode(): BudgetMode {
+  return useSyncExternalStore(subscribe, getBudgetMode)
 }
 
 /** 告警阈值：用量达预算的此比例即进入 warn */

@@ -6,35 +6,39 @@
 
 import React, { useState } from 'react'
 import { Icon, IC, AgentMark, StatusDot, Enter, SectionTitle, TaskStatusBadge } from '../glass/ui'
-import { AGENT_META, AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, sumTokens, fmtTokens } from '../glass/meta'
+import { AGENT_META, AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, sumTokens, fmtTokens, sumCost, fmtCost } from '../glass/meta'
 import { tr, statusLabel, modeLabel, agentDesc } from '../glass/i18n'
-import { useBudget, setBudget, budgetLevel } from '../glass/budget'
+import { useBudget, setBudget, useBudgetMode, setBudgetMode, budgetLevel } from '../glass/budget'
 
-/** 本次会话 Token 预算条：进度 + 分级告警（ok/warn≥80%/over≥100%）+ 可编辑上限 */
-function BudgetBar({ used }: { used: number }) {
+/** 本次会话预算条：口径切换(Token/$) + 进度 + 分级告警(ok/warn≥80%/over≥100%) + 可编辑上限 */
+function BudgetBar({ tokens, cost }: { tokens: number; cost: number }) {
+  const mode = useBudgetMode()
   const limit = useBudget()
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState('')
+  const isCost = mode === 'cost'
+  const used = isCost ? cost : tokens
   const level = budgetLevel(used, limit)
   const color = level === 'over' ? 'var(--st-error)' : level === 'warn' ? 'var(--st-busy)' : 'var(--mint)'
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0
+  const fmtU = (n: number) => isCost ? fmtCost(n) : fmtTokens(n)
   const commit = () => {
-    const n = Number(val.replace(/[,_\s]/g, ''))
+    const n = Number(val.replace(/[$,_\s]/g, ''))
     setBudget(Number.isFinite(n) ? n : 0)
     setEditing(false); setVal('')
   }
   return (
-    <div className="glass" style={{ padding: '11px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14 }}>
+    <div className="glass" style={{ padding: '11px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
       <Icon d={IC.bolt} size={15} style={{ color }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: limit > 0 ? 5 : 0 }}>
           <span style={{ color: 'var(--tx-2)' }}>
-            {tr('本次 Token 预算', 'Session token budget')}
+            {tr('本次预算', 'Session budget')}
             {level === 'over' && <span style={{ color: 'var(--st-error)', marginLeft: 8 }}>· {tr('已超预算', 'Over budget')}</span>}
             {level === 'warn' && <span style={{ color: 'var(--st-busy)', marginLeft: 8 }}>· {tr('接近预算', 'Near limit')}</span>}
           </span>
           <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--tx-3)' }}>
-            {fmtTokens(used)}{limit > 0 ? ` / ${fmtTokens(limit)}` : tr(' · 未设', ' · not set')}
+            {fmtU(used)}{limit > 0 ? ` / ${fmtU(limit)}` : tr(' · 未设', ' · not set')}
           </span>
         </div>
         {limit > 0 && (
@@ -43,15 +47,19 @@ function BudgetBar({ used }: { used: number }) {
           </div>
         )}
       </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button className={'ah-btn sm' + (!isCost ? ' primary' : '')} onClick={() => setBudgetMode('tokens')} title={tr('按 Token 计', 'By tokens')}>Token</button>
+        <button className={'ah-btn sm' + (isCost ? ' primary' : '')} onClick={() => setBudgetMode('cost')} title={tr('按估算费用计', 'By est. cost')}>$</button>
+      </div>
       {editing ? (
-        <input className="ah-input mono" autoFocus style={{ width: 150, fontSize: 12, padding: '4px 8px' }}
-          value={val} placeholder={tr('如 200000，空=关', 'e.g. 200000, empty=off')}
+        <input className="ah-input mono" autoFocus style={{ width: 140, fontSize: 12, padding: '4px 8px' }}
+          value={val} placeholder={isCost ? tr('如 5（美元），空=关', 'e.g. 5 (USD), empty=off') : tr('如 200000，空=关', 'e.g. 200000, empty=off')}
           onChange={e => setVal(e.target.value)}
           onBlur={commit}
           onKeyDown={e => { if (e.key === 'Enter') commit() }} />
       ) : (
         <button className="ah-btn sm" onClick={() => { setVal(limit ? String(limit) : ''); setEditing(true) }}>
-          {limit > 0 ? tr('改预算', 'Edit') : tr('设预算', 'Set budget')}
+          {limit > 0 ? tr('改', 'Edit') : tr('设预算', 'Set')}
         </button>
       )}
     </div>
@@ -77,8 +85,10 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
   const runningCount = tasks.filter(t => t.status === 'running').length
   const doneToday = tasks.filter(t => t.status === 'completed').length
   const sessionTokens = tasks.reduce((s, t) => s + sumTokens(t.usage), 0)
-  const tokZh = sessionTokens > 0 ? ` · 本次 Token ${fmtTokens(sessionTokens)}` : ''
-  const tokEn = sessionTokens > 0 ? ` · ${fmtTokens(sessionTokens)} tokens` : ''
+  const sessionCost = tasks.reduce((s, t) => s + (sumCost(t.usage) || 0), 0)
+  const costZh = sessionCost > 0 ? ` ≈${fmtCost(sessionCost)}` : ''
+  const tokZh = sessionTokens > 0 ? ` · 本次 Token ${fmtTokens(sessionTokens)}${costZh}` : ''
+  const tokEn = sessionTokens > 0 ? ` · ${fmtTokens(sessionTokens)} tokens${costZh}` : ''
 
   return (
     <div data-screen-label="总览" style={{ padding: '6px 4px 30px' }}>
@@ -95,7 +105,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat }: {
         </button>
       </div>
 
-      <BudgetBar used={sessionTokens} />
+      <BudgetBar tokens={sessionTokens} cost={sessionCost} />
 
       {/* Agent 卡片网格 */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>

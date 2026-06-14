@@ -10,10 +10,9 @@ import { store } from "./store"
 import { detectAgentsAsync } from "./hub/agent-detector"
 import { getProviderManager } from "./providers/manager"
 import { getLocalProxy } from "./routing/proxy"
-import { createAdapter } from "./hub/adapters/base"
-import { agentName, agentCaps } from "./hub/agents"
 import { locateAgentCandidates } from "./hub/agent-locator"
 import { takeoverStatus, takeoverApply, takeoverRestore } from "./routing/takeover"
+import { syncRegistryFromBindings } from "./hub/agent-connections"
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -75,31 +74,7 @@ function createTray(): void {
 }
 
 function registerAgentsFromBindings(): void {
-  const bindings = providerMgr.getBindings()
-  for (const b of bindings) {
-    const existing = registry.get(b.agentId)
-    const name = agentName(b.agentId)
-    const caps = agentCaps(b.agentId)
-    const protocol = (b as any).protocol || "http"
-    const binary = (b as any).binary as string | undefined
-    const argsStr = ((b as any).args as string | undefined) || ""
-    const args = argsStr.trim() ? argsStr.trim().split(/\s+/) : undefined
-    // 绑定签名：协议/二进制/参数任一变化都重建 adapter（http 适配器无签名，仅比协议）
-    const sig = protocol + "|" + (binary || "") + "|" + argsStr.trim()
-    if (existing && ((existing.adapter as any).protocol !== protocol || ((existing.adapter as any).__sig ?? sig) !== sig)) {
-      existing.adapter.stop().catch(() => {})
-      registry.unregister(b.agentId)
-    }
-    const fresh = registry.get(b.agentId)
-    if (!fresh) {
-      const adapter = createAdapter(b.agentId, name, protocol as any, binary, args)
-      ;(adapter as any).__sig = sig
-      registry.register(adapter, caps, b.providerId, b.modelId)
-    } else {
-      fresh.providerId = b.providerId
-      fresh.modelId = b.modelId
-    }
-  }
+  syncRegistryFromBindings(registry, providerMgr.getBindings())
 }
 
 async function initHub(): Promise<void> {

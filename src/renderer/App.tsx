@@ -11,14 +11,14 @@ import { Sidebar, PageId } from './glass/Sidebar'
 import { Enter } from './glass/ui'
 import {
   AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, ChatMessage,
-  DispatchMode, nowHHMM, sumTokens
+  DispatchMode, nowHHMM, sumTokens, sumCost
 } from './glass/meta'
 import { HomeScreen } from './screens/Home'
 import { ChatScreen } from './screens/Chat'
 import { TasksScreen } from './screens/Tasks'
 import { SettingsScreen, MotionLevel } from './screens/Settings'
 import { useLang, tr } from './glass/i18n'
-import { getBudget } from './glass/budget'
+import { getBudget, getBudgetMode } from './glass/budget'
 
 type AgentMap = Record<string, { status: AgentUIStatus }>
 
@@ -167,7 +167,7 @@ export default function App() {
           ? {
               ...t,
               results: { ...(t.results || {}), [e.agentId]: e.content },
-              usage: e.usage ? { ...(t.usage || {}), [e.agentId]: e.usage } : t.usage
+              usage: e.usage ? { ...(t.usage || {}), [e.agentId]: { ...e.usage, modelId: e.modelId } } : t.usage
             }
           : t))
       } else if (e.kind === 'error') {
@@ -201,11 +201,16 @@ export default function App() {
 
   const onSend = useCallback(async (text: string, mode: DispatchMode, targetAgent: string | null) => {
     if (streaming) return
-    // 预算软上限：本次会话 token 已达上限时确认后才继续（A2）
+    // 预算软上限：本次会话用量（按 token 或估算费用口径）达上限时确认后才继续（A2/B1）
     const budget = getBudget()
-    if (budget > 0 && tasks.reduce((s, t) => s + sumTokens(t.usage), 0) >= budget &&
-        !window.confirm(tr('本次会话 Token 用量已达预算上限，仍要继续派发吗？', 'Session token usage reached the budget limit. Dispatch anyway?'))) {
-      return
+    if (budget > 0) {
+      const used = getBudgetMode() === 'cost'
+        ? tasks.reduce((s, t) => s + (sumCost(t.usage) || 0), 0)
+        : tasks.reduce((s, t) => s + sumTokens(t.usage), 0)
+      if (used >= budget &&
+          !window.confirm(tr('本次会话用量已达预算上限，仍要继续派发吗？', 'Session usage reached the budget limit. Dispatch anyway?'))) {
+        return
+      }
     }
     const msgId = 'm' + Date.now()
     const localId = 'local-' + Date.now()

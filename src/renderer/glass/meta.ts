@@ -110,7 +110,7 @@ export const DEFAULT_STDIO_ARGS: Record<string, string> = {
   'minimax-code': 'run {prompt}'
 }
 
-export interface TokenUsage { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+export interface TokenUsage { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; modelId?: string }
 
 export interface TaskItem {
   id: string
@@ -139,6 +139,48 @@ export const fmtTokens = (n: number): string =>
   n >= 1_000_000 ? (n / 1_000_000).toFixed(1) + 'M'
   : n >= 1000 ? (n / 1000).toFixed(n >= 10_000 ? 0 : 1) + 'k'
   : String(n)
+
+/* ---------- 费用估算 ----------
+   近似单价（USD / 1M tokens，{in:输入, out:输出}）。公开报价随时间变动，仅供估算。
+   最后核对 2026-06；如过期在此更新。未列出的模型不显示费用（而非显示 $0）。 */
+const MODEL_PRICES: Array<{ match: RegExp; in: number; out: number }> = [
+  { match: /opus/i, in: 15, out: 75 },
+  { match: /haiku/i, in: 0.8, out: 4 },
+  { match: /^claude/i, in: 3, out: 15 },        // sonnet 及其它 claude 取 3/15
+  { match: /^gpt-4o-mini/i, in: 0.15, out: 0.6 },
+  { match: /^gpt-4o/i, in: 2.5, out: 10 },
+  { match: /^gpt-4\.1-mini/i, in: 0.4, out: 1.6 },
+  { match: /^gpt-4\.1/i, in: 2, out: 8 },
+  { match: /^deepseek/i, in: 0.27, out: 1.1 },
+  { match: /gemini.*flash/i, in: 0.3, out: 2.5 },
+  { match: /gemini.*pro/i, in: 1.25, out: 10 }
+]
+
+function priceFor(modelId?: string): { in: number; out: number } | null {
+  if (!modelId) return null
+  for (const p of MODEL_PRICES) if (p.match.test(modelId)) return p
+  return null
+}
+
+/** 单条 usage 的估算费用（USD）；模型未在单价表中则返回 null（不参与合计）。 */
+export const costOf = (u?: TokenUsage): number | null => {
+  if (!u) return null
+  const p = priceFor(u.modelId)
+  if (!p) return null
+  return (u.prompt_tokens || 0) / 1e6 * p.in + (u.completion_tokens || 0) / 1e6 * p.out
+}
+
+/** 任务/会话级估算费用合计；无任一可估则返回 null。 */
+export const sumCost = (m?: Record<string, TokenUsage>): number | null => {
+  if (!m) return null
+  let total = 0, any = false
+  for (const u of Object.values(m)) { const c = costOf(u); if (c != null) { total += c; any = true } }
+  return any ? total : null
+}
+
+/** 紧凑显示费用：0→$0，<0.01→<$0.01，否则 $0.0123 / $1.23。 */
+export const fmtCost = (n: number): string =>
+  n === 0 ? '$0' : n < 0.01 ? '<$0.01' : '$' + n.toFixed(n < 1 ? 3 : 2)
 
 export interface ReplyState {
   agentId: string

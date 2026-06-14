@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react'
 import { Icon, IC, AgentMark, Enter, Seg, SectionTitle, Collapse, TaskStatusBadge } from '../glass/ui'
-import { TaskItem, fmtDur, sumTokens, fmtTokens, usageTotal } from '../glass/meta'
+import { TaskItem, fmtDur, sumTokens, fmtTokens, usageTotal, sumCost, costOf, fmtCost } from '../glass/meta'
 import { tr, modeLabel } from '../glass/i18n'
 
 export function TasksScreen({ tasks, search, onCancelTask }: {
@@ -49,8 +49,8 @@ export function TasksScreen({ tasks, search, onCancelTask }: {
                   {t.agents.map(a => <AgentMark key={a} id={a} size={20} radius={6} />)}
                 </div>
                 {sumTokens(t.usage) > 0 && (
-                  <span className="ah-chip" title={tr('Token 总用量', 'Total tokens')} style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-                    {fmtTokens(sumTokens(t.usage))} tok
+                  <span className="ah-chip" title={tr('Token 总量 / 估算费用', 'Total tokens / est. cost')} style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                    {fmtTokens(sumTokens(t.usage))} tok{sumCost(t.usage) != null ? ` · ≈${fmtCost(sumCost(t.usage)!)}` : ''}
                   </span>
                 )}
                 <span className="ah-hint" style={{ width: 50, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
@@ -66,10 +66,10 @@ export function TasksScreen({ tasks, search, onCancelTask }: {
                   <div className="ah-hint" style={{ fontFamily: 'var(--font-mono)' }}>{t.id} · {modeLabel(t.mode)} · {tr(`${t.agents.length} 个 Agent`, `${t.agents.length} agents`)}</div>
                   {sumTokens(t.usage) > 0 && (
                     <div className="ah-hint" style={{ fontFamily: 'var(--font-mono)', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                      <span style={{ color: 'var(--mint)' }}>{tr('Token 合计', 'Total tokens')} {fmtTokens(sumTokens(t.usage))}</span>
+                      <span style={{ color: 'var(--mint)' }}>{tr('Token 合计', 'Total tokens')} {fmtTokens(sumTokens(t.usage))}{sumCost(t.usage) != null ? ` · ≈${fmtCost(sumCost(t.usage)!)}` : ''}</span>
                       {Object.entries(t.usage!).map(([aid, u]) => (
                         <span key={aid} style={{ color: 'var(--tx-3)' }}>
-                          {aid}: {fmtTokens(usageTotal(u))} (↑{fmtTokens(u.prompt_tokens || 0)} ↓{fmtTokens(u.completion_tokens || 0)})
+                          {aid}: {fmtTokens(usageTotal(u))} (↑{fmtTokens(u.prompt_tokens || 0)} ↓{fmtTokens(u.completion_tokens || 0)}){costOf(u) != null ? ` ≈${fmtCost(costOf(u)!)}` : ''}
                         </span>
                       ))}
                     </div>
