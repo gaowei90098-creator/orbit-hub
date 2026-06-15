@@ -127,6 +127,8 @@ export interface TaskItem {
   errors?: Record<string, string>
   /** 每 agent 的 token 用量（来自 dispatch done 事件） */
   usage?: Record<string, TokenUsage>
+  /** 每 agent 的 agentic 活动轨迹（来自 activity 流事件）；持久化后可在任务历史里复查"做了什么" */
+  steps?: Record<string, ActivityStep[]>
 }
 
 /** 单条 usage 的总 token（缺 total 时用 prompt+completion 兜底） */

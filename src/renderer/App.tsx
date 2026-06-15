@@ -217,6 +217,10 @@ export default function App() {
             : [...m.replies, { agentId: e.agentId, thinking: '', text: '', done: false, steps: upsertStep(undefined, e.step) }]
           return { ...m, replies }
         }))
+        // 同时落进任务历史，重启后仍可复查 agent 做了什么
+        setTasks(ts => ts.map(t => t.id === localId
+          ? { ...t, steps: { ...(t.steps || {}), [e.agentId]: upsertStep(t.steps?.[e.agentId], e.step) } }
+          : t))
       } else if (e.kind === 'done') {
         setBusyOverride(o => ({ ...o, [e.agentId]: undefined }))
         setMessages(ms => ms.map(m => m.id === msgId

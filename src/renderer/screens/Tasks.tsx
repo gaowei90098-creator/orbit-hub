@@ -8,6 +8,7 @@ import { Icon, IC, AgentMark, Enter, Seg, SectionTitle, Collapse, TaskStatusBadg
 import { TaskItem, fmtDur, sumTokens, fmtTokens, usageTotal, sumCost, costOf, fmtCost } from '../glass/meta'
 import { tr, modeLabel } from '../glass/i18n'
 import { SetupTab, firstRunActionForError } from '../glass/connection-status'
+import { ActivityTrail } from '../glass/activity-view'
 
 /** 结果一键复制（带 1.2s “已复制”反馈） */
 function CopyBtn({ text }: { text: string }) {
@@ -94,7 +95,10 @@ export function TasksScreen({ tasks, search, onCancelTask, openSetup }: {
                   {t.results && Object.entries(t.results).map(([agentId, content]) => (
                     <div key={agentId} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                       <AgentMark id={agentId} size={24} radius={7} />
-                      <div style={{ flex: 1, fontSize: 13, color: 'var(--tx-2)', background: 'rgba(0,0,0,0.18)', borderRadius: 10, padding: '9px 13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content}</div>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {t.steps?.[agentId]?.length ? <ActivityTrail steps={t.steps[agentId]} running={t.status === 'running'} /> : null}
+                        <div style={{ fontSize: 13, color: 'var(--tx-2)', background: 'rgba(0,0,0,0.18)', borderRadius: 10, padding: '9px 13px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content}</div>
+                      </div>
                       {content && <CopyBtn text={content} />}
                     </div>
                   ))}
@@ -103,7 +107,10 @@ export function TasksScreen({ tasks, search, onCancelTask, openSetup }: {
                     return (
                       <div key={agentId} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                         <AgentMark id={agentId} size={24} radius={7} />
-                        <div style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: 'var(--st-error)', background: 'rgba(232,112,106,0.08)', border: '1px solid rgba(232,112,106,0.2)', borderRadius: 10, padding: '9px 13px', fontFamily: 'var(--font-mono)' }}>{err}</div>
+                        <div style={{ flex: 1, minWidth: 220, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {t.steps?.[agentId]?.length ? <ActivityTrail steps={t.steps[agentId]} running={false} /> : null}
+                          <div style={{ fontSize: 12.5, color: 'var(--st-error)', background: 'rgba(232,112,106,0.08)', border: '1px solid rgba(232,112,106,0.2)', borderRadius: 10, padding: '9px 13px', fontFamily: 'var(--font-mono)' }}>{err}</div>
+                        </div>
                         {action && (
                           <button className="ah-btn sm primary" onClick={() => openSetup(action.tab)}>
                             {tr(action.labelZh, action.labelEn)}
@@ -113,6 +120,17 @@ export function TasksScreen({ tasks, search, onCancelTask, openSetup }: {
                       </div>
                     )
                   })}
+                  {/* steps-only（运行中尚无 result/error 的 agent）也展示活动轨迹 */}
+                  {t.steps && Object.entries(t.steps).map(([agentId, steps]) =>
+                    (steps?.length && !t.results?.[agentId] && !t.errors?.[agentId]) ? (
+                      <div key={`steps-${agentId}`} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                        <AgentMark id={agentId} size={24} radius={7} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <ActivityTrail steps={steps} running={t.status === 'running'} />
+                        </div>
+                      </div>
+                    ) : null
+                  )}
                 </div>
               </Collapse>
             </Enter>
