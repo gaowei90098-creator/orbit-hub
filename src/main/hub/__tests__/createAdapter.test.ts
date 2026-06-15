@@ -27,6 +27,8 @@ describe("createAdapter", () => {
     expect((a as any).protocol).toBe("stdio-plain")
     expect(a.mode).toBe("oneshot")
     expect((a as any).execArgs).toContain("exec")
+    expect((a as any).execArgs).toContain("--json")
+    expect((a as any).activityParser).toBeTypeOf("function")
   })
   it("returns ClaudeAdapter (oneshot --print) for stdio-plain claude", () => {
     const a = createAdapter("claude", "Claude Code", "stdio-plain")

@@ -403,7 +403,7 @@ function RoutingTab({ providers, bindings, onSetBinding, onTab }: {
 
 /* 一键开启 agentic：把"检测到本机 CLI 但仍走 HTTP"的 agent 翻成 stdio-plain 直连，
    binary 留空(auto 用首选安装)、args 留空(用主进程 adapter 的 agentic 默认参数：
-   codex `exec --sandbox workspace-write …` / claude `--print --permission-mode acceptEdits`)，
+   codex `exec --json --sandbox workspace-write …` / claude `--print --permission-mode acceptEdits`)，
    从"会描述行动"升级到"真在工作区读写文件、跑命令"，过程经 Phase 0 步骤卡呈现。 */
 function AgenticEnableBanner({ bindings, located, onSetBinding, onTab }: {
   bindings: BindingDef[]

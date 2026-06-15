@@ -1,10 +1,12 @@
 import { StdioAgentAdapter } from './stdio-adapter'
 import { locateCodexBinary } from '../agent-locator'
+import { parseCodexStreamJsonLine } from './codex-stream-json'
 
 /**
  * Codex（桌面版/CLI）直连适配器 — oneshot
  *
- * `codex exec --sandbox workspace-write --skip-git-repo-check -`
+ * `codex exec --json --sandbox workspace-write --skip-git-repo-check -`
+ *   - --json：把执行过程以 JSONL 事件流出，由 activityParser 解析成步骤卡和最终答案。
  *   - --sandbox workspace-write：允许在当前工作区（agent 派发时按 WorkspaceManager 注入的 cwd）写入/修改文件，
  *     不允许动 git 仓库外；agent 真正能"做"（读、写、跑命令）的最低权限档。
  *     若用户改 args 为 `danger-full-access` 则完全放开（不推荐）。
@@ -14,6 +16,7 @@ import { locateCodexBinary } from '../agent-locator'
  */
 export class CodexAdapter extends StdioAgentAdapter {
   constructor() {
-    super('codex', 'Codex CLI', locateCodexBinary() || 'codex', ['exec', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-'])
+    super('codex', 'Codex CLI', locateCodexBinary() || 'codex', ['exec', '--json', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-'])
+    this.activityParser = parseCodexStreamJsonLine
   }
 }
