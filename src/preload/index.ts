@@ -93,6 +93,23 @@ const api = {
     getActive: () => ipcRenderer.invoke('workspaces:getActive'),
     setActive: (id: string | null) => ipcRenderer.invoke('workspaces:setActive', id)
   },
+  // --- AgentHub skills + native agentic (Claude-B 新增) ---
+  skills: {
+    list: () => ipcRenderer.invoke('skills:list'),
+    builtins: () => ipcRenderer.invoke('skills:builtins'),
+    add: (input: any) => ipcRenderer.invoke('skills:add', input),
+    update: (id: string, patch: any) => ipcRenderer.invoke('skills:update', id, patch),
+    remove: (id: string) => ipcRenderer.invoke('skills:remove', id),
+    getInstalls: () => ipcRenderer.invoke('skills:getInstalls'),
+    install: (agentId: string, skillId: string) => ipcRenderer.invoke('skills:install', agentId, skillId),
+    uninstall: (agentId: string, skillId: string) => ipcRenderer.invoke('skills:uninstall', agentId, skillId)
+  },
+  agentic: {
+    capabilities: () => ipcRenderer.invoke('agentic:capabilities'),
+    getEnabled: () => ipcRenderer.invoke('agentic:getEnabled'),
+    setEnabled: (agentId: string, on: boolean) => ipcRenderer.invoke('agentic:setEnabled', agentId, on)
+  },
+  // --- /AgentHub skills + native agentic ---
   platform: process.platform
 }
 

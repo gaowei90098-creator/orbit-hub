@@ -8,8 +8,11 @@ import { Icon, IC, AgentMark, Enter, Seg, SectionTitle, Switch } from '../glass/
 import { AGENT_META, AGENT_IDS, DEFAULT_STDIO_ARGS, BindingDef, ProviderDef } from '../glass/meta'
 import { tr, agentDesc, getLang, setLang, Lang } from '../glass/i18n'
 import { ConnectionSummary, SetupTab } from '../glass/connection-status'
+import { SkillsTab } from './Skills' // AgentHub skills (Claude-B 新增)
 
 export type MotionLevel = 'off' | 'subtle' | 'rich'
+// 技能页是新增的本地标签，不属于 SetupTab；本组件内联合扩展（Claude-B 新增）
+type TabKey = SetupTab | 'appearance' | 'skills'
 
 export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, onSetBinding, fallbackChain, onSetFallback, onReload, onUpsertProvider, onDeleteProvider, motion, setMotion, initialTab, connectionSummary, goChat }: {
   providers: ProviderDef[]
@@ -29,14 +32,15 @@ export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, on
   goChat: (agentId: string | null) => void
   openSetup: (tab?: SetupTab | 'appearance') => void
 }) {
-  const [tab, setTab] = useState<SetupTab | 'appearance'>(initialTab)
+  const [tab, setTab] = useState<TabKey>(initialTab)
   useEffect(() => setTab(initialTab), [initialTab])
   return (
     <div data-screen-label="设置" style={{ padding: '6px 4px 30px' }}>
       <SectionTitle right={
-        <Seg value={tab} onChange={v => setTab(v as SetupTab | 'appearance')} options={[
+        <Seg value={tab} onChange={v => setTab(v as TabKey)} options={[
           { value: 'providers', label: tr('提供商', 'Providers') }, { value: 'routing', label: tr('路由', 'Routing') },
           { value: 'workspaces', label: tr('工作区', 'Workspaces') },
+          { value: 'skills', label: tr('技能', 'Skills') },
           { value: 'proxy', label: tr('代理', 'Proxy') }, { value: 'sites', label: tr('Agent 官网', 'Agent sites') },
           { value: 'appearance', label: tr('外观', 'Appearance') }
         ]} />
@@ -46,6 +50,7 @@ export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, on
         onUpsert={onUpsertProvider} onDelete={onDeleteProvider} />}
       {tab === 'routing' && <RoutingTab providers={providers} bindings={bindings} onSetBinding={onSetBinding} onTab={setTab} />}
       {tab === 'workspaces' && <WorkspacesTab />}
+      {tab === 'skills' && <SkillsTab />}
       {tab === 'proxy' && <ProxyTab providers={providers} fallbackChain={fallbackChain} onSetFallback={onSetFallback} />}
       {tab === 'sites' && <AgentSitesTab />}
       {tab === 'appearance' && <AppearanceTab motion={motion} setMotion={setMotion} />}

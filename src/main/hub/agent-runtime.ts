@@ -13,7 +13,9 @@ export function buildAgentRuntimeSystemPrompt(
   agentId: string,
   basePrompt: string = agentSystemPrompt(agentId),
   memories: RuntimeMemoryEntry[] = [],
-  taskText = ''
+  taskText = '',
+  /** 已装技能注入块（由调用方从 SkillManager 取，buildSkillBlock 拼好）；空则不注入 */
+  skillsBlock = ''
 ): string {
   const name = agentName(agentId)
   const caps = agentCaps(agentId)
@@ -31,13 +33,14 @@ export function buildAgentRuntimeSystemPrompt(
     '- Check: verify your own answer for correctness, edge cases, and whether it satisfies the user request.',
     '- Report: keep the final response concise. Lead with completed work, findings, decisions, or what the user must handle.',
     '- Do not reveal hidden reasoning. Do not include startup banners, tool chatter, or generic capability disclaimers.',
-    memoryBlock
+    memoryBlock,
+    skillsBlock
   ].filter(Boolean).join('\n')
 }
 
-export function buildAgentTaskPrompt(agentId: string, userTask: string, memories: RuntimeMemoryEntry[] = []): string {
+export function buildAgentTaskPrompt(agentId: string, userTask: string, memories: RuntimeMemoryEntry[] = [], skillsBlock = ''): string {
   return [
-    buildAgentRuntimeSystemPrompt(agentId, agentSystemPrompt(agentId), memories, userTask),
+    buildAgentRuntimeSystemPrompt(agentId, agentSystemPrompt(agentId), memories, userTask, skillsBlock),
     '',
     'User task:',
     userTask

@@ -9,6 +9,12 @@ import { buildAgentRuntimeSystemPrompt, buildAgentTaskPrompt, RuntimeMemoryEntry
 import { decompositionPrompt, parsePlan, synthesisPrompt, verifyPrompt, parseVerdict, retryPrompt, ORCHESTRATOR_LEAD_SYSTEM } from "./orchestrator"
 import { ChatCompletionMessage, ThinkingConfig } from "../providers/types"
 import { getWorkspaceManager } from "./workspace"
+// --- AgentHub skills + native agentic (Claude-B 新增) ---
+import { getSkillManager } from "../skills/manager"
+import { buildSkillBlock } from "../skills/inject"
+import { runAgenticHttp } from "../agentic/executor"
+import { isHttpAgenticEnabled } from "../agentic/capabilities"
+// --- /AgentHub skills + native agentic ---
 
 export type DispatchMode = "auto" | "broadcast" | "chain" | "orchestrate"
 
@@ -265,6 +271,12 @@ export class Dispatcher extends EventEmitter {
     const systemPrompt = this.systemPromptFor(agentId, opts.systemPrompt, text)
     const thinking = opts.thinking || resolved.thinking
 
+    // --- AgentHub native agentic (Claude-B 新增): 开启后 HTTP agent 走工具回环，真在工作区动手 ---
+    if (isHttpAgenticEnabled(agentId)) {
+      return this.runAgenticHttpBranch(task, agentId, text, systemPrompt, thinking, resolved, opts)
+    }
+    // --- /AgentHub native agentic ---
+
     let content = ""
     let thinkingTxt = ""
     let summary: any = undefined
@@ -330,12 +342,70 @@ export class Dispatcher extends EventEmitter {
 
   private systemPromptFor(agentId: string, overridePrompt?: string, taskText = ""): string {
     if (overridePrompt) return overridePrompt
-    return buildAgentRuntimeSystemPrompt(agentId, agentSystemPrompt(agentId), this.memoryContext(), taskText)
+    return buildAgentRuntimeSystemPrompt(agentId, agentSystemPrompt(agentId), this.memoryContext(), taskText, this.skillsBlockFor(agentId))
   }
 
   private promptForAgent(agentId: string, text: string): string {
-    return buildAgentTaskPrompt(agentId, text, this.memoryContext())
+    return buildAgentTaskPrompt(agentId, text, this.memoryContext(), this.skillsBlockFor(agentId))
   }
+
+  // --- AgentHub skills (Claude-B 新增): 取目标 agent 已装技能拼成注入块 ---
+  private skillsBlockFor(agentId: string): string {
+    try {
+      return buildSkillBlock(getSkillManager().installedFor(agentId))
+    } catch {
+      return ""
+    }
+  }
+  // --- /AgentHub skills ---
+
+  // --- AgentHub native agentic 工具回环（Claude-B 新增） ---
+  // HTTP agent 开启 agentic 后：用 AgentHub 自带工具回环替代纯聊天流，让模型真在工作区
+  // 读写文件、跑命令；每步发 activity 事件复用既有步骤卡。自管 start/done/error 与 registry。
+  private async runAgenticHttpBranch(
+    task: DispatchTask, agentId: string, userText: string, systemPrompt: string,
+    thinking: ThinkingConfig, resolved: any, opts: DispatchOptions
+  ): Promise<{ content: string; error?: string }> {
+    const providerId = resolved.provider.id
+    const modelId = resolved.model.id
+    let root: string | null = null
+    const wsId = opts.workspaceId ?? null
+    if (wsId) {
+      try { root = getWorkspaceManager().getById(wsId)?.rootPath ?? null } catch { root = null }
+    }
+    const start = Date.now()
+    this.emit("stream", { kind: "start", taskId: task.id, agentId, providerId, modelId, mode: "content" })
+    try {
+      const res = await runAgenticHttp({
+        userText,
+        systemPrompt,
+        resolved,
+        thinking,
+        root,
+        isCancelled: () => (task as any).status === "cancelled",
+        emit: {
+          delta: (channel, textDelta) => this.emit("stream", { kind: "delta", taskId: task.id, agentId, providerId, modelId, channel, text: textDelta }),
+          activity: (step) => this.emit("stream", { kind: "activity", taskId: task.id, agentId, step })
+        }
+      })
+      if (res.error) {
+        task.errors.set(agentId, res.error)
+        this.emit("stream", { kind: "error", taskId: task.id, agentId, providerId, modelId, error: res.error })
+        return { content: res.content || "", error: res.error }
+      }
+      task.results.set(agentId, res.content)
+      if (res.usage) task.usage.set(agentId, res.usage)
+      this.emit("stream", { kind: "done", taskId: task.id, agentId, providerId, modelId, content: res.content, usage: res.usage, durationMs: Date.now() - start })
+      return { content: res.content }
+    } catch (e: any) {
+      task.errors.set(agentId, e.message)
+      this.emit("stream", { kind: "error", taskId: task.id, agentId, providerId, modelId, error: e.message })
+      return { content: "", error: e.message }
+    } finally {
+      this.registry.setStatus(agentId, "idle")
+    }
+  }
+  // --- /AgentHub native agentic ---
 
   private memoryContext(): RuntimeMemoryEntry[] {
     try {

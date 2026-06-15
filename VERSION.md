@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 当前代码版本：`0.2.1`
-- 当前发布状态：`0.2.1` 已完成本地验证，准备推送到 GitHub
+- 当前代码版本：`0.2.3`
+- 当前发布状态：`0.2.3` 已完成本地验证并推送到 GitHub（skills + native agentic）
 - 版本来源：以 `package.json` 的 `version` 与 `build.buildVersion` 为准；两者必须同步
 
 ## 升版规则
@@ -52,8 +52,19 @@
   - `npm test`
   - `npm run build`
 
+### 0.2.3
+
+- 状态：已完成本地验证，推送到 GitHub（tag `v0.2.3`）。
+- 摘要：统一 Agent 能力 + 跨 Agent 技能(Skill)系统 —— 技能子系统（按 agent 单独/集体安装、派发时注入系统提示）、AgentHub 原生 agentic 工具回环（让 HTTP 模型也能在工作区读写文件/跑命令，对齐 codex/claude）、能力矩阵 UI（设置 → 技能）、跨 provider（OpenAI/Anthropic/Gemini）工具调用。
+- 主要文件：`src/main/skills/*`、`src/main/agentic/*`、`src/renderer/screens/Skills.tsx`，以及 dispatcher/index/preload/Settings/vite-env/client/agent-runtime 的接线（基于 `b864497` 干净叠加，未混入他人未提交改动）。
+- 验证（全绿）：
+  - `npm run typecheck`
+  - `npm run lint`
+  - `npm test`（117 passed）
+  - `npm run build`
+
 ### 下一个候选版本
 
-- 默认候选：`0.2.2`
-- 适用范围：后续 agentic / 工作区流程修复、验证和小增强。
+- 默认候选：`0.2.4`
+- 适用范围：后续 agentic / 工作区 / 技能流程修复、验证和小增强。
 - 登记要求：完成后补充改动摘要、验证命令、提交哈希或发布 tag。

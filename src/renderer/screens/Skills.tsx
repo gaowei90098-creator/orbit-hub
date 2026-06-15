@@ -1,0 +1,341 @@
+/* ============================================================
+   AgentHub 玻璃拟态 UI — 技能(Skill)页
+   三块：能力矩阵（确认每个 agent 真实能力）/ 技能目录（增删 + 全部安装）/
+   安装矩阵（单格=单独安装，行列「全部」=集体安装）。
+   ============================================================ */
+
+import React, { useState, useEffect, useCallback } from 'react'
+import { Icon, IC, Enter, AgentMark, Switch } from '../glass/ui'
+import { AGENT_META } from '../glass/meta'
+import { tr } from '../glass/i18n'
+
+interface SkillDef {
+  id: string; name: string; description: string; instructions: string
+  tags: string[]; source: string; createdAt: number; updatedAt: number
+}
+interface CapState {
+  agentId: string; name: string; protocol: 'http' | 'stdio-plain'
+  nativeCli: boolean; httpAgentic: boolean; capabilities: string[]
+}
+type Installs = Record<string, string[]>
+
+const CAP_ORDER = ['fs-read', 'fs-write', 'exec', 'agentic-loop', 'skills'] as const
+const CAP_LABEL: Record<string, { zh: string; en: string }> = {
+  'fs-read': { zh: '读文件', en: 'Read files' },
+  'fs-write': { zh: '写文件', en: 'Write files' },
+  'exec': { zh: '执行命令', en: 'Run commands' },
+  'agentic-loop': { zh: '多步自驱', en: 'Agentic loop' },
+  'skills': { zh: '技能', en: 'Skills' }
+}
+
+const api = () => (window as any).electronAPI
+
+export function SkillsTab() {
+  const [caps, setCaps] = useState<CapState[]>([])
+  const [skills, setSkills] = useState<SkillDef[]>([])
+  const [installs, setInstalls] = useState<Installs>({})
+  const [err, setErr] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const [c, s, i] = await Promise.all([
+        api()?.agentic?.capabilities?.() as Promise<CapState[]>,
+        api()?.skills?.list?.() as Promise<SkillDef[]>,
+        api()?.skills?.getInstalls?.() as Promise<Installs>
+      ])
+      if (Array.isArray(c)) setCaps(c)
+      if (Array.isArray(s)) setSkills(s)
+      setInstalls(i && typeof i === 'object' ? i : {})
+    } catch (e: any) { setErr(e?.message || 'load failed') }
+  }, [])
+  useEffect(() => { refresh() }, [refresh])
+
+  const agentIds = caps.map(c => c.agentId)
+
+  const setAgentic = async (agentId: string, on: boolean) => {
+    try { await api()?.agentic?.setEnabled?.(agentId, on); await refresh() } catch (e: any) { setErr(e?.message || 'failed') }
+  }
+  const isInstalled = (agentId: string, skillId: string) => (installs[agentId] || []).includes(skillId)
+  const toggleInstall = async (agentId: string, skillId: string) => {
+    try {
+      if (isInstalled(agentId, skillId)) await api()?.skills?.uninstall?.(agentId, skillId)
+      else await api()?.skills?.install?.(agentId, skillId)
+      const i = await api()?.skills?.getInstalls?.(); setInstalls(i || {})
+    } catch (e: any) { setErr(e?.message || 'failed') }
+  }
+  const installAllForSkill = async (skillId: string, on: boolean) => {
+    try { await api()?.skills?.[on ? 'install' : 'uninstall']?.('*', skillId); const i = await api()?.skills?.getInstalls?.(); setInstalls(i || {}) }
+    catch (e: any) { setErr(e?.message || 'failed') }
+  }
+  const installAllForAgent = async (agentId: string, on: boolean) => {
+    try {
+      for (const s of skills) await api()?.skills?.[on ? 'install' : 'uninstall']?.(agentId, s.id)
+      const i = await api()?.skills?.getInstalls?.(); setInstalls(i || {})
+    } catch (e: any) { setErr(e?.message || 'failed') }
+  }
+  const removeSkill = async (id: string, name: string) => {
+    if (!window.confirm(tr(`删除技能「${name}」？已安装的 agent 会一并卸载。`, `Delete skill "${name}"? It will be uninstalled from all agents.`))) return
+    try { await api()?.skills?.remove?.(id); await refresh() } catch (e: any) { setErr(e?.message || 'failed') }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="ah-hint" style={{ padding: '0 4px' }}>
+        {tr('技能 = 一段注入给 agent 的指令包。可给单个 agent 装（点格子），或一键给全部 agent 装。开启「Agentic」后，HTTP 接入的模型也能像 codex/claude 一样在工作区读写文件、跑命令。',
+            'A skill is an instruction pack injected into an agent. Install it per-agent (click a cell) or for all at once. Turn on "Agentic" so HTTP models also read/write files and run commands in the workspace, like codex/claude.')}
+      </div>
+
+      <CapabilityMatrix caps={caps} onToggleAgentic={setAgentic} />
+
+      <SkillCatalog skills={skills} onChanged={refresh} onRemove={removeSkill}
+        onInstallAll={installAllForSkill} installs={installs} agentIds={agentIds} />
+
+      {skills.length > 0 && agentIds.length > 0 && (
+        <InstallMatrix skills={skills} caps={caps} isInstalled={isInstalled}
+          onToggle={toggleInstall} onInstallAllForSkill={installAllForSkill} onInstallAllForAgent={installAllForAgent} />
+      )}
+
+      {err && <div className="glass" style={{ padding: '10px 14px', color: 'var(--st-error)', fontSize: 12 }}>{err}</div>}
+    </div>
+  )
+}
+
+/* ---------- 能力矩阵 ---------- */
+function CapabilityMatrix({ caps, onToggleAgentic }: { caps: CapState[]; onToggleAgentic: (id: string, on: boolean) => void }) {
+  return (
+    <Enter className="glass" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <Icon d={IC.pulse} size={17} style={{ color: 'var(--ag-codex)' }} />
+        <div style={{ fontWeight: 700 }}>{tr('能力矩阵', 'Capability matrix')}</div>
+        <span className="ah-hint">{tr('确认每个接入 agent 的真实 agent 能力', 'confirm what each connected agent can really do')}</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ color: 'var(--tx-3)', textAlign: 'left' }}>
+              <th style={{ padding: '6px 10px', fontWeight: 600 }}>Agent</th>
+              <th style={{ padding: '6px 10px', fontWeight: 600 }}>{tr('后端', 'Backend')}</th>
+              {CAP_ORDER.map(c => (
+                <th key={c} style={{ padding: '6px 10px', fontWeight: 600, textAlign: 'center', whiteSpace: 'nowrap' }}>{tr(CAP_LABEL[c].zh, CAP_LABEL[c].en)}</th>
+              ))}
+              <th style={{ padding: '6px 10px', fontWeight: 600, textAlign: 'center' }}>Agentic</th>
+            </tr>
+          </thead>
+          <tbody>
+            {caps.map(a => (
+              <tr key={a.agentId} style={{ borderTop: '1px solid var(--glass-border)' }}>
+                <td style={{ padding: '8px 10px' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {AGENT_META[a.agentId] ? <AgentMark id={a.agentId} size={22} radius={6} /> : null}
+                    <span style={{ fontWeight: 600 }}>{AGENT_META[a.agentId]?.name || a.name}</span>
+                  </span>
+                </td>
+                <td style={{ padding: '8px 10px' }}>
+                  <span className="ah-chip" style={{ fontSize: 10.5 }}>{a.protocol === 'stdio-plain' ? (a.nativeCli ? 'StdIO·CLI' : 'StdIO') : 'HTTP'}</span>
+                </td>
+                {CAP_ORDER.map(c => (
+                  <td key={c} style={{ padding: '8px 10px', textAlign: 'center' }}>
+                    {a.capabilities.includes(c)
+                      ? <Icon d={IC.check} size={15} style={{ color: 'var(--mint)' }} />
+                      : <span style={{ color: 'var(--tx-3)' }}>·</span>}
+                  </td>
+                ))}
+                <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                  {a.protocol === 'http'
+                    ? <span style={{ display: 'inline-flex' }}><Switch on={a.httpAgentic} onChange={v => onToggleAgentic(a.agentId, v)} /></span>
+                    : <span className="ah-hint" title={tr('stdio 原生 agentic', 'native stdio agentic')}>{tr('原生', 'native')}</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="ah-hint" style={{ fontSize: 11.5, color: 'var(--tx-3)' }}>
+        {tr('开启 Agentic 需该 agent 走 HTTP 绑定；建议先在「设置 → 工作区」指定一个项目目录，否则只读（禁止写文件/执行命令）。',
+            'Enabling Agentic requires an HTTP binding; set a workspace under Settings → Workspaces first, otherwise it stays read-only (no writes / no command execution).')}
+      </div>
+    </Enter>
+  )
+}
+
+/* ---------- 技能目录 + 添加 ---------- */
+function SkillCatalog({ skills, onChanged, onRemove, onInstallAll, installs, agentIds }: {
+  skills: SkillDef[]; onChanged: () => void; onRemove: (id: string, name: string) => void
+  onInstallAll: (skillId: string, on: boolean) => void; installs: Installs; agentIds: string[]
+}) {
+  const [adding, setAdding] = useState(false)
+  const [draft, setDraft] = useState({ name: '', description: '', instructions: '', tags: '' })
+  const [builtins, setBuiltins] = useState<Array<{ name: string; description?: string; instructions: string; tags?: string[]; source?: string }>>([])
+
+  useEffect(() => { api()?.skills?.builtins?.().then((b: any) => setBuiltins(Array.isArray(b) ? b : [])).catch(() => {}) }, [])
+
+  const installedCount = (skillId: string) => agentIds.filter(a => (installs[a] || []).includes(skillId)).length
+  const save = async () => {
+    if (!draft.name.trim() || !draft.instructions.trim()) return
+    await api()?.skills?.add?.({
+      name: draft.name.trim(), description: draft.description.trim(), instructions: draft.instructions,
+      tags: draft.tags.split(',').map(t => t.trim()).filter(Boolean), source: 'paste'
+    })
+    setDraft({ name: '', description: '', instructions: '', tags: '' }); setAdding(false); onChanged()
+  }
+  const addBuiltin = async (b: typeof builtins[0]) => { await api()?.skills?.add?.(b); onChanged() }
+
+  return (
+    <Enter className="glass" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }} delay={60}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <Icon d={IC.bolt} size={17} style={{ color: 'var(--ag-claude)' }} />
+        <div style={{ fontWeight: 700 }}>{tr('技能目录', 'Skill catalog')}</div>
+        <span className="ah-hint">{skills.length} {tr('个技能', 'skills')}</span>
+        <div style={{ flex: 1 }} />
+        <button className="ah-btn sm primary" onClick={() => setAdding(v => !v)}>
+          <Icon d={IC.plus} size={13} /> {tr('添加技能', 'Add skill')}
+        </button>
+      </div>
+
+      {adding && (
+        <div className="glass" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'var(--mint-line)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div>
+              <div className="ah-label" style={{ marginBottom: 5 }}>{tr('名称', 'Name')}</div>
+              <input className="ah-input" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+                placeholder={tr('如 代码审查', 'e.g. Code review')} />
+            </div>
+            <div>
+              <div className="ah-label" style={{ marginBottom: 5 }}>{tr('标签（逗号分隔）', 'Tags (comma-separated)')}</div>
+              <input className="ah-input" value={draft.tags} onChange={e => setDraft(d => ({ ...d, tags: e.target.value }))}
+                placeholder="review, coding" />
+            </div>
+          </div>
+          <div>
+            <div className="ah-label" style={{ marginBottom: 5 }}>{tr('一行描述', 'One-line description')}</div>
+            <input className="ah-input" value={draft.description} onChange={e => setDraft(d => ({ ...d, description: e.target.value }))} />
+          </div>
+          <div>
+            <div className="ah-label" style={{ marginBottom: 5 }}>{tr('指令正文（SKILL.md 风格，会注入给 agent）', 'Instructions (SKILL.md style, injected to the agent)')}</div>
+            <textarea className="ah-input mono" style={{ minHeight: 120, resize: 'vertical', width: '100%' }}
+              value={draft.instructions} onChange={e => setDraft(d => ({ ...d, instructions: e.target.value }))}
+              placeholder={tr('When the user asks for X, do Y…', 'When the user asks for X, do Y…')} />
+          </div>
+          {builtins.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span className="ah-label">{tr('内置模板', 'Templates')}:</span>
+              {builtins.map((b, i) => (
+                <button key={i} className="ah-btn sm" onClick={() => addBuiltin(b)} title={b.description}>
+                  <Icon d={IC.plus} size={12} /> {b.name}
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="ah-btn sm" onClick={() => setAdding(false)}>{tr('取消', 'Cancel')}</button>
+            <button className="ah-btn sm primary" disabled={!draft.name.trim() || !draft.instructions.trim()} onClick={save}>
+              <Icon d={IC.check} size={13} /> {tr('创建', 'Create')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {skills.length === 0 && !adding && (
+        <div className="ah-hint" style={{ padding: '12px 4px', textAlign: 'center' }}>
+          {tr('还没有技能。点「添加技能」粘贴一段 SKILL.md，或用内置模板。', 'No skills yet. Click "Add skill" to paste a SKILL.md, or use a template.')}
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+        {skills.map(s => {
+          const n = installedCount(s.id)
+          const allOn = n >= agentIds.length && agentIds.length > 0
+          return (
+            <div key={s.id} className="glass" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                <button className="ah-btn sm danger" onClick={() => onRemove(s.id, s.name)} title={tr('删除', 'Delete')}><Icon d={IC.trash} size={13} /></button>
+              </div>
+              {s.description && <div className="ah-hint" style={{ lineHeight: 1.5 }}>{s.description}</div>}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {s.tags.map(t => <span key={t} className="ah-chip" style={{ fontSize: 10 }}>{t}</span>)}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                <span className="ah-hint">{tr(`已装 ${n}/${agentIds.length}`, `${n}/${agentIds.length} agents`)}</span>
+                <div style={{ flex: 1 }} />
+                <button className="ah-btn sm" onClick={() => onInstallAll(s.id, !allOn)}>
+                  {allOn ? tr('全部卸载', 'Uninstall all') : tr('全部安装', 'Install all')}
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </Enter>
+  )
+}
+
+/* ---------- 安装矩阵（agent×skill） ---------- */
+function InstallMatrix({ skills, caps, isInstalled, onToggle, onInstallAllForSkill, onInstallAllForAgent }: {
+  skills: SkillDef[]; caps: CapState[]
+  isInstalled: (agentId: string, skillId: string) => boolean
+  onToggle: (agentId: string, skillId: string) => void
+  onInstallAllForSkill: (skillId: string, on: boolean) => void
+  onInstallAllForAgent: (agentId: string, on: boolean) => void
+}) {
+  const agentAllOn = (agentId: string) => skills.every(s => isInstalled(agentId, s.id))
+  const skillAllOn = (skillId: string) => caps.every(c => isInstalled(c.agentId, skillId))
+  return (
+    <Enter className="glass" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }} delay={120}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <Icon d={IC.tasks} size={17} style={{ color: 'var(--ag-openclaw)' }} />
+        <div style={{ fontWeight: 700 }}>{tr('安装矩阵', 'Install matrix')}</div>
+        <span className="ah-hint">{tr('点格子=单独装，行/列「全部」=集体装', 'click a cell to install one; use row/column "all" for bulk')}</span>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: 12.5 }}>
+          <thead>
+            <tr>
+              <th style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--tx-3)', fontWeight: 600 }}>{tr('技能 \\ Agent', 'Skill \\ Agent')}</th>
+              {caps.map(c => (
+                <th key={c.agentId} style={{ padding: '6px 8px', textAlign: 'center' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                    {AGENT_META[c.agentId] ? <AgentMark id={c.agentId} size={22} radius={6} /> : <span style={{ fontWeight: 600 }}>{c.name}</span>}
+                    <button className="ah-btn sm" style={{ padding: '1px 6px', fontSize: 10 }} onClick={() => onInstallAllForAgent(c.agentId, !agentAllOn(c.agentId))}>
+                      {agentAllOn(c.agentId) ? tr('清空', 'clear') : tr('全部', 'all')}
+                    </button>
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {skills.map(s => (
+              <tr key={s.id} style={{ borderTop: '1px solid var(--glass-border)' }}>
+                <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 600, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                    <button className="ah-btn sm" style={{ padding: '1px 6px', fontSize: 10 }} onClick={() => onInstallAllForSkill(s.id, !skillAllOn(s.id))}>
+                      {skillAllOn(s.id) ? tr('清空', 'clear') : tr('全部', 'all')}
+                    </button>
+                  </div>
+                </td>
+                {caps.map(c => {
+                  const on = isInstalled(c.agentId, s.id)
+                  return (
+                    <td key={c.agentId} style={{ padding: '6px 8px', textAlign: 'center' }}>
+                      <button onClick={() => onToggle(c.agentId, s.id)} title={on ? tr('点按卸载', 'click to uninstall') : tr('点按安装', 'click to install')}
+                        style={{
+                          width: 24, height: 24, borderRadius: 7, cursor: 'pointer',
+                          border: '1px solid ' + (on ? 'var(--mint-line)' : 'var(--glass-border)'),
+                          background: on ? 'var(--mint-soft)' : 'transparent',
+                          color: on ? 'var(--mint)' : 'var(--tx-3)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center'
+                        }}>
+                        {on ? <Icon d={IC.check} size={14} /> : ''}
+                      </button>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Enter>
+  )
+}

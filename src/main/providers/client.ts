@@ -137,11 +137,12 @@ export class ProviderClient {
       model: model.id,
       max_tokens: this.binding.maxOutputTokens ?? 8192,
       stream: true,
-      messages: messages.map(m => ({ role: m.role, content: m.content }))
+      messages: openaiMessagesToAnthropic(messages)
     }
     if (sysText) body.system = sysText
     if (wantThink) body.thinking = { type: 'enabled', budget_tokens: budget }
     if (this.binding.temperature !== undefined && !wantThink) body.temperature = this.binding.temperature
+    if (opts.tools && opts.tools.length) body.tools = openaiToolsToAnthropic(opts.tools)  // 工具支持（Claude-B 新增）
 
     const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal })
     if (!res.ok || !res.body) {
@@ -155,16 +156,19 @@ export class ProviderClient {
     let inputTokens = 0
     let outputTokens = 0
     let stopReason: string | undefined
+    const toolAcc: any[] = []   // 按 content block index 累积 tool_use（id/name 在 start，input 拼 partial_json）
     await this.readSse(res.body, (evt) => {
       if (!evt) return
-      // anthropic event-stream: lines like "event: content_block_delta" then "data: {...}"
-      const dataLine = evt.split('\n').find(l => l.startsWith('data: '))
-      if (!dataLine) return
-      const payload = dataLine.slice(6).trim()
+      // readSse 已剥离 "data: " 前缀；兼容两种形态再解析（Claude-B 加固）
+      const payload = evt.startsWith('data: ') ? evt.slice(6).trim() : evt.trim()
+      if (!payload) return
       try {
         const obj = JSON.parse(payload)
-        if (obj.type === 'content_block_start' && obj.content_block?.type === 'thinking') {
-          thinkingStartedAt = Date.now()
+        if (obj.type === 'content_block_start') {
+          if (obj.content_block?.type === 'thinking') thinkingStartedAt = Date.now()
+          if (obj.content_block?.type === 'tool_use') {
+            toolAcc[obj.index] = { index: obj.index, id: obj.content_block.id, type: 'function', function: { name: obj.content_block.name, arguments: '' } }
+          }
         }
         if (obj.type === 'content_block_delta') {
           if (obj.delta?.type === 'thinking_delta' && obj.delta?.thinking) {
@@ -174,6 +178,9 @@ export class ProviderClient {
           if (obj.delta?.type === 'text_delta' && obj.delta?.text) {
             content += obj.delta.text
             cb.onContent?.(obj.delta.text)
+          }
+          if (obj.delta?.type === 'input_json_delta' && toolAcc[obj.index]) {
+            toolAcc[obj.index].function.arguments += obj.delta.partial_json || ''
           }
         }
         // usage：message_start 带 input_tokens，message_delta 带累计 output_tokens
@@ -185,16 +192,15 @@ export class ProviderClient {
           if (obj.usage) outputTokens = obj.usage.output_tokens ?? outputTokens
           if (obj.delta?.stop_reason) stopReason = obj.delta.stop_reason
         }
-        if (obj.type === 'message_stop') {
-          // end
-        }
       } catch {}
     })
 
+    const toolCalls = toolAcc.filter(Boolean)
     cb.onDone?.({
       content,
       usage: normalizeUsage({ input_tokens: inputTokens, output_tokens: outputTokens }),
       finishReason: normFinish(stopReason),
+      toolCalls: toolCalls.length ? toolCalls : undefined,
       thinking: thinkingTxt ? {
         enabled: true,
         level: thinking.level,
@@ -210,12 +216,10 @@ export class ProviderClient {
     const url = `${provider.baseUrl.replace(/\/$/, '')}/models/${encodeURIComponent(model.id)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(provider.apiKey)}`
     const headers = this.headersFor(provider)
     const sysText = opts.systemPrompt
-    const contents = messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }))
+    const contents = openaiMessagesToGemini(messages)
     const body: any = { contents }
     if (sysText) body.systemInstruction = { role: 'system', parts: [{ text: sysText }] }
+    if (opts.tools && opts.tools.length) body.tools = [{ functionDeclarations: openaiToolsToGemini(opts.tools) }]  // 工具支持（Claude-B 新增）
     if (model.supportsThinking && thinking.mode !== 'off') {
       const budget = thinking.budgetTokens ?? THINKING_BUDGET_TOKENS[thinking.level] ?? THINKING_BUDGET_TOKENS.medium
       body.generationConfig = { thinkingConfig: { thinkingBudget: budget }, maxOutputTokens: this.binding.maxOutputTokens ?? 8192 }
@@ -233,11 +237,11 @@ export class ProviderClient {
     let thinkingTxt = ''
     let usageMeta: any = undefined
     let geminiFinish: string | undefined
+    const toolAcc: any[] = []   // functionCall part 累积（Gemini 无 id，按序号生成稳定 id）
     await this.readSse(res.body, (evt) => {
       if (!evt) return
-      const dataLine = evt.split('\n').find(l => l.startsWith('data: '))
-      if (!dataLine) return
-      const payload = dataLine.slice(6).trim()
+      const payload = evt.startsWith('data: ') ? evt.slice(6).trim() : evt.trim()  // readSse 已剥前缀，加固兼容
+      if (!payload) return
       try {
         const obj = JSON.parse(payload)
         if (obj.usageMetadata) usageMeta = obj.usageMetadata
@@ -245,7 +249,9 @@ export class ProviderClient {
         if (fr) geminiFinish = normFinish(fr)
         const parts = obj.candidates?.[0]?.content?.parts || []
         for (const part of parts) {
-          if (part.text && part.thought) {
+          if (part.functionCall) {
+            toolAcc.push({ index: toolAcc.length, id: 'gcall-' + toolAcc.length, type: 'function', function: { name: part.functionCall.name, arguments: JSON.stringify(part.functionCall.args || {}) } })
+          } else if (part.text && part.thought) {
             thinkingTxt += part.text
             cb.onThinking?.(part.text)
           } else if (part.text) {
@@ -258,7 +264,8 @@ export class ProviderClient {
     cb.onDone?.({
       content,
       usage: normalizeUsage(usageMeta),
-      finishReason: geminiFinish,
+      finishReason: toolAcc.length ? 'tool_calls' : geminiFinish,
+      toolCalls: toolAcc.length ? toolAcc : undefined,
       thinking: thinkingTxt ? {
         enabled: true,
         level: thinking.level,
@@ -308,6 +315,93 @@ function accumulateToolCalls(acc: any[], deltas: any[]): void {
     if (d.function?.name) acc[i].function.name = d.function.name
     if (typeof d.function?.arguments === 'string') acc[i].function.arguments += d.function.arguments
   }
+}
+
+/* ---------- 工具/消息跨协议转换（Claude-B 新增，纯函数，便于单测） ---------- */
+
+/** OpenAI 工具定义 → Anthropic tools 形状。 */
+export function openaiToolsToAnthropic(tools: any[]): any[] {
+  return (tools || []).filter(t => t?.function).map(t => ({
+    name: t.function.name,
+    description: t.function.description || '',
+    input_schema: t.function.parameters || { type: 'object', properties: {} }
+  }))
+}
+
+/** OpenAI 工具定义 → Gemini functionDeclarations 形状。 */
+export function openaiToolsToGemini(tools: any[]): any[] {
+  return (tools || []).filter(t => t?.function).map(t => ({
+    name: t.function.name,
+    description: t.function.description || '',
+    parameters: t.function.parameters || { type: 'object', properties: {} }
+  }))
+}
+
+/** 从 assistant.tool_calls 收集 id→工具名（供 tool 结果按名回灌，Gemini 用）。 */
+function toolNameById(messages: ChatCompletionMessage[]): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const m of messages) {
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls) if (tc.id && tc.function?.name) map[tc.id] = tc.function.name
+    }
+  }
+  return map
+}
+
+/** OpenAI 形状 messages → Anthropic messages（连续 tool_result 合并到同一 user 消息）。 */
+export function openaiMessagesToAnthropic(messages: ChatCompletionMessage[]): any[] {
+  const out: any[] = []
+  for (const m of messages) {
+    if (m.role === 'tool') {
+      const block = { type: 'tool_result', tool_use_id: m.tool_call_id, content: m.content || '' }
+      const last = out[out.length - 1]
+      if (last && last.role === 'user' && last._toolGroup) last.content.push(block)
+      else out.push({ role: 'user', content: [block], _toolGroup: true })
+      continue
+    }
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      const blocks: any[] = []
+      if (m.content) blocks.push({ type: 'text', text: m.content })
+      for (const tc of m.tool_calls) {
+        let input: any = {}
+        try { input = JSON.parse(tc.function?.arguments || '{}') } catch { input = {} }
+        blocks.push({ type: 'tool_use', id: tc.id, name: tc.function?.name, input })
+      }
+      out.push({ role: 'assistant', content: blocks })
+      continue
+    }
+    out.push({ role: m.role, content: m.content })
+  }
+  return out.map(({ _toolGroup, ...rest }) => rest)
+}
+
+/** OpenAI 形状 messages → Gemini contents（tool 结果转 functionResponse，按 id→name 匹配）。 */
+export function openaiMessagesToGemini(messages: ChatCompletionMessage[]): any[] {
+  const nameById = toolNameById(messages)
+  const out: any[] = []
+  for (const m of messages) {
+    if (m.role === 'tool') {
+      const name = (m.tool_call_id && nameById[m.tool_call_id]) || 'tool'
+      const part = { functionResponse: { name, response: { result: m.content || '' } } }
+      const last = out[out.length - 1]
+      if (last && last._fnGroup) last.parts.push(part)
+      else out.push({ role: 'user', parts: [part], _fnGroup: true })
+      continue
+    }
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      const parts: any[] = []
+      if (m.content) parts.push({ text: m.content })
+      for (const tc of m.tool_calls) {
+        let args: any = {}
+        try { args = JSON.parse(tc.function?.arguments || '{}') } catch { args = {} }
+        parts.push({ functionCall: { name: tc.function?.name, args } })
+      }
+      out.push({ role: 'model', parts })
+      continue
+    }
+    out.push({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })
+  }
+  return out.map(({ _fnGroup, ...rest }) => rest)
 }
 
 /** 把各家结束原因归一为 OpenAI 取向的中性值：stop | length | tool_calls | content_filter。 */

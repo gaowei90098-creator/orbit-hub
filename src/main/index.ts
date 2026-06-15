@@ -16,6 +16,12 @@ import { syncRegistryFromBindings } from "./hub/agent-connections"
 import { routePreview } from "./hub/route-preview"
 import { MemoryCategory, MemoryLibrary } from "./memory-library"
 import { getWorkspaceManager, WorkspaceNotFoundError, WorkspacePathInvalidError } from "./hub/workspace"
+// --- AgentHub skills + native agentic (Claude-B 新增) ---
+import { getSkillManager } from "./skills/manager"
+import { BUILTIN_SKILLS } from "./skills/types"
+import { getCapabilityMatrix } from "./agentic/capabilities"
+import { getAgenticConfig } from "./agentic/config"
+// --- /AgentHub skills + native agentic ---
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -276,6 +282,21 @@ function serialiseWsError(e: unknown): Error {
   }
   return e as Error
 }
+
+// --- AgentHub skills + native agentic（Claude-B 新增）：技能 CRUD / 安装 + 能力矩阵 / agentic 开关 ---
+ipcMain.handle("skills:list", () => getSkillManager().list())
+ipcMain.handle("skills:builtins", () => BUILTIN_SKILLS)
+ipcMain.handle("skills:add", (_e, input) => getSkillManager().add(input))
+ipcMain.handle("skills:update", (_e, id: string, patch) => getSkillManager().update(id, patch))
+ipcMain.handle("skills:remove", (_e, id: string) => getSkillManager().remove(id))
+ipcMain.handle("skills:getInstalls", () => getSkillManager().getInstalls())
+ipcMain.handle("skills:install", (_e, agentId: string, skillId: string) => getSkillManager().install(agentId, skillId))
+ipcMain.handle("skills:uninstall", (_e, agentId: string, skillId: string) => getSkillManager().uninstall(agentId, skillId))
+ipcMain.handle("agentic:capabilities", () => getCapabilityMatrix())
+ipcMain.handle("agentic:getEnabled", () => getAgenticConfig().getEnabled())
+ipcMain.handle("agentic:setEnabled", (_e, agentId: string, on: boolean) => getAgenticConfig().setEnabled(agentId, on))
+// --- /AgentHub skills + native agentic ---
+
 ipcMain.handle("win:minimize", () => { mainWindow?.minimize() })
 ipcMain.handle("win:maximizeToggle", () => {
   if (!mainWindow) return false

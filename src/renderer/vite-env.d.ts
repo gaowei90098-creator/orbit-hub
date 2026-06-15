@@ -73,6 +73,22 @@ interface ElectronAPI {
     getActive: () => Promise<string | null>
     setActive: (id: string | null) => Promise<string | null>
   }
+  // --- AgentHub skills + native agentic (Claude-B 新增) ---
+  skills: {
+    list: () => Promise<Array<{ id: string; name: string; description: string; instructions: string; tags: string[]; source: string; createdAt: number; updatedAt: number }>>
+    builtins: () => Promise<Array<{ name: string; description?: string; instructions: string; tags?: string[]; source?: string }>>
+    add: (input: { name: string; description?: string; instructions: string; tags?: string[]; source?: string }) => Promise<any>
+    update: (id: string, patch: { name?: string; description?: string; instructions?: string; tags?: string[]; source?: string }) => Promise<any>
+    remove: (id: string) => Promise<boolean>
+    getInstalls: () => Promise<Record<string, string[]>>
+    install: (agentId: string, skillId: string) => Promise<Record<string, string[]>>
+    uninstall: (agentId: string, skillId: string) => Promise<Record<string, string[]>>
+  }
+  agentic: {
+    capabilities: () => Promise<Array<{ agentId: string; name: string; protocol: 'http' | 'stdio-plain'; nativeCli: boolean; httpAgentic: boolean; capabilities: string[] }>>
+    getEnabled: () => Promise<string[]>
+    setEnabled: (agentId: string, on: boolean) => Promise<string[]>
+  }
   platform: string
 }
 
