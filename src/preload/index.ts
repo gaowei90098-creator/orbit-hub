@@ -107,7 +107,9 @@ const api = {
   agentic: {
     capabilities: () => ipcRenderer.invoke('agentic:capabilities'),
     getEnabled: () => ipcRenderer.invoke('agentic:getEnabled'),
-    setEnabled: (agentId: string, on: boolean) => ipcRenderer.invoke('agentic:setEnabled', agentId, on)
+    setEnabled: (agentId: string, on: boolean) => ipcRenderer.invoke('agentic:setEnabled', agentId, on),
+    getMode: () => ipcRenderer.invoke('agentic:getMode'),
+    setMode: (mode: 'all' | 'selected') => ipcRenderer.invoke('agentic:setMode', mode)
   },
   // --- /AgentHub skills + native agentic ---
   platform: process.platform

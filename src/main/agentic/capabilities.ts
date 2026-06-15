@@ -8,7 +8,9 @@
  *
  * 能力来源：
  *   - stdio-plain：子进程在工作区 cwd 内运行，天然可读写/执行（codex/claude 为原生 CLI agentic）。
- *   - http：默认只能「聊天/描述」；开启 AgentHub 原生 executor 后由工具回环补齐全部能力。
+ *   - http：自 0.3.0 起默认开启 AgentHub 原生 executor（config.mode='all'），由工具回环补齐
+ *     读/写/执行/多步能力，与 codex/claude 对齐；可在能力矩阵按 agent 关闭或整体切到「按需」。
+ *     安全兜底：未绑定工作区时工具回环只读（禁止写/执行）。
  *   - skills：任何 agent 都能接收注入的技能（含 codex/claude）。
  */
 import { getProviderManager } from '../providers/manager'

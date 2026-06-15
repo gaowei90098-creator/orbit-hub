@@ -5,8 +5,9 @@
  * 执行工具、回灌 role:'tool' 结果、循环，直到模型收尾或达上限/取消。每步发 activity 事件，
  * 复用既有步骤卡 UI，让纯 HTTP 模型也呈现「真在工作区动手」的全链路。
  *
- * 注意：anthropic/gemini 的工具转发由 Phase D 在 client.ts 补齐；在此之前这些 provider
- * 不会触发 tool_calls，loop 第一轮即收尾（等价纯聊天，零回归）。
+ * provider 覆盖：openai-compatible / anthropic / gemini 三种线格式的工具下发与 tool_call
+ * 回灌均已在 client.ts 实现，故三者都能触发 tool_calls 并进入回环。模型若不调用工具则
+ * loop 第一轮即收尾（等价纯聊天，零回归）。
  */
 import { buildProviderClient, ResolvedCall } from '../providers/client'
 import { ChatCompletionMessage, ThinkingConfig } from '../providers/types'
@@ -28,9 +29,9 @@ export interface AgenticEmit {
 }
 
 export interface RunAgenticParams {
-  /** 用户任务文本（dispatcher 已拼好工作区上下文前缀） */
+  /** 用户任务文本（原始） */
   userText: string
-  /** 系统提示（已含技能注入块） */
+  /** 系统提示（dispatcher 已拼入技能注入块 + 工作区 bootstrap 项目上下文） */
   systemPrompt: string
   resolved: ResolvedCall
   thinking: ThinkingConfig

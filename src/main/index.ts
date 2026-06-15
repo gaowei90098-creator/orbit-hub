@@ -295,6 +295,8 @@ ipcMain.handle("skills:uninstall", (_e, agentId: string, skillId: string) => get
 ipcMain.handle("agentic:capabilities", () => getCapabilityMatrix())
 ipcMain.handle("agentic:getEnabled", () => getAgenticConfig().getEnabled())
 ipcMain.handle("agentic:setEnabled", (_e, agentId: string, on: boolean) => getAgenticConfig().setEnabled(agentId, on))
+ipcMain.handle("agentic:getMode", () => getAgenticConfig().getMode())
+ipcMain.handle("agentic:setMode", (_e, mode: 'all' | 'selected') => getAgenticConfig().setMode(mode))
 // --- /AgentHub skills + native agentic ---
 
 ipcMain.handle("win:minimize", () => { mainWindow?.minimize() })

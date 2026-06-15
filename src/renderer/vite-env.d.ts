@@ -88,6 +88,8 @@ interface ElectronAPI {
     capabilities: () => Promise<Array<{ agentId: string; name: string; protocol: 'http' | 'stdio-plain'; nativeCli: boolean; httpAgentic: boolean; capabilities: string[] }>>
     getEnabled: () => Promise<string[]>
     setEnabled: (agentId: string, on: boolean) => Promise<string[]>
+    getMode: () => Promise<'all' | 'selected'>
+    setMode: (mode: 'all' | 'selected') => Promise<'all' | 'selected'>
   }
   platform: string
 }

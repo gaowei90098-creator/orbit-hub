@@ -10,9 +10,12 @@
  *   - 单例：getInstance()
  *   - 删/重命名/路径改动时不动 activeId；若被删的是 active，主动让 UI 重新选择（getActive 返回 null）
  */
-import { statSync } from 'fs'
-import { resolve as resolvePath } from 'path'
+import { statSync, readFileSync } from 'fs'
+import { resolve as resolvePath, join as joinPath, relative as relativePath, isAbsolute } from 'path'
 import { store } from '../store'
+
+/** bootstrap 项目上下文注入上限（字符数），与 skills inject 的上限思路一致，防 token 爆炸。 */
+export const BOOTSTRAP_CONTEXT_MAX_CHARS = 16000
 
 export interface Workspace {
   id: string
@@ -124,6 +127,44 @@ class WorkspaceManager {
     }
     this.save()
     return true
+  }
+
+  /**
+   * 读取工作区的 bootstrapFiles，拼成可注入 prompt 的「项目上下文」块。
+   * - 路径限定在 rootPath 内（拒绝绝对路径 / `..` 逃逸），逐个 readFileSync(utf-8)；
+   * - 总字符超 maxChars 即停止并标注省略数；缺失/不可读的文件跳过并标注。
+   * - 无工作区 / 无 bootstrapFiles / 全部读取失败 → 返回空串（不注入，零回归）。
+   */
+  bootstrapContext(id: string | null | undefined, maxChars = BOOTSTRAP_CONTEXT_MAX_CHARS): string {
+    if (!id) return ''
+    const ws = this.getById(id)
+    if (!ws || !Array.isArray(ws.bootstrapFiles) || ws.bootstrapFiles.length === 0) return ''
+    const root = resolvePath(ws.rootPath)
+    const blocks: string[] = []
+    let used = 0
+    let omitted = 0
+    for (const rel of ws.bootstrapFiles) {
+      if (typeof rel !== 'string' || !rel.trim()) continue
+      if (isAbsolute(rel)) { omitted++; continue }
+      const abs = resolvePath(joinPath(root, rel))
+      const within = abs === root || abs.startsWith(root + (process.platform === 'win32' ? '\\' : '/'))
+      if (!within) { omitted++; continue }            // 拒绝 `..` 逃逸
+      let text: string
+      try { text = readFileSync(abs, 'utf-8') } catch { omitted++; continue }
+      const relLabel = relativePath(root, abs).replace(/\\/g, '/')
+      const body = `## ${relLabel}\n${text.trim()}`
+      if (used + body.length > maxChars && blocks.length > 0) { omitted++; continue }
+      blocks.push(body)
+      used += body.length
+    }
+    if (blocks.length === 0) return ''
+    if (omitted > 0) blocks.push(`(${omitted} more bootstrap file(s) omitted: missing, out-of-root, or over length limit.)`)
+    return [
+      '# Project context (workspace bootstrap files)',
+      'These files come from the active workspace. Follow their conventions and instructions.',
+      '',
+      blocks.join('\n\n')
+    ].join('\n').trim()
   }
 
   getActive(): string | null { return this.state.activeId }

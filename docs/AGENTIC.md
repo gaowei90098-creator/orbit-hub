@@ -2,6 +2,20 @@
 
 > 起因：用户反馈"接入的 agent 没有 agentic 能力"。本文件是基于一次全路径审计(10-agent workflow + 人工复审)的诊断与改进计划。最后更新 2026-06-15。配套：[DESIGN.md](./DESIGN.md)。
 
+## 0. 实现现状（0.3.0，2026-06-16 更新）
+
+> 下文第 1~5 节是**实现前**的诊断与路线图，保留作历史。截至 0.3.0，多数已落地，且默认姿态已收紧到"全员对齐"。以当前代码为准：
+
+- **HTTP 原生 agentic 回环：已实现且默认开启。** `agentic/executor.ts` 把 读/写/列文件 + 执行命令 做成工具喂给模型，按 `finishReason==='tool_calls'` 执行工具、回灌 `role:'tool'` 结果、循环（默认上限 8 轮），每步发 `activity` 事件复用步骤卡 UI。
+- **三种 provider 线全部支持工具：** openai-compatible / anthropic / gemini 的工具下发与 tool_call 累积/回灌均在 `providers/client.ts` 实现（不再只有 OpenAI 兼容线）。
+- **默认姿态（`agentic/config.ts` v2）：** `mode='all'`——所有 HTTP agent 默认具备 agentic，与 codex/claude 对齐；可在「设置 → 技能 → 能力矩阵」整体切「按需」或对个别 agent 关闭。**安全兜底：未绑定工作区时工具回环只读**（禁止写/执行；路径限定工作区内，拒绝 `..`/绝对路径逃逸，见 `agentic/tools.ts`）。
+- **stdio 原生 agentic：** codex/claude 走各自 CLI（`codex exec --sandbox workspace-write` / `claude --print --permission-mode acceptEdits`），stream-json 解析为结构化活动步骤；多行提示词在直接 spawn 路径已保真（`stdio-adapter.ts`）。
+- **技能注入：** 全 agent、全路径（HTTP 对话 / HTTP agentic / stdio）统一注入已装技能到系统提示（`skills/inject.ts` + `dispatcher.ts`）。
+- **工作区 bootstrap 项目上下文：** 工作区 `bootstrapFiles`（如 CLAUDE.md/AGENTS.md）经 `workspace.ts#bootstrapContext` 读取并注入 prompt（全 agent 通用，带字符上限与越界防护）。
+- **thinking 对齐：** HTTP 下发 reasoning 参数；stdio 路径开启 thinking 时以 prompt 指令对齐（`dispatcher.ts`）。
+
+**尚未做（待办）：** 写/执行的逐次交互审批（当前为「按 agent 开关 + 无工作区只读」的粗粒度门禁）；为 openclaw/hermes/minimax-code 的 CLI 输出补结构化活动解析器（需各自输出样本）；proxy 的 Anthropic 入站工具透传。
+
 ## 1. 现状诊断（按集成路径，附 file:line 证据）
 
 | 路径 | agentic 程度 | 结论 |

@@ -34,18 +34,21 @@ export function SkillsTab() {
   const [caps, setCaps] = useState<CapState[]>([])
   const [skills, setSkills] = useState<SkillDef[]>([])
   const [installs, setInstalls] = useState<Installs>({})
+  const [mode, setMode] = useState<'all' | 'selected'>('all')
   const [err, setErr] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      const [c, s, i] = await Promise.all([
+      const [c, s, i, m] = await Promise.all([
         api()?.agentic?.capabilities?.() as Promise<CapState[]>,
         api()?.skills?.list?.() as Promise<SkillDef[]>,
-        api()?.skills?.getInstalls?.() as Promise<Installs>
+        api()?.skills?.getInstalls?.() as Promise<Installs>,
+        api()?.agentic?.getMode?.() as Promise<'all' | 'selected'>
       ])
       if (Array.isArray(c)) setCaps(c)
       if (Array.isArray(s)) setSkills(s)
       setInstalls(i && typeof i === 'object' ? i : {})
+      if (m === 'all' || m === 'selected') setMode(m)
     } catch (e: any) { setErr(e?.message || 'load failed') }
   }, [])
   useEffect(() => { refresh() }, [refresh])
@@ -54,6 +57,12 @@ export function SkillsTab() {
 
   const setAgentic = async (agentId: string, on: boolean) => {
     try { await api()?.agentic?.setEnabled?.(agentId, on); await refresh() } catch (e: any) { setErr(e?.message || 'failed') }
+  }
+  const setAgenticMode = async (m: 'all' | 'selected') => {
+    try { await api()?.agentic?.setMode?.(m); await refresh() } catch (e: any) { setErr(e?.message || 'failed') }
+  }
+  const editSkill = async (id: string, patch: { name: string; description: string; instructions: string; tags: string[] }) => {
+    try { await api()?.skills?.update?.(id, patch); await refresh() } catch (e: any) { setErr(e?.message || 'failed') }
   }
   const isInstalled = (agentId: string, skillId: string) => (installs[agentId] || []).includes(skillId)
   const toggleInstall = async (agentId: string, skillId: string) => {
@@ -85,9 +94,9 @@ export function SkillsTab() {
             'A skill is an instruction pack injected into an agent. Install it per-agent (click a cell) or for all at once. Turn on "Agentic" so HTTP models also read/write files and run commands in the workspace, like codex/claude.')}
       </div>
 
-      <CapabilityMatrix caps={caps} onToggleAgentic={setAgentic} />
+      <CapabilityMatrix caps={caps} onToggleAgentic={setAgentic} mode={mode} onSetMode={setAgenticMode} />
 
-      <SkillCatalog skills={skills} onChanged={refresh} onRemove={removeSkill}
+      <SkillCatalog skills={skills} onChanged={refresh} onRemove={removeSkill} onEdit={editSkill}
         onInstallAll={installAllForSkill} installs={installs} agentIds={agentIds} />
 
       {skills.length > 0 && agentIds.length > 0 && (
@@ -101,13 +110,21 @@ export function SkillsTab() {
 }
 
 /* ---------- 能力矩阵 ---------- */
-function CapabilityMatrix({ caps, onToggleAgentic }: { caps: CapState[]; onToggleAgentic: (id: string, on: boolean) => void }) {
+function CapabilityMatrix({ caps, onToggleAgentic, mode, onSetMode }: {
+  caps: CapState[]; onToggleAgentic: (id: string, on: boolean) => void
+  mode: 'all' | 'selected'; onSetMode: (m: 'all' | 'selected') => void
+}) {
   return (
     <Enter className="glass" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
         <Icon d={IC.pulse} size={17} style={{ color: 'var(--ag-codex)' }} />
         <div style={{ fontWeight: 700 }}>{tr('能力矩阵', 'Capability matrix')}</div>
         <span className="ah-hint">{tr('确认每个接入 agent 的真实 agent 能力', 'confirm what each connected agent can really do')}</span>
+        <div style={{ flex: 1 }} />
+        <span className="ah-hint" style={{ fontSize: 11.5 }} title={tr('开启后所有 HTTP agent 默认具备 agentic（可逐个关闭）；关闭则改为按需启用', 'On: every HTTP agent is agentic by default (toggle off individually). Off: enable per agent.')}>
+          {tr('默认全员 Agentic', 'Agentic for all')}
+        </span>
+        <Switch on={mode === 'all'} onChange={v => onSetMode(v ? 'all' : 'selected')} />
       </div>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12.5 }}>
@@ -159,24 +176,36 @@ function CapabilityMatrix({ caps, onToggleAgentic }: { caps: CapState[]; onToggl
 }
 
 /* ---------- 技能目录 + 添加 ---------- */
-function SkillCatalog({ skills, onChanged, onRemove, onInstallAll, installs, agentIds }: {
+function SkillCatalog({ skills, onChanged, onRemove, onEdit, onInstallAll, installs, agentIds }: {
   skills: SkillDef[]; onChanged: () => void; onRemove: (id: string, name: string) => void
+  onEdit: (id: string, patch: { name: string; description: string; instructions: string; tags: string[] }) => void
   onInstallAll: (skillId: string, on: boolean) => void; installs: Installs; agentIds: string[]
 }) {
   const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState({ name: '', description: '', instructions: '', tags: '' })
   const [builtins, setBuiltins] = useState<Array<{ name: string; description?: string; instructions: string; tags?: string[]; source?: string }>>([])
 
   useEffect(() => { api()?.skills?.builtins?.().then((b: any) => setBuiltins(Array.isArray(b) ? b : [])).catch(() => {}) }, [])
 
+  const resetForm = () => { setDraft({ name: '', description: '', instructions: '', tags: '' }); setEditingId(null); setAdding(false) }
+  const startAdd = () => { setEditingId(null); setDraft({ name: '', description: '', instructions: '', tags: '' }); setAdding(v => editingId ? true : !v) }
+  const startEdit = (s: SkillDef) => {
+    setEditingId(s.id)
+    setDraft({ name: s.name, description: s.description, instructions: s.instructions, tags: (s.tags || []).join(', ') })
+    setAdding(true)
+  }
+
   const installedCount = (skillId: string) => agentIds.filter(a => (installs[a] || []).includes(skillId)).length
   const save = async () => {
     if (!draft.name.trim() || !draft.instructions.trim()) return
-    await api()?.skills?.add?.({
+    const patch = {
       name: draft.name.trim(), description: draft.description.trim(), instructions: draft.instructions,
-      tags: draft.tags.split(',').map(t => t.trim()).filter(Boolean), source: 'paste'
-    })
-    setDraft({ name: '', description: '', instructions: '', tags: '' }); setAdding(false); onChanged()
+      tags: draft.tags.split(',').map(t => t.trim()).filter(Boolean)
+    }
+    if (editingId) onEdit(editingId, patch)
+    else await api()?.skills?.add?.({ ...patch, source: 'paste' })
+    resetForm(); if (!editingId) onChanged()
   }
   const addBuiltin = async (b: typeof builtins[0]) => { await api()?.skills?.add?.(b); onChanged() }
 
@@ -187,13 +216,17 @@ function SkillCatalog({ skills, onChanged, onRemove, onInstallAll, installs, age
         <div style={{ fontWeight: 700 }}>{tr('技能目录', 'Skill catalog')}</div>
         <span className="ah-hint">{skills.length} {tr('个技能', 'skills')}</span>
         <div style={{ flex: 1 }} />
-        <button className="ah-btn sm primary" onClick={() => setAdding(v => !v)}>
+        <button className="ah-btn sm primary" onClick={startAdd}>
           <Icon d={IC.plus} size={13} /> {tr('添加技能', 'Add skill')}
         </button>
       </div>
 
       {adding && (
         <div className="glass" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10, borderColor: 'var(--mint-line)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 13 }}>
+            <Icon d={editingId ? IC.pencil : IC.plus} size={14} style={{ color: 'var(--mint)' }} />
+            {editingId ? tr('编辑技能', 'Edit skill') : tr('新建技能', 'New skill')}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div>
               <div className="ah-label" style={{ marginBottom: 5 }}>{tr('名称', 'Name')}</div>
@@ -227,9 +260,9 @@ function SkillCatalog({ skills, onChanged, onRemove, onInstallAll, installs, age
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-            <button className="ah-btn sm" onClick={() => setAdding(false)}>{tr('取消', 'Cancel')}</button>
+            <button className="ah-btn sm" onClick={resetForm}>{tr('取消', 'Cancel')}</button>
             <button className="ah-btn sm primary" disabled={!draft.name.trim() || !draft.instructions.trim()} onClick={save}>
-              <Icon d={IC.check} size={13} /> {tr('创建', 'Create')}
+              <Icon d={IC.check} size={13} /> {editingId ? tr('保存', 'Save') : tr('创建', 'Create')}
             </button>
           </div>
         </div>
@@ -249,6 +282,7 @@ function SkillCatalog({ skills, onChanged, onRemove, onInstallAll, installs, age
             <div key={s.id} className="glass" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ fontWeight: 700, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</div>
+                <button className="ah-btn sm" onClick={() => startEdit(s)} title={tr('编辑', 'Edit')}><Icon d={IC.pencil} size={13} /></button>
                 <button className="ah-btn sm danger" onClick={() => onRemove(s.id, s.name)} title={tr('删除', 'Delete')}><Icon d={IC.trash} size={13} /></button>
               </div>
               {s.description && <div className="ah-hint" style={{ lineHeight: 1.5 }}>{s.description}</div>}

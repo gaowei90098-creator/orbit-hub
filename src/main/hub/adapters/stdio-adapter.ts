@@ -9,6 +9,14 @@ function quoteForCommandShell(value: string): string {
 }
 
 /**
+ * 多行提示词保真决策（纯函数，便于单测）：
+ * 仅当经 cmd.exe /c 拼接命令行时压平换行（否则破坏命令行解析）；直接 spawn 时原样保留。
+ */
+export function resolvePromptArg(prompt: string, needsCommandShell: boolean): string {
+  return needsCommandShell ? prompt.replace(/\r?\n/g, ' ') : prompt
+}
+
+/**
  * 通用本地 CLI 直连适配器 — oneshot
  *
  * 每次 send() spawn 一次子进程：
@@ -80,8 +88,11 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
     this.outDecoder = new TextDecoder('utf-8')
     const viaArg = this.execArgs.some(a => a.includes('{prompt}'))
     const needsCommandShell = process.platform === 'win32' && !/\.exe$/i.test(this.binary)
+    // 多行提示词保真：直接 spawn（.exe / 非 Windows）时单个 argv 可含换行，原样保留；
+    // 仅经 cmd.exe /c 拼接命令行时才压平换行（否则换行会破坏命令行解析）。
+    const promptArg = resolvePromptArg(prompt, needsCommandShell)
     const args = viaArg
-      ? this.execArgs.map(a => a.replace('{prompt}', prompt.replace(/\r?\n/g, ' ')))
+      ? this.execArgs.map(a => a.replace('{prompt}', promptArg))
       : this.execArgs
     const cmd = needsCommandShell ? (process.env.ComSpec || 'cmd.exe') : this.binary
     const spawnArgs = needsCommandShell

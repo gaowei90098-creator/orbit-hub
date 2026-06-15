@@ -18,6 +18,18 @@ import { isHttpAgenticEnabled } from "../agentic/capabilities"
 
 export type DispatchMode = "auto" | "broadcast" | "chain" | "orchestrate"
 
+/** stdio 路径无法像 HTTP 那样下发 reasoning 参数，开启 thinking 时改用 prompt 指令对齐行为。 */
+const STDIO_THINKING_DIRECTIVE =
+  "[Reasoning mode] Think through the problem step by step and weigh edge cases before answering. " +
+  "Do not print raw chain-of-thought; provide the well-reasoned final result."
+
+/** 宽松判断 thinking 是否开启（兼容 {enabled} / {level} 等形态）。 */
+function thinkingRequested(th: any): boolean {
+  if (!th || typeof th !== "object") return false
+  if (th.enabled === false) return false
+  return th.enabled === true || (typeof th.level === "string" && th.level !== "off" && th.level !== "none") || !!th.budgetTokens || !!th.budget
+}
+
 export interface DispatchTask {
   id: string
   text: string
@@ -268,7 +280,7 @@ export class Dispatcher extends EventEmitter {
     this.registry.setStatus(agentId, "busy")
     const messages: ChatCompletionMessage[] = [{ role: "user", content: text }]
     const client = buildProviderClient(resolved)
-    const systemPrompt = this.systemPromptFor(agentId, opts.systemPrompt, text)
+    const systemPrompt = this.systemPromptFor(agentId, opts.systemPrompt, text, opts.workspaceId)
     const thinking = opts.thinking || resolved.thinking
 
     // --- AgentHub native agentic (Claude-B 新增): 开启后 HTTP agent 走工具回环，真在工作区动手 ---
@@ -340,14 +352,29 @@ export class Dispatcher extends EventEmitter {
     }
   }
 
-  private systemPromptFor(agentId: string, overridePrompt?: string, taskText = ""): string {
+  private systemPromptFor(agentId: string, overridePrompt?: string, taskText = "", workspaceId?: string | null): string {
     if (overridePrompt) return overridePrompt
-    return buildAgentRuntimeSystemPrompt(agentId, agentSystemPrompt(agentId), this.memoryContext(), taskText, this.skillsBlockFor(agentId))
+    const base = buildAgentRuntimeSystemPrompt(agentId, agentSystemPrompt(agentId), this.memoryContext(), taskText, this.skillsBlockFor(agentId))
+    const ws = this.workspaceContextFor(workspaceId)
+    return ws ? base + "\n\n" + ws : base
   }
 
-  private promptForAgent(agentId: string, text: string): string {
-    return buildAgentTaskPrompt(agentId, text, this.memoryContext(), this.skillsBlockFor(agentId))
+  private promptForAgent(agentId: string, text: string, workspaceId?: string | null): string {
+    const base = buildAgentTaskPrompt(agentId, text, this.memoryContext(), this.skillsBlockFor(agentId))
+    const ws = this.workspaceContextFor(workspaceId)
+    // 项目上下文置顶（CLAUDE.md/AGENTS.md 约定），其后才是 runtime 指令 + 用户任务
+    return ws ? ws + "\n\n" + base : base
   }
+
+  // --- AgentHub workspace bootstrap：把工作区 bootstrapFiles 作为项目级上下文拼入 prompt（全 agent 通用） ---
+  private workspaceContextFor(workspaceId?: string | null): string {
+    try {
+      return getWorkspaceManager().bootstrapContext(workspaceId ?? null)
+    } catch {
+      return ""
+    }
+  }
+  // --- /AgentHub workspace bootstrap ---
 
   // --- AgentHub skills (Claude-B 新增): 取目标 agent 已装技能拼成注入块 ---
   private skillsBlockFor(agentId: string): string {
@@ -465,7 +492,9 @@ export class Dispatcher extends EventEmitter {
       adapter.onActivity = null
     }
     try {
-      let agentPrompt = this.promptForAgent(agentId, text)
+      let agentPrompt = this.promptForAgent(agentId, text, opts.workspaceId)
+      // thinking 对齐：stdio 不能下发 reasoning 参数，开启时以指令注入（与 HTTP 路径行为一致）
+      if (thinkingRequested(opts.thinking)) agentPrompt = STDIO_THINKING_DIRECTIVE + "\n\n" + agentPrompt
       // 工作区 → cwd：未指定/不存在 → 降级 home（不报错），并在 prompt 顶部打提示
       // 让 agent 知道它在 home 而非项目里，避免静默"在错地方改文件"。
       let cwd: string | null = null

@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 当前代码版本：`0.2.4`
-- 当前发布状态：`0.2.4` 已完成本地验证并推送到 GitHub（修复开发模式渲染黑屏）
+- 当前代码版本：`0.3.0`
+- 当前发布状态：`0.3.0` 已完成本地验证并推送到 GitHub（全员 Agent 能力对齐）
 - 版本来源：以 `package.json` 的 `version` 与 `build.buildVersion` 为准；两者必须同步
 
 ## 升版规则
@@ -74,8 +74,26 @@
   - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（108 passed，exit 0；未限定时的 53 个失败套件均为 `.cc-switch-src/`，其依赖未在本仓库安装）
   - `npm run build`（exit 0）
 
+### 0.3.0
+
+- 状态：已完成本地验证，推送到 GitHub（tag `v0.3.0`）。
+- 摘要：**全员 Agent 能力对齐**。让所有接入 agent（openclaw/hermes/marvis/minimax-code）在能力上对齐 codex/claude，并补齐审计发现的全部缺口：
+  - HTTP 原生 agentic 回环**默认对所有 agent 开启**（`agentic/config.ts` 升 v2：`mode='all'` + 显式停用名单 + v1 迁移）——HTTP 模型默认可在工作区读写文件/执行命令；未绑定工作区时只读。
+  - 工作区 `bootstrapFiles` 真正作为项目级上下文注入（`hub/workspace.ts#bootstrapContext`，路径沙箱 + 字符上限），全 agent、三派发路径通用。
+  - 多行提示词保真（`stdio-adapter.ts`：仅 cmd.exe 路径压平换行，直接 spawn 保留）。
+  - thinking 对齐到 stdio 路径（`dispatcher.ts` 以 prompt 指令注入）。
+  - 技能可在 UI 编辑（`Skills.tsx` 接 `skills.update`）；能力矩阵新增「默认全员 Agentic」总开关（`agentic:getMode/setMode`）。
+  - 文档/注释纠偏到实现现状（`docs/AGENTIC.md` §0、`executor.ts` 注释）。
+- 主要文件：`agentic/config.ts`、`agentic/capabilities.ts`、`agentic/executor.ts`、`hub/workspace.ts`、`hub/dispatcher.ts`、`hub/adapters/stdio-adapter.ts`、`index.ts`、`preload/index.ts`、`renderer/vite-env.d.ts`、`renderer/screens/Skills.tsx`、`docs/AGENTIC.md`、`docs/DESIGN-0.3.0-capability-parity.md`，以及 5 个新测试。设计方案见 `docs/DESIGN-0.3.0-capability-parity.md`。
+- 未覆盖（列入后续）：写/执行的逐次审批；openclaw/hermes/minimax-code 的 CLI 活动解析器（需输出样本）；proxy Anthropic 入站工具透传。
+- 验证（全绿）：
+  - `npm run typecheck`（exit 0）
+  - `npx eslint src`（exit 0；`eslint .` 的报错全在未跟踪的本机目录 `.cc-switch-src/`、`output/playwright/`，属另一项目）
+  - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（126 passed / 25 files，exit 0）
+  - `npm run build`（exit 0）
+
 ### 下一个候选版本
 
-- 默认候选：`0.2.5`
+- 默认候选：`0.3.1`（小修复/小增强）；下一个较大功能版本 `0.4.0`。
 - 适用范围：后续 agentic / 工作区 / 技能流程修复、验证和小增强。
 - 登记要求：完成后补充改动摘要、验证命令、提交哈希或发布 tag。
