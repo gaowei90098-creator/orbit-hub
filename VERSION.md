@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 当前代码版本：`0.2.3`
-- 当前发布状态：`0.2.3` 已完成本地验证并推送到 GitHub（skills + native agentic）
+- 当前代码版本：`0.2.4`
+- 当前发布状态：`0.2.4` 已完成本地验证并推送到 GitHub（修复开发模式渲染黑屏）
 - 版本来源：以 `package.json` 的 `version` 与 `build.buildVersion` 为准；两者必须同步
 
 ## 升版规则
@@ -63,8 +63,19 @@
   - `npm test`（117 passed）
   - `npm run build`
 
+### 0.2.4
+
+- 状态：已完成本地验证，推送到 GitHub（tag `v0.2.4`）。
+- 摘要：修复开发模式（`npm run dev`）渲染黑屏 —— `src/renderer/index.html` 的 CSP `script-src 'self'` 会拦截 `@vitejs/plugin-react` 在 dev 注入的 inline Fast Refresh 预置脚本，导致 React 无法挂载、窗口仅剩深色背景。新增仅开发（`apply: 'serve'`）生效的 `dev-csp-relax` 渲染插件，在 dev 放行 `'unsafe-inline' 'unsafe-eval'`；生产构建（loadFile）不注入该脚本，CSP 保持严格，安全性不受影响。
+- 主要文件：`electron.vite.config.ts`（renderer 新增 `dev-csp-relax` 插件）。
+- 验证：
+  - `npm run typecheck`（exit 0）
+  - `npx eslint src`（exit 0；`eslint .` 报的错误全部位于未跟踪的本机目录 `.cc-switch-src/`、`output/playwright/`，属另一项目，不在 AgentHub 源码内）
+  - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（108 passed，exit 0；未限定时的 53 个失败套件均为 `.cc-switch-src/`，其依赖未在本仓库安装）
+  - `npm run build`（exit 0）
+
 ### 下一个候选版本
 
-- 默认候选：`0.2.4`
+- 默认候选：`0.2.5`
 - 适用范围：后续 agentic / 工作区 / 技能流程修复、验证和小增强。
 - 登记要求：完成后补充改动摘要、验证命令、提交哈希或发布 tag。
