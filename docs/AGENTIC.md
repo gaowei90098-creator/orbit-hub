@@ -9,7 +9,7 @@
 - **HTTP 原生 agentic 回环：已实现且默认开启。** `agentic/executor.ts` 把 读/写/列文件 + 执行命令 做成工具喂给模型，按 `finishReason==='tool_calls'` 执行工具、回灌 `role:'tool'` 结果、循环（默认上限 8 轮），每步发 `activity` 事件复用步骤卡 UI。
 - **三种 provider 线全部支持工具：** openai-compatible / anthropic / gemini 的工具下发与 tool_call 累积/回灌均在 `providers/client.ts` 实现（不再只有 OpenAI 兼容线）。
 - **默认姿态（`agentic/config.ts` v2）：** `mode='all'`——所有 HTTP agent 默认具备 agentic，与 codex/claude 对齐；可在「设置 → 技能 → 能力矩阵」整体切「按需」或对个别 agent 关闭。**安全兜底：未绑定工作区时工具回环只读**（禁止写/执行；路径限定工作区内，拒绝 `..`/绝对路径逃逸，见 `agentic/tools.ts`）。
-- **stdio 原生 agentic：** codex/claude 走各自 CLI（`codex exec --sandbox workspace-write` / `claude --print --permission-mode acceptEdits`），stream-json 解析为结构化活动步骤；多行提示词在直接 spawn 路径已保真（`stdio-adapter.ts`）。
+- **stdio 原生 agentic：** codex/claude 走各自 CLI（Codex 使用 `codex exec --sandbox danger-full-access -C .` 的非交互可执行模式；Claude 使用 `claude --print --permission-mode acceptEdits`），stream-json 解析为结构化活动步骤；多行提示词在直接 spawn 路径已保真（`stdio-adapter.ts`）。
 - **技能注入：** 全 agent、全路径（HTTP 对话 / HTTP agentic / stdio）统一注入已装技能到系统提示（`skills/inject.ts` + `dispatcher.ts`）。
 - **工作区 bootstrap 项目上下文：** 工作区 `bootstrapFiles`（如 CLAUDE.md/AGENTS.md）经 `workspace.ts#bootstrapContext` 读取并注入 prompt（全 agent 通用，带字符上限与越界防护）。
 - **thinking 对齐：** HTTP 下发 reasoning 参数；stdio 路径开启 thinking 时以 prompt 指令对齐（`dispatcher.ts`）。
@@ -31,7 +31,7 @@
 | 路径 | agentic 程度 | 结论 |
 |------|------|------|
 | HTTP 派发（5/6 agent 默认走这） | **prompt-only** | 只发**一次** chat completion，**不传任何工具**，丢弃 `finishReason/toolCalls`，无 act-observe 回环。`agent-runtime.ts` 只是用 system prompt 叫模型"像 agent 一样"，**没有任何执行**。 |
-| stdio 派发（codex/claude 等） | **真 agentic 但默认关 + 不可见** | `codex exec --sandbox workspace-write` / `claude --print --permission-mode acceptEdits` 在工作区真读写文件、跑命令；但①codex/claude 默认绑 HTTP，需手动切 stdio；②中间步骤被 `curateAgentReply` 删掉，UI 只剩最终文本。 |
+| stdio 派发（codex/claude 等） | **真 agentic 但默认关 + 不可见** | `codex exec --sandbox danger-full-access -C .` / `claude --print --permission-mode acceptEdits` 在工作区真读写文件、跑命令；但①codex/claude 默认绑 HTTP，需手动切 stdio；②中间步骤被 `curateAgentReply` 删掉，UI 只剩最终文本。 |
 | provider 协议层 | partial | 类型层有 `tools`/`tool_calls` 字段；**仅 OpenAI 兼容线**会发 `body.tools` 并能累积 tool_call delta（`client.ts:93-124`）。Anthropic/Gemini 线**完全丢弃工具**。 |
 | 本地代理 proxy | partial | 仅为**外部 CLI 接管**转发工具(外部客户端自己跑回环)；对 AgentHub 自身派发是死代码。Anthropic 入站工具未转发。 |
 | UI 呈现 | **none** | `ReplyState` 只有 `{agentId,thinking,text,done,cancelled,error}`，无法表达"工具调用/文件改动/命令"。用户看不到 agent 做了什么。 |

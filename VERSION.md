@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 当前代码版本：`0.5.2`
-- 当前发布状态：`0.5.2` 已完成本地验证，推送到 GitHub（tag `v0.5.2`，ACP client fs handler）
+- 当前代码版本：`0.5.3`
+- 当前发布状态：`0.5.3` 已完成本地验证，推送到 GitHub（tag `v0.5.3`，Codex CLI StdIO 非交互权限修复）
 - 版本来源：以 `package.json` 的 `version` 与 `build.buildVersion` 为准；两者必须同步
 
 ## 升版规则
@@ -157,8 +157,23 @@
   - `npm run build:win`
 - 本机安装验证：已卸载旧版 `AgentHub 0.1.0`，安装并启动 `AgentHub 0.5.2`（`C:\Users\Admin\AppData\Local\Programs\AgentHub\AgentHub.exe`）。
 
+### 0.5.3
+
+- 状态：已完成本地验证，推送到 GitHub（tag `v0.5.3`）。
+- 摘要：修复 Codex CLI StdIO 在 AgentHub 中被只读沙箱限制，导致无法执行 PowerShell/定位本地项目的问题。Codex CLI 0.134 在 `codex exec --sandbox workspace-write` 非交互模式下会降级为只读/不能执行 shell；默认参数改为 `exec --json --sandbox danger-full-access --skip-git-repo-check -C . -`，由 AgentHub 选择的 workspace 作为 spawn cwd 和 Codex `-C` 工作根。
+- 主要文件：`src/main/hub/adapters/codex.ts`、`src/main/hub/__tests__/createAdapter.test.ts`、`src/renderer/glass/meta.ts`、`src/renderer/screens/Settings.tsx`、`package.json`、`package-lock.json`。
+- 验证：
+  - `npx vitest run src/main/hub/__tests__/createAdapter.test.ts src/main/hub/__tests__/codexAdapter.test.ts src/main/hub/adapters/__tests__/codex-stream-json.test.ts`（22 passed / 3 files）
+  - `npm run typecheck`
+  - `npx eslint src`
+  - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（155 passed / 28 files）
+  - `npm run build`
+  - `npm run build:win`
+  - 联机冒烟：真实 Codex CLI 0.134 用 `--sandbox danger-full-access -C .` 可在 `C:\Users\Admin\Desktop\测试` 执行 PowerShell 并定位 `D:\AgentHub开发版本`。
+- 本机安装验证：已安装并启动 `AgentHub 0.5.3`（`C:\Users\Admin\AppData\Local\Programs\AgentHub\AgentHub.exe`）。
+
 ### 下一个候选版本
 
-- 默认候选：`0.5.3`（小修复/小增强）；下一个较大功能版本 `0.6.0`。
+- 默认候选：`0.5.4`（小修复/小增强）；下一个较大功能版本 `0.6.0`。
 - 适用范围：ACP 增强（terminal handler / server 复用）、session/prompt 联机验证、后续 agentic / 工作区 / 技能流程修复与小增强。
 - 登记要求：完成后补充改动摘要、验证命令、提交哈希或发布 tag。

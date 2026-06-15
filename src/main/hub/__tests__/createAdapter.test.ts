@@ -28,6 +28,8 @@ describe("createAdapter", () => {
     expect(a.mode).toBe("oneshot")
     expect((a as any).execArgs).toContain("exec")
     expect((a as any).execArgs).toContain("--json")
+    expect((a as any).execArgs).toContain("danger-full-access")
+    expect((a as any).execArgs).toEqual(expect.arrayContaining(["-C", "."]))
     expect((a as any).activityParser).toBeTypeOf("function")
   })
   it("returns ClaudeAdapter (oneshot --print) for stdio-plain claude", () => {

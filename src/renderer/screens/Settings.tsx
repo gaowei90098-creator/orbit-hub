@@ -408,7 +408,7 @@ function RoutingTab({ providers, bindings, onSetBinding, onTab }: {
 
 /* 一键开启 agentic：把"检测到本机 CLI 但仍走 HTTP"的 agent 翻成 stdio-plain 直连，
    binary 留空(auto 用首选安装)、args 留空(用主进程 adapter 的 agentic 默认参数：
-   codex `exec --json --sandbox workspace-write …` / claude `--print --permission-mode acceptEdits`)，
+   codex `exec --json --sandbox danger-full-access …` / claude `--print --permission-mode acceptEdits`)，
    从"会描述行动"升级到"真在工作区读写文件、跑命令"，过程经 Phase 0 步骤卡呈现。 */
 function AgenticEnableBanner({ bindings, located, onSetBinding, onTab }: {
   bindings: BindingDef[]
@@ -730,8 +730,8 @@ function WorkspacesTab() {
               </button>
             </div>
             <div className="ah-hint" style={{ marginTop: 6 }}>
-              {tr('Codex 会以 workspace-write 沙箱运行（允许写当前工作区，但不碰外部）；Claude Code 会以 acceptEdits 模式运行（自动接受文件编辑）。',
-                  'Codex runs in workspace-write sandbox (writes to this dir only); Claude Code runs in acceptEdits (auto-accepts edits).')}
+              {tr('Codex 会以 danger-full-access 非交互模式运行，并把当前工作区作为 -C 根目录；Claude Code 会以 acceptEdits 模式运行（自动接受文件编辑）。',
+                  'Codex runs non-interactively with danger-full-access and uses the selected workspace as -C root; Claude Code runs in acceptEdits (auto-accepts edits).')}
             </div>
           </div>
           {err && <div style={{ fontSize: 12, color: 'var(--st-error)' }}>{err}</div>}
