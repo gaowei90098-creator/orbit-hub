@@ -30,10 +30,17 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
   /** oneshot 参数；可被路由绑定的 args 覆盖 */
   execArgs: string[]
 
+  /** 活动解析器（如 claude stream-json）。set 则按行缓冲 stdout、逐行解析为活动步骤/最终内容；
+      null（默认）= 原样把 stdout 透传给 onOutput，行为与历史完全一致（零回归）。 */
+  activityParser: ((line: string) => { steps?: any[]; content?: string } | null) | null = null
+  /** 解析出的活动步骤回调（dispatcher 透传成 {kind:'activity'} 流事件） */
+  onActivity: ((step: any) => void) | null = null
+
   protected proc: ChildProcess | null = null
   private errChunks: Buffer[] = []
   private errBytes = 0
   private outDecoder: TextDecoder | null = null
+  private lineBuf = ''
 
   constructor(id: string, name: string, defaultBinary: string, defaultArgs: string[]) {
     super()
@@ -69,6 +76,7 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
     this.buffer = ''
     this.errChunks = []
     this.errBytes = 0
+    this.lineBuf = ''
     this.outDecoder = new TextDecoder('utf-8')
     const viaArg = this.execArgs.some(a => a.includes('{prompt}'))
     const needsCommandShell = process.platform === 'win32' && !/\.exe$/i.test(this.binary)
@@ -115,7 +123,8 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
       const text = this.outDecoder ? this.outDecoder.decode(d, { stream: true }) : d.toString()
       if (!text) return
       this.buffer += text
-      this.handleOutput(text)
+      if (this.activityParser) this.handleActivityChunk(text)
+      else this.handleOutput(text)
     })
     this.proc.stderr?.on('data', (d: Buffer) => {
       this.errChunks.push(d)
@@ -130,6 +139,11 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
       this.handleError(e)
     })
     this.proc.on('exit', (code) => {
+      // 活动模式：进程退出前刷掉最后一行（结果行常无尾随换行）
+      if (this.activityParser && this.lineBuf.trim()) {
+        this.consumeActivityLine(this.lineBuf)
+        this.lineBuf = ''
+      }
       const failed = code !== 0 && code !== null
       this.proc = null
       this.status = 'idle'
@@ -145,6 +159,34 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
     } catch (e: any) {
       this.handleError(e)
     }
+  }
+
+  /** 活动模式：按行缓冲 stdout，逐完整行交给 activityParser。 */
+  private handleActivityChunk(text: string): void {
+    this.lineBuf += text
+    let nl: number
+    while ((nl = this.lineBuf.indexOf('\n')) >= 0) {
+      const line = this.lineBuf.slice(0, nl)
+      this.lineBuf = this.lineBuf.slice(nl + 1)
+      this.consumeActivityLine(line)
+    }
+  }
+
+  /** 单行 → 活动步骤（onActivity）/ 最终内容（handleOutput）。解析器抛错则回退把原行当内容透传。 */
+  private consumeActivityLine(line: string): void {
+    const parser = this.activityParser
+    if (!parser) return
+    let parsed: { steps?: any[]; content?: string } | null
+    try {
+      parsed = parser(line)
+    } catch {
+      parsed = { content: line.endsWith('\n') ? line : line + '\n' }
+    }
+    if (!parsed) return
+    if (parsed.steps) {
+      for (const s of parsed.steps) { if (this.onActivity) this.onActivity(s) }
+    }
+    if (parsed.content) this.handleOutput(parsed.content)
   }
 
   /** stderr 解码：先 UTF-8，出现替换符则按 GBK 重解（Windows 中文 cmd 错误信息） */

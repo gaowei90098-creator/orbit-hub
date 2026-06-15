@@ -106,7 +106,7 @@ export interface BindingDef {
     codex/claude 为 agentic 默认（在工作区读写文件、跑命令），留空即用这套参数。 */
 export const DEFAULT_STDIO_ARGS: Record<string, string> = {
   codex: 'exec --sandbox workspace-write --skip-git-repo-check -',
-  claude: '--print --permission-mode acceptEdits',
+  claude: '--print --verbose --output-format stream-json --permission-mode acceptEdits',
   hermes: '（无参数，prompt 走 stdin）',
   openclaw: 'crestodian --message {prompt}',
   marvis: '（Marvis 暂无官方 CLI，建议用 HTTP 绑定）',

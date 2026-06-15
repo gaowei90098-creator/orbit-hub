@@ -39,6 +39,8 @@ export type StreamEvent =
   | { kind: "delta"; taskId: string; agentId: string; providerId: string; modelId: string; channel: "content" | "thinking"; text: string }
   | { kind: "done"; taskId: string; agentId: string; providerId: string; modelId: string; content: string; thinking?: string; summary?: { level?: string; budget?: number; preview?: string }; durationMs: number; usage?: any }
   | { kind: "error"; taskId: string; agentId: string; providerId?: string; modelId?: string; error: string }
+  // agentic 活动步骤（stdio stream-json / 未来 HTTP act-observe 解析所得）；UI 按 step.id upsert
+  | { kind: "activity"; taskId: string; agentId: string; step: { id: string; kind?: string; tool?: string; label?: string; detail?: string; output?: string; status: string } }
   // 编排模式（Orchestrator）
   | { kind: "orchestrate:plan"; taskId: string; leadAgentId?: string; subtasks: Array<{ id: string; title: string; detail?: string; agentId?: string }> }
   | { kind: "orchestrate:subtask"; taskId: string; subtaskId: string; agentId?: string; status: "pending" | "running" | "done" | "error"; content?: string }
@@ -386,9 +388,11 @@ export class Dispatcher extends EventEmitter {
     const self = this
     let settled = false
     let spawnedOnce = false
+    let sawActivity = false
     const cleanup = () => {
       adapter.onOutput = null
       adapter.onError = null
+      adapter.onActivity = null
     }
     try {
       let agentPrompt = this.promptForAgent(agentId, text)
@@ -417,8 +421,16 @@ export class Dispatcher extends EventEmitter {
           cleanup()
           rejectP(err)
         }
+        // agentic 活动步骤：透传成 stream 事件；同时刷新"有输出"时间戳，防止长任务被 60s 静默检测误杀
+        const onAct = (step: any) => {
+          if (settled || !step) return
+          lastOutputAt = Date.now()
+          sawActivity = true
+          self.emit("stream", { kind: "activity", taskId: task.id, agentId, step })
+        }
         adapter.onOutput = onChunk
         adapter.onError = onErr
+        adapter.onActivity = onAct
         adapter.start().then(() => {
           try {
             adapter.send(agentPrompt, { cwd })
@@ -430,7 +442,7 @@ export class Dispatcher extends EventEmitter {
           const proc = adapter[procField]
           const idle = Date.now() - lastOutputAt
           const elapsed = Date.now() - start
-          const hasOutput = content.length > 0
+          const hasOutput = content.length > 0 || sawActivity
           const procGone = spawnedOnce && !proc                                   // 进程退出 = oneshot 正常完成
           const quietDone = hasOutput && idle > IDLE_AFTER_OUTPUT_MS               // 有输出后久静默 → 兜底完成
           const stalledNoOutput = spawnedOnce && !hasOutput && elapsed > STARTUP_SILENCE_MS // 始终无输出 → 卡死
