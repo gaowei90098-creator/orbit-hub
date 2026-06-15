@@ -1,7 +1,12 @@
 ﻿node_modules/
 out/
 dist/
-build/
+build/*
+!build/icon.ico
+!build/icon.png
+!build/icon-linux.png
+!build/installerSidebar.bmp
+!build/installer.nsh
 .vite/
 .DS_Store
 Thumbs.db

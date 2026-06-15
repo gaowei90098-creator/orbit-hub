@@ -1,5 +1,6 @@
-﻿import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, dialog } from "electron"
+import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, dialog } from "electron"
 import { join, resolve } from "path"
+import { existsSync } from "fs"
 import { HubServer } from "./hub/server"
 import { AgentRegistry } from "./hub/registry"
 import { EventPipeline } from "./hub/pipeline"
@@ -32,13 +33,25 @@ function memory(): MemoryLibrary {
   return memoryLibrary
 }
 
+function appAssetPath(fileName: string): string {
+  const packaged = join(process.resourcesPath, "build", fileName)
+  if (app.isPackaged && existsSync(packaged)) return packaged
+
+  const fromAppPath = join(app.getAppPath(), "build", fileName)
+  if (existsSync(fromAppPath)) return fromAppPath
+
+  return join(process.cwd(), "build", fileName)
+}
+
 function createWindow(): void {
+  const iconPath = appAssetPath(process.platform === "win32" ? "icon.ico" : "icon.png")
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 960,
     minHeight: 640,
     title: "AgentHub",
+    icon: iconPath,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -66,7 +79,7 @@ function createWindow(): void {
 }
 
 function createTray(): void {
-  const trayIcon = nativeImage.createEmpty()
+  const trayIcon = nativeImage.createFromPath(appAssetPath("icon.png"))
   tray = new Tray(trayIcon)
   const contextMenu = Menu.buildFromTemplate([
     { label: "Open AgentHub", click: () => mainWindow?.show() },
@@ -340,6 +353,7 @@ const initialDeepLink = process.argv.find(a => a.startsWith('agenthub://'))
 if (initialDeepLink) pendingDeepLink = parseDeepLink(initialDeepLink)
 
 app.whenReady().then(async () => {
+  if (process.platform === "win32") app.setAppUserModelId("dev.agenthub.desktop")
   providerMgr.unlockSecrets()   // app ready 后解密落盘的 apiKey 到内存（safeStorage 此时可用）
   createWindow()
   createTray()
