@@ -5,8 +5,10 @@ import { KeywordRouter } from "./router"
 import { getProviderManager } from "../providers/manager"
 import { buildProviderClient } from "../providers/client"
 import { agentSystemPrompt } from "./agents"
+import { buildAgentRuntimeSystemPrompt, buildAgentTaskPrompt, RuntimeMemoryEntry } from "./agent-runtime"
 import { decompositionPrompt, parsePlan, synthesisPrompt, verifyPrompt, parseVerdict, retryPrompt, ORCHESTRATOR_LEAD_SYSTEM } from "./orchestrator"
 import { ChatCompletionMessage, ThinkingConfig } from "../providers/types"
+import { getWorkspaceManager } from "./workspace"
 
 export type DispatchMode = "auto" | "broadcast" | "chain" | "orchestrate"
 
@@ -28,6 +30,8 @@ export interface DispatchTask {
 export interface DispatchOptions {
   thinking?: ThinkingConfig
   systemPrompt?: string
+  /** 工作区 ID：传 null = 不绑定（沿用 home）。stdIO 派发按此取 cwd。 */
+  workspaceId?: string | null
 }
 
 export type StreamEvent =
@@ -49,7 +53,8 @@ export class Dispatcher extends EventEmitter {
 
   constructor(
     private registry: AgentRegistry,
-    private pipeline: EventPipeline
+    private pipeline: EventPipeline,
+    private memoryProvider: () => RuntimeMemoryEntry[] = () => []
   ) {
     super()
   }
@@ -255,7 +260,7 @@ export class Dispatcher extends EventEmitter {
     this.registry.setStatus(agentId, "busy")
     const messages: ChatCompletionMessage[] = [{ role: "user", content: text }]
     const client = buildProviderClient(resolved)
-    const systemPrompt = opts.systemPrompt || this.systemPromptFor(agentId)
+    const systemPrompt = this.systemPromptFor(agentId, opts.systemPrompt, text)
     const thinking = opts.thinking || resolved.thinking
 
     let content = ""
@@ -321,8 +326,21 @@ export class Dispatcher extends EventEmitter {
     }
   }
 
-  private systemPromptFor(agentId: string): string {
-    return agentSystemPrompt(agentId)
+  private systemPromptFor(agentId: string, overridePrompt?: string, taskText = ""): string {
+    if (overridePrompt) return overridePrompt
+    return buildAgentRuntimeSystemPrompt(agentId, agentSystemPrompt(agentId), this.memoryContext(), taskText)
+  }
+
+  private promptForAgent(agentId: string, text: string): string {
+    return buildAgentTaskPrompt(agentId, text, this.memoryContext())
+  }
+
+  private memoryContext(): RuntimeMemoryEntry[] {
+    try {
+      return this.memoryProvider() || []
+    } catch {
+      return []
+    }
   }
 
   cancel(taskId: string): boolean {
@@ -349,7 +367,7 @@ export class Dispatcher extends EventEmitter {
    * interactive 适配器保留输出静默判定; 任务被取消时 kill 子进程.
    * 注意: stdio 不依赖 HTTP provider, resolved 可为 null.
    */
-  private async sendToAgentStdio(task: DispatchTask, agentId: string, text: string, _opts: DispatchOptions, resolved: any, adapter: any, binding?: any): Promise<{ content: string; error?: string }> {
+  private async sendToAgentStdio(task: DispatchTask, agentId: string, text: string, opts: DispatchOptions, resolved: any, adapter: any, binding?: any): Promise<{ content: string; error?: string }> {
     this.registry.setStatus(agentId, "busy")
     let content = ""
     // stdio 直连本地 CLI：用绑定自身的 provider/model 做标注（而非 HTTP 回退结果，
@@ -373,7 +391,18 @@ export class Dispatcher extends EventEmitter {
       adapter.onError = null
     }
     try {
-      await this.pipeline.process(text, agentId)
+      let agentPrompt = this.promptForAgent(agentId, text)
+      // 工作区 → cwd：未指定/不存在 → 降级 home（不报错），并在 prompt 顶部打提示
+      // 让 agent 知道它在 home 而非项目里，避免静默"在错地方改文件"。
+      let cwd: string | null = null
+      const wsId = opts.workspaceId ?? null
+      if (wsId) {
+        const ws = getWorkspaceManager().getById(wsId)
+        if (ws?.rootPath) cwd = ws.rootPath
+        else agentPrompt = '[AgentHub 提示] 指定的工作区不存在或已被删除；本次派发将在 home 目录运行（agent 看不到项目文件）。\n\n' + agentPrompt
+      }
+      // pipeline 看到的是最终 prompt（包含工作区提示）
+      await this.pipeline.process(agentPrompt, agentId)
       await new Promise<void>((resolveP, rejectP) => {
         let lastOutputAt = Date.now()
         const onChunk = (chunk: string) => {
@@ -392,7 +421,7 @@ export class Dispatcher extends EventEmitter {
         adapter.onError = onErr
         adapter.start().then(() => {
           try {
-            adapter.send(text)
+            adapter.send(agentPrompt, { cwd })
             spawnedOnce = true
           } catch (e) { onErr(e as Error) }
         }).catch(onErr)

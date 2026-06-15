@@ -39,7 +39,10 @@ export const IC = {
   copy: <><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a1 1 0 0 1 1-1h10"></path></>,
   broadcast: <><circle cx="12" cy="12" r="2.2"></circle><path d="M7.5 7.5a6.4 6.4 0 0 0 0 9M16.5 7.5a6.4 6.4 0 0 1 0 9M4.6 4.6a10.5 10.5 0 0 0 0 14.8M19.4 4.6a10.5 10.5 0 0 1 0 14.8"></path></>,
   min: <><path d="M5 12h14"></path></>,
-  max: <><rect x="5.5" y="5.5" width="13" height="13" rx="2"></rect></>
+  max: <><rect x="5.5" y="5.5" width="13" height="13" rx="2"></rect></>,
+  folder: <><path d="M4 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path></>,
+  pencil: <><path d="M4 20h4l10-10-4-4L4 16z"></path><path d="M14 6l4 4"></path></>,
+  trash: <><path d="M5 7h14"></path><path d="M9 7V5a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 5v2"></path><path d="M6.5 7l1 12.2A1.5 1.5 0 0 0 9 20.7h6a1.5 1.5 0 0 0 1.5-1.5L17.5 7"></path><path d="M10 11v6M14 11v6"></path></>
 }
 
 /* ---------- Agent 徽标（官方图标贴片） ---------- */

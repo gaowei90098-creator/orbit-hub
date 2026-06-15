@@ -15,7 +15,7 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
   setActiveAgent: (id: string | null) => void
   messages: ChatMessage[]
   streaming: boolean
-  onSend: (text: string, mode: DispatchMode, targetAgent: string | null) => void
+  onSend: (text: string, mode: DispatchMode, targetAgent: string | null, workspaceId?: string | null) => void
   onCancel: () => void
   connectionSummary: ConnectionSummary
   openSetup: (tab?: SetupTab) => void
@@ -23,7 +23,33 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
   const [mode, setMode] = useState<DispatchMode>('auto')
   const [input, setInput] = useState('')
   const [routeHint, setRouteHint] = useState<string | null>(null)
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+  const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string; rootPath: string }>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // 启动时拉一次工作区列表 + 活动工作区；用户后续改设置时通过 IPC 事件可再次刷新（这里仅首加载）
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const list = await (window.electronAPI as any)?.workspaces?.list?.()
+        if (alive && Array.isArray(list)) setWorkspaces(list)
+        const active = await (window.electronAPI as any)?.workspaces?.getActive?.()
+        if (!alive) return
+        if (typeof active === 'string' && active) {
+          // 拿到的 active 若在列表里才设；否则视为空（被外部删了）
+          setWorkspaceId(Array.isArray(list) && list.some((w: any) => w.id === active) ? active : null)
+        }
+      } catch { /* 容忍：业务未就绪时为空数组 */ }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  // Chat 顶部选了 workspace 后回写为活动（持久化到主进程 store）
+  const pickWorkspace = async (next: string | null) => {
+    setWorkspaceId(next)
+    try { await (window.electronAPI as any)?.workspaces?.setActive?.(next) } catch { /* noop */ }
+  }
 
   useEffect(() => {
     const el = scrollRef.current
@@ -69,7 +95,7 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
     const text = input.trim()
     if (!text || streaming || blocked) return
     setInput('')
-    onSend(text, activeAgent ? 'auto' : mode, activeAgent)
+    onSend(text, activeAgent ? 'auto' : mode, activeAgent, workspaceId)
   }
 
   return (
@@ -83,6 +109,9 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
         targetItem={targetItem}
         selectableAgentIds={selectableAgentIds}
         openSetup={openSetup}
+        workspaceId={workspaceId}
+        workspaces={workspaces}
+        pickWorkspace={pickWorkspace}
       />
 
       <div ref={scrollRef} className="ah-chat-list">
@@ -129,15 +158,18 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
   )
 }
 
-function ChatToolbar({ activeAgent, setActiveAgent, mode, setMode, routeHint, targetItem, selectableAgentIds, openSetup }: {
+function ChatToolbar({ activeAgent, setActiveAgent, mode, setMode, routeHint, targetItem, selectableAgentIds, openSetup, workspaceId, workspaces, pickWorkspace }: {
   activeAgent: string | null
   setActiveAgent: (id: string | null) => void
   mode: DispatchMode
   setMode: (mode: DispatchMode) => void
   routeHint: string | null
-  targetItem: ConnectionSummary['items'][number] | null
+  targetItem: ConnectionSummary['items'][number] | null | undefined
   selectableAgentIds: string[]
   openSetup: (tab?: SetupTab) => void
+  workspaceId: string | null
+  workspaces: Array<{ id: string; name: string; rootPath: string }>
+  pickWorkspace: (id: string | null) => void
 }) {
   return (
     <div className="glass" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', flexWrap: 'wrap' }}>
@@ -167,6 +199,26 @@ function ChatToolbar({ activeAgent, setActiveAgent, mode, setMode, routeHint, ta
           {tr('暂无已配置的 Agent', 'No configured agents yet')}
           <button className="ah-btn sm" onClick={() => openSetup('routing')}>{tr('去设置', 'Set up')}</button>
         </span>
+      )}
+      <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }}></div>
+      {/* 工作区选择器：让 agent 知道当前对话对应的项目（cwd） */}
+      <span className="ah-label">{tr('工作区：', 'Workspace:')}</span>
+      <select className="ah-select" style={{ minWidth: 140, maxWidth: 220, padding: '4px 8px' }}
+        value={workspaceId ?? '__auto__'}
+        onChange={e => pickWorkspace(e.target.value === '__auto__' ? null : e.target.value)}
+        title={tr('选择工作目录，agent 将在此目录下工作', 'Pick a workspace so the agent runs in your project directory')}>
+        <option value="__auto__">{tr('自动（沿用上次）', 'Auto (use last)')}</option>
+        {workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+      </select>
+      {workspaceId && (() => {
+        const w = workspaces.find(x => x.id === workspaceId)
+        return w ? <span className="ah-hint" style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.rootPath}>{w.rootPath}</span> : null
+      })()}
+      {!workspaceId && workspaces.length > 0 && (
+        <span className="ah-hint">{tr('agent 将在 home 目录运行（无项目上下文）', 'agent runs in your home dir (no project context)')}</span>
+      )}
+      {workspaces.length === 0 && (
+        <button className="ah-btn sm" onClick={() => openSetup('workspaces')}>{tr('新建工作区', 'New workspace')}</button>
       )}
       <div style={{ flex: 1 }}></div>
       {activeAgent && <span className="ah-hint">{tr(`仅派发给 ${AGENT_META[activeAgent].name}`, `Dispatch to ${AGENT_META[activeAgent].name} only`)}</span>}

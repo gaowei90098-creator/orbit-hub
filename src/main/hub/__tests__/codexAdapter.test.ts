@@ -8,6 +8,34 @@ const MOCK_BIN = process.platform === "win32"
  : path.join(__dirname, "mock-codex.js")
 
 describe("CodexAdapter end-to-end (mock binary)", () => {
+ it("does not trigger Node shell+args deprecation warnings", async () => {
+ const a = new CodexAdapter()
+ a.binary = MOCK_BIN
+ const warnings: Error[] = []
+ const onWarning = (warning: Error) => warnings.push(warning)
+ process.on("warning", onWarning)
+
+ try {
+ await a.start()
+ a.send("hello from vitest")
+
+ await new Promise<void>((resolve) => {
+ const start = Date.now()
+ const tick = setInterval(() => {
+ if (!(a as any).proc || (a as any).proc.exitCode !== null || Date.now() - start >8000) {
+ clearInterval(tick)
+ resolve()
+ }
+ },50)
+ })
+ } finally {
+ process.off("warning", onWarning)
+ await a.stop()
+ }
+
+ expect(warnings.map(w => (w as any).code)).not.toContain("DEP0190")
+ },15000)
+
  it("spawns binary, sends prompt, captures echoed stdout", async () => {
  const a = new CodexAdapter()
  a.binary = MOCK_BIN

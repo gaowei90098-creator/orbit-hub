@@ -87,7 +87,7 @@ export class AgentRegistry extends EventEmitter {
       try {
         await info.adapter.start()
         info.status = "idle"
-      } catch (e) {
+      } catch {
         info.status = "error"
         info.errorCount++
       }

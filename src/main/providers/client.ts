@@ -12,7 +12,7 @@
  *   - Gemini → generationConfig.thinkingConfig（v1beta）
  */
 
-import { AgentRouteBinding, ChatCompletionChunk, ChatCompletionMessage, ChatCompletionRequest, ChatCompletionResponse, ModelDefinition, ProviderDefinition, ThinkingConfig, ThinkingSummary } from './types'
+import { AgentRouteBinding, ChatCompletionChunk, ChatCompletionMessage, ChatCompletionRequest, ModelDefinition, ProviderDefinition, ThinkingConfig, ThinkingSummary } from './types'
 import { THINKING_BUDGET_TOKENS } from './presets'
 
 export interface StreamCallbacks {

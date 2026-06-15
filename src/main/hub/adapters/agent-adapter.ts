@@ -32,7 +32,7 @@ export abstract class BaseAgentAdapter extends EventEmitter implements AgentAdap
 
  abstract start(): Promise<void>
  abstract stop(): Promise<void>
- abstract send(prompt: string): void
+ abstract send(prompt: string, opts?: { cwd?: string | null }): void
 
  protected handleOutput(chunk: string): void {
  if (this.onOutput) this.onOutput(chunk)

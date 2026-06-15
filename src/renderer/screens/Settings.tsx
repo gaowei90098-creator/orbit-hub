@@ -36,6 +36,7 @@ export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, on
       <SectionTitle right={
         <Seg value={tab} onChange={v => setTab(v as SetupTab | 'appearance')} options={[
           { value: 'providers', label: tr('提供商', 'Providers') }, { value: 'routing', label: tr('路由', 'Routing') },
+          { value: 'workspaces', label: tr('工作区', 'Workspaces') },
           { value: 'proxy', label: tr('代理', 'Proxy') }, { value: 'sites', label: tr('Agent 官网', 'Agent sites') },
           { value: 'appearance', label: tr('外观', 'Appearance') }
         ]} />
@@ -44,6 +45,7 @@ export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, on
       {tab === 'providers' && <ProvidersTab providers={providers} onSetEnabled={onSetEnabled} onSetKey={onSetKey} onReload={onReload}
         onUpsert={onUpsertProvider} onDelete={onDeleteProvider} />}
       {tab === 'routing' && <RoutingTab providers={providers} bindings={bindings} onSetBinding={onSetBinding} />}
+      {tab === 'workspaces' && <WorkspacesTab />}
       {tab === 'proxy' && <ProxyTab providers={providers} fallbackChain={fallbackChain} onSetFallback={onSetFallback} />}
       {tab === 'sites' && <AgentSitesTab />}
       {tab === 'appearance' && <AppearanceTab motion={motion} setMotion={setMotion} />}
@@ -536,6 +538,153 @@ function BindingRow({ b, providers, patch, candidates }: {
           title={tr('采样温度：越低越严谨稳定，越高越发散有创意', 'Sampling temperature: lower = steadier, higher = more creative')}
           onChange={e => patch(b.agentId, x => ({ ...x, temperature: parseFloat(e.target.value) }))} />
       </div>
+    </div>
+  )
+}
+
+/* ---------- 工作区 ---------- */
+interface WorkspaceItem {
+  id: string
+  name: string
+  rootPath: string
+  createdAt: number
+  updatedAt: number
+}
+
+function WorkspacesTab() {
+  const [list, setList] = useState<WorkspaceItem[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [editing, setEditing] = useState<{ id: string | null; name: string; rootPath: string; isNew: boolean } | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const refresh = async () => {
+    try {
+      const [l, a] = await Promise.all([
+        window.electronAPI?.workspaces?.list?.() as Promise<WorkspaceItem[] | undefined>,
+        window.electronAPI?.workspaces?.getActive?.() as Promise<string | null | undefined>
+      ])
+      if (Array.isArray(l)) setList(l)
+      setActiveId(typeof a === 'string' ? a : null)
+    } catch (e: any) { setErr(e?.message || '加载失败') }
+  }
+  useEffect(() => { refresh() }, [])
+
+  const startNew = () => { setEditing({ id: null, name: '', rootPath: '', isNew: true }); setErr(null) }
+  const startEdit = (w: WorkspaceItem) => { setEditing({ id: w.id, name: w.name, rootPath: w.rootPath, isNew: false }); setErr(null) }
+  const pickFolder = async () => {
+    try {
+      const p = await (window.electronAPI as any)?.app?.pickFolder?.()
+      if (p && editing) setEditing({ ...editing, rootPath: p })
+    } catch { /* noop */ }
+  }
+  const save = async () => {
+    if (!editing || !editing.name.trim() || !editing.rootPath.trim()) { setErr('名称和路径不能为空'); return }
+    setBusy(true); setErr(null)
+    try {
+      if (editing.isNew) {
+        const ws = await (window.electronAPI as any)?.workspaces?.create?.({ name: editing.name.trim(), rootPath: editing.rootPath.trim() })
+        if (ws?.id) await (window.electronAPI as any)?.workspaces?.setActive?.(ws.id)
+      } else if (editing.id) {
+        await (window.electronAPI as any)?.workspaces?.update?.(editing.id, { name: editing.name.trim(), rootPath: editing.rootPath.trim() })
+      }
+      setEditing(null)
+      await refresh()
+    } catch (e: any) {
+      const code = e?.code
+      setErr(code === 'WORKSPACE_PATH_INVALID' ? '路径不存在或不是目录' : (e?.message || '保存失败'))
+    } finally { setBusy(false) }
+  }
+  const setActive = async (id: string) => {
+    try { await (window.electronAPI as any)?.workspaces?.setActive?.(id); setActiveId(id) } catch (e: any) {
+      setErr(e?.message || '设置当前工作区失败')
+    }
+  }
+  const remove = async (w: WorkspaceItem) => {
+    if (!window.confirm(tr(`删除工作区「${w.name}」？该操作不影响磁盘上的项目文件。`, `Delete workspace "${w.name}"? Files on disk are not affected.`))) return
+    try { await (window.electronAPI as any)?.workspaces?.remove?.(w.id); await refresh() } catch (e: any) {
+      setErr(e?.message || '删除失败')
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 860 }}>
+      <div className="ah-hint" style={{ padding: '0 4px' }}>
+        {tr('工作区 = agent 派发时的工作目录（cwd）与项目上下文。多个 agent 可共享同一工作区；在 Chat 顶部或此处切换，agent 将真正在项目里执行命令、读写文件。',
+            'A workspace is the working directory and project context used when dispatching to an agent. Multiple agents can share the same workspace; switch it from Chat or here, and the agent will actually run commands and edit files in your project.')}
+      </div>
+
+      <Enter className="glass" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700 }}>{tr('新建工作区', 'New workspace')}</div>
+          <div className="ah-hint">{tr('挑一个项目根目录，agent 将从这里开始工作', 'Pick a project root; the agent will work from here')}</div>
+        </div>
+        <button className="ah-btn sm primary" onClick={startNew}><Icon d={IC.plus} size={13} />{tr('新建', 'New')}</button>
+      </Enter>
+
+      {editing && (
+        <Enter className="glass" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, borderColor: 'var(--mint-line)' }}>
+          <div style={{ fontWeight: 700 }}>{editing.isNew ? tr('新建工作区', 'New workspace') : tr('编辑工作区', 'Edit workspace')}</div>
+          <div>
+            <div className="ah-label" style={{ marginBottom: 5 }}>{tr('名称', 'Name')}</div>
+            <input className="ah-input" autoFocus value={editing.name}
+              placeholder={tr('如 我的项目', 'e.g. My project')}
+              onChange={e => setEditing({ ...editing, name: e.target.value })} />
+          </div>
+          <div>
+            <div className="ah-label" style={{ marginBottom: 5 }}>{tr('项目根目录', 'Project root')}</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="ah-input mono" style={{ flex: 1, fontSize: 12 }} value={editing.rootPath}
+                placeholder="D:\Projects\my-app"
+                onChange={e => setEditing({ ...editing, rootPath: e.target.value })} />
+              <button className="ah-btn sm" onClick={pickFolder} type="button">
+                <Icon d={IC.folder} size={13} />{tr('选择文件夹…', 'Browse…')}
+              </button>
+            </div>
+            <div className="ah-hint" style={{ marginTop: 6 }}>
+              {tr('Codex 会以 workspace-write 沙箱运行（允许写当前工作区，但不碰外部）；Claude Code 会以 acceptEdits 模式运行（自动接受文件编辑）。',
+                  'Codex runs in workspace-write sandbox (writes to this dir only); Claude Code runs in acceptEdits (auto-accepts edits).')}
+            </div>
+          </div>
+          {err && <div style={{ fontSize: 12, color: 'var(--st-error)' }}>{err}</div>}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button className="ah-btn sm" disabled={busy} onClick={() => { setEditing(null); setErr(null) }}>{tr('取消', 'Cancel')}</button>
+            <button className="ah-btn sm primary" disabled={busy} onClick={save}><Icon d={IC.check} size={13} />{tr('保存', 'Save')}</button>
+          </div>
+        </Enter>
+      )}
+
+      {list.length === 0 && !editing && (
+        <Enter delay={60} className="glass" style={{ padding: 24, textAlign: 'center', color: 'var(--tx-3)' }}>
+          <Icon d={IC.folder} size={28} sw={1.2} />
+          <div style={{ marginTop: 10, fontSize: 13, fontWeight: 600 }}>{tr('还没有工作区', 'No workspaces yet')}</div>
+          <div className="ah-hint" style={{ marginTop: 4 }}>{tr('新建一个工作区，让 agent 在你的项目里工作', 'Create one so the agent can work in your project')}</div>
+        </Enter>
+      )}
+
+      {list.map((w, i) => (
+        <Enter key={w.id} delay={i * 40} className="glass" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10, flex: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: activeId === w.id ? 'var(--mint-soft)' : 'rgba(255,255,255,0.06)',
+            color: activeId === w.id ? 'var(--mint)' : 'var(--tx-2)'
+          }}>
+            <Icon d={IC.folder} size={16} />
+          </div>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <div style={{ fontWeight: 700 }}>{w.name}{activeId === w.id && <span className="ah-chip mint" style={{ marginLeft: 8, fontSize: 10 }}>{tr('当前', 'Active')}</span>}</div>
+            <div className="ah-hint" style={{ fontFamily: 'var(--font-mono)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.rootPath}>{w.rootPath}</div>
+          </div>
+          {activeId !== w.id && <button className="ah-btn sm" onClick={() => setActive(w.id)}>{tr('设为当前', 'Set active')}</button>}
+          <button className="ah-btn sm" onClick={() => startEdit(w)}><Icon d={IC.pencil} size={13} />{tr('编辑', 'Edit')}</button>
+          <button className="ah-btn sm danger" onClick={() => remove(w)}><Icon d={IC.trash} size={13} />{tr('删除', 'Delete')}</button>
+        </Enter>
+      ))}
+
+      {/* editing 不在时也展示全局错误（setActive/remove 失败） */}
+      {!editing && err && (
+        <div className="glass" style={{ padding: '10px 14px', color: 'var(--st-error)', fontSize: 12 }}>{err}</div>
+      )}
     </div>
   )
 }

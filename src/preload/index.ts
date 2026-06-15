@@ -4,8 +4,8 @@ const api = {
   hub: {
     getStatus: () => ipcRenderer.invoke('hub:status'),
     routePreview: (text: string) => ipcRenderer.invoke('hub:routePreview', text),
-    dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any }) =>
-      ipcRenderer.invoke('hub:dispatch', { text, mode: mode || 'auto', targetAgent, thinking: opts?.thinking }),
+    dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any; workspaceId?: string | null }) =>
+      ipcRenderer.invoke('hub:dispatch', { text, mode: mode || 'auto', targetAgent, thinking: opts?.thinking, workspaceId: opts?.workspaceId ?? null }),
     cancel: (taskId: string) => ipcRenderer.invoke('hub:cancel', taskId),
     onStatus: (callback: (data: any) => void) => {
       const handler = (_event: any, data: any) => callback(data)
@@ -68,13 +68,30 @@ const api = {
     get: (key: string) => ipcRenderer.invoke('store:get', key),
     set: (key: string, value: any) => ipcRenderer.invoke('store:set', key, value)
   },
+  memory: {
+    catalog: () => ipcRenderer.invoke('memory:catalog'),
+    list: (category?: string) => ipcRenderer.invoke('memory:list', category),
+    addEntry: (entry: any) => ipcRenderer.invoke('memory:addEntry', entry),
+    loadState: () => ipcRenderer.invoke('memory:loadState'),
+    saveState: (state: any) => ipcRenderer.invoke('memory:saveState', state)
+  },
   app: {
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
+    pickFolder: () => ipcRenderer.invoke('app:pickFolder'),
     onDeepLink: (callback: (link: { action: string; params: Record<string, string> }) => void) => {
       const handler = (_event: any, link: any) => callback(link)
       ipcRenderer.on('app:deep-link', handler)
       return () => ipcRenderer.removeListener('app:deep-link', handler)
     }
+  },
+  workspaces: {
+    list: () => ipcRenderer.invoke('workspaces:list'),
+    create: (input: { name: string; rootPath: string }) => ipcRenderer.invoke('workspaces:create', input),
+    update: (id: string, patch: { name?: string; rootPath?: string; bootstrapFiles?: string[] }) =>
+      ipcRenderer.invoke('workspaces:update', id, patch),
+    remove: (id: string) => ipcRenderer.invoke('workspaces:remove', id),
+    getActive: () => ipcRenderer.invoke('workspaces:getActive'),
+    setActive: (id: string | null) => ipcRenderer.invoke('workspaces:setActive', id)
   },
   platform: process.platform
 }

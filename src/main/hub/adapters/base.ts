@@ -47,7 +47,7 @@ export class HttpAgentAdapter implements AgentAdapter {
 
   async start(): Promise<void> { this.status = "idle" }
   async stop(): Promise<void> { this.status = "idle" }
-  send(_prompt: string): void { /* real dispatch happens through Dispatcher.dispatch() */ }
+  send(_prompt: string, _opts?: { cwd?: string | null }): void { /* real dispatch happens through Dispatcher.dispatch() */ }
 }
 
 /**

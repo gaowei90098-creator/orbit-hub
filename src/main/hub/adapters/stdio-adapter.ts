@@ -1,14 +1,20 @@
 import { BaseAgentAdapter } from './agent-adapter'
 import { spawn, exec, execSync, ChildProcess } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import { homedir } from 'os'
+
+function quoteForCommandShell(value: string): string {
+  if (/^[A-Za-z0-9_./:\\=@%+-]+$/.test(value)) return value
+  return `"${value.replace(/"/g, '\\"')}"`
+}
 
 /**
  * 通用本地 CLI 直连适配器 — oneshot
  *
  * 每次 send() spawn 一次子进程：
- *   - execArgs 含 "{prompt}" 占位符 → prompt 替换后作为命令行参数传入
+ *   - execArgs 含 “{prompt}” 占位符 → prompt 替换后作为命令行参数传入
  *   - 否则（默认）prompt 写入 stdin 并关闭 —— 免转义，适配大多数 CLI
+ *   - opts.cwd 指定工作目录；不存在/不可访问则降级到 homedir（stderr 输出回退原因）
  * stdout 实时回流为流式输出（流式 UTF-8 解码，避免多字节字符被分块截断），
  * 进程退出即任务完成；stderr 按 UTF-8 → GBK 智能解码（Windows cmd 错误是 GBK）。
  * 登录态/模型/沙箱等继承各 CLI 自己的本机配置。
@@ -52,33 +58,48 @@ export class StdioAgentAdapter extends BaseAgentAdapter {
           { timeout: 2000, encoding: 'utf-8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
       } catch {
         this.status = 'error'
-        throw new Error('未检测到 ' + this.name + ' CLI（PATH 中没有 "' + this.binary + '"）。请先安装该 CLI，或在 设置→路由→StdIO 填写完整二进制路径。')
+        throw new Error('未检测到 ' + this.name + ' CLI（PATH 中没有 “' + this.binary + '”）。请先安装该 CLI，或在 设置→路由→StdIO 填写完整二进制路径。')
       }
     }
     this.status = 'idle'
     this.startCount++
   }
 
-  send(prompt: string): void {
+  send(prompt: string, opts?: { cwd?: string | null }): void {
     this.buffer = ''
     this.errChunks = []
     this.errBytes = 0
     this.outDecoder = new TextDecoder('utf-8')
     const viaArg = this.execArgs.some(a => a.includes('{prompt}'))
-    // .exe 全路径可直接 spawn；.cmd/.bat/裸命令需经 shell
-    const useShell = !/\.exe$/i.test(this.binary)
-    const cmd = useShell && this.binary.includes(' ') ? `"${this.binary}"` : this.binary
+    const needsCommandShell = process.platform === 'win32' && !/\.exe$/i.test(this.binary)
     const args = viaArg
-      ? this.execArgs.map(a => a.replace('{prompt}', useShell
-          ? '"' + prompt.replace(/\r?\n/g, ' ').replace(/"/g, '\\"') + '"'
-          : prompt))
+      ? this.execArgs.map(a => a.replace('{prompt}', prompt.replace(/\r?\n/g, ' ')))
       : this.execArgs
+    const cmd = needsCommandShell ? (process.env.ComSpec || 'cmd.exe') : this.binary
+    const spawnArgs = needsCommandShell
+      ? ['/d', '/s', '/c', [this.binary, ...args].map(quoteForCommandShell).join(' ')]
+      : args
 
-    this.proc = spawn(cmd, args, {
+    // 工作目录解析：opts.cwd 给定 → 预检 → 不存在/不是目录 → 降级 homedir，控制台告警
+    // （不写入 errChunks：那是 CLI 进程的真实 stderr，混入会误导用户）
+    const requested = typeof opts?.cwd === 'string' ? opts.cwd.trim() : ''
+    let cwd = homedir()
+    if (requested) {
+      try {
+        const st = statSync(requested)
+        if (st.isDirectory()) cwd = requested
+        else console.warn('[StdioAgentAdapter] cwd 存在但不是目录，已回退 home:', requested)
+      } catch {
+        console.warn('[StdioAgentAdapter] cwd 不可访问，已回退 home:', requested)
+      }
+    }
+
+    this.proc = spawn(cmd, spawnArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      shell: useShell,
-      cwd: homedir(),
-      // 本地 CLI 以管道方式 spawn（非真实终端）。显式声明“非交互纯文本管道”：
+      shell: false,
+      windowsVerbatimArguments: needsCommandShell,
+      cwd,
+      // 本地 CLI 以管道方式 spawn（非真实终端）。显式声明”非交互纯文本管道”：
       // - TERM=dumb / NO_COLOR：让基于 prompt_toolkit / rich / curses 的 CLI 退化为纯文本，
       //   而不是去查询 Windows 控制台屏幕缓冲区导致 NoConsoleScreenBufferError 崩溃
       //   （Hermes 等 Python TUI 继承到 TERM=xterm-256color 时正是这样崩的），同时避免 ANSI

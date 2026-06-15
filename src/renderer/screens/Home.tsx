@@ -93,7 +93,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
   const tokEn = sessionTokens > 0 ? ` · ${fmtTokens(sessionTokens)} tokens${costZh}` : ''
 
   return (
-    <div data-screen-label="总览" style={{ padding: '6px 4px 30px' }}>
+    <div data-screen-label="总览" style={{ padding: '6px 4px 30px', width: '100%', maxWidth: 1540, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.01em' }}>{greeting()}</h1>
@@ -112,7 +112,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
       <FirstRunPanel summary={connectionSummary} openSetup={openSetup} goChat={goChat} />
 
       {/* Agent 卡片网格 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 16, alignItems: 'stretch' }}>
         {AGENT_IDS.map((id, idx) => {
           const meta = AGENT_META[id]
           const a = agents[id] || { status: 'off' as AgentUIStatus }
@@ -123,7 +123,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
           const connection = connectionSummary.items.find(item => item.agentId === id)
           return (
             <Enter key={id} delay={idx * 70} style={{ display: 'flex' }}>
-              <div className="glass hover-glow" style={{ flex: 1, padding: 18, display: 'flex', flexDirection: 'column', gap: 13, transition: 'border-color 0.2s, transform 0.2s', cursor: 'default' }}
+              <div data-agent-card className="glass hover-glow" style={{ flex: 1, padding: 18, display: 'flex', flexDirection: 'column', gap: 13, transition: 'border-color 0.2s, transform 0.2s', cursor: 'default', minWidth: 0 }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--glass-border-strong)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.transform = 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 13, height: 48 }}>
@@ -157,12 +157,12 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
                   </div>
                 )}
 
-                <div style={{ display: 'flex', gap: 8, marginTop: 'auto' }}>
-                  <button className="ah-btn sm" style={{ flex: 1 }} onClick={() => goChat(id)}>
+                <div style={{ display: 'flex', gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
+                  <button className="ah-btn sm" style={{ flex: '1 1 128px' }} onClick={() => goChat(id)}>
                     <Icon d={IC.send} size={13} /> {tr('派发任务', 'Dispatch')}
                   </button>
                   {connection?.action && (
-                    <button className="ah-btn sm primary" onClick={() => openSetup(connection.action!.tab)}>
+                    <button className="ah-btn sm primary" style={{ flex: '1 1 128px' }} onClick={() => openSetup(connection.action!.tab)}>
                       {tr(connection.action.labelZh, connection.action.labelEn)}
                     </button>
                   )}

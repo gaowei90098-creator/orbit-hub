@@ -3,7 +3,7 @@
 interface ElectronAPI {
   hub: {
     getStatus: () => Promise<any>
-    dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any }) => Promise<any>
+    dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any; workspaceId?: string | null }) => Promise<any>
     cancel: (taskId: string) => Promise<boolean>
     onStatus: (callback: (data: any) => void) => () => void
     onStream: (callback: (data: any) => void) => () => void
@@ -53,9 +53,25 @@ interface ElectronAPI {
     get: (key: string) => Promise<any>
     set: (key: string, value: any) => Promise<boolean>
   }
+  memory: {
+    catalog: () => Promise<any>
+    list: (category?: 'conversation' | 'task' | 'skill' | 'file' | 'system') => Promise<any[]>
+    addEntry: (entry: any) => Promise<any>
+    loadState: () => Promise<{ messages?: any[]; tasks?: any[] }>
+    saveState: (state: { messages: any[]; tasks: any[] }) => Promise<any>
+  }
   app: {
     openExternal: (url: string) => Promise<void>
+    pickFolder: () => Promise<string | null>
     onDeepLink: (callback: (link: { action: string; params: Record<string, string> }) => void) => () => void
+  }
+  workspaces: {
+    list: () => Promise<Array<{ id: string; name: string; rootPath: string; createdAt: number; updatedAt: number }>>
+    create: (input: { name: string; rootPath: string }) => Promise<{ id: string; name: string; rootPath: string }>
+    update: (id: string, patch: { name?: string; rootPath?: string; bootstrapFiles?: string[] }) => Promise<any>
+    remove: (id: string) => Promise<boolean>
+    getActive: () => Promise<string | null>
+    setActive: (id: string | null) => Promise<string | null>
   }
   platform: string
 }

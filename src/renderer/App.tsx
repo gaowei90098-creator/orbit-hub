@@ -59,6 +59,7 @@ export default function App() {
   const localTaskId = useRef<Map<string, string>>(new Map()) // 后端 taskId → 本地任务行 id
   const currentMsgId = useRef<string | null>(null)
   const cancelGen = useRef(0)
+  const memoryReady = useRef(false)
   const orchestrateTasks = useRef<Set<string>>(new Set())  // 编排模式任务 id（其内部 agent 事件不渲染气泡）
 
   /* 动效档位 → html[data-motion] */
@@ -66,6 +67,34 @@ export default function App() {
     document.documentElement.dataset.motion = motion
     try { localStorage.setItem('ah-motion', motion) } catch { /* noop */ }
   }, [motion])
+
+  useEffect(() => {
+    let alive = true
+    const memoryApi = window.electronAPI?.memory
+    if (!memoryApi?.loadState) {
+      memoryReady.current = true
+      return () => { alive = false }
+    }
+    memoryApi.loadState()
+      .then(state => {
+        if (!alive) return
+        if (Array.isArray(state?.messages) && state.messages.length > 0) setMessages(state.messages as ChatMessage[])
+        if (Array.isArray(state?.tasks) && state.tasks.length > 0) setTasks(state.tasks as TaskItem[])
+      })
+      .catch(() => {})
+      .finally(() => { if (alive) memoryReady.current = true })
+    return () => { alive = false }
+  }, [])
+
+  useEffect(() => {
+    if (!memoryReady.current) return
+    const memoryApi = window.electronAPI?.memory
+    if (!memoryApi?.saveState) return
+    const timer = setTimeout(() => {
+      memoryApi.saveState({ messages, tasks }).catch(() => {})
+    }, 450)
+    return () => clearTimeout(timer)
+  }, [messages, tasks])
 
   /* ---------- 数据加载 ---------- */
   const loadConfig = useCallback(async () => {
@@ -203,10 +232,10 @@ export default function App() {
   }, [])
 
   /* ---------- 派发 ---------- */
-  const runDispatch = useCallback(async (msgId: string, localId: string, text: string, mode: DispatchMode, targetAgent?: string) => {
+  const runDispatch = useCallback(async (msgId: string, localId: string, text: string, mode: DispatchMode, targetAgent?: string, workspaceId?: string | null) => {
     pendingMsgId.current = msgId
     try {
-      const task = await window.electronAPI.hub.dispatch(text, mode, targetAgent || undefined)
+      const task = await window.electronAPI.hub.dispatch(text, mode, targetAgent || undefined, { workspaceId: workspaceId ?? null })
       if (task?.id) {
         taskToMsg.current.set(task.id, msgId)
         localTaskId.current.set(task.id, localId)
@@ -218,7 +247,7 @@ export default function App() {
     }
   }, [])
 
-  const onSend = useCallback(async (text: string, mode: DispatchMode, targetAgent: string | null) => {
+  const onSend = useCallback(async (text: string, mode: DispatchMode, targetAgent: string | null, workspaceId?: string | null) => {
     if (streaming) return
     // 预算软上限：本次会话用量（按 token 或估算费用口径）达上限时确认后才继续（A2/B1）
     const budget = getBudget()
@@ -271,7 +300,7 @@ export default function App() {
 
     try {
       if (isChain) {
-        const t1 = await runDispatch(msgId, localId, text, 'auto', 'codex')
+        const t1 = await runDispatch(msgId, localId, text, 'auto', 'codex', workspaceId)
         if (cancelGen.current !== gen) return // 已手动停止
         const out = asRecord(t1?.results)['codex'] || ''
         const firstFailed = t1?.status === 'failed' || !out
@@ -279,11 +308,11 @@ export default function App() {
           finalize('failed', t1?.error || asRecord(t1?.errors)['codex'] || '链式第一步无输出')
           return
         }
-        const t2 = await runDispatch(msgId, localId, out, 'auto', 'claude')
+        const t2 = await runDispatch(msgId, localId, out, 'auto', 'claude', workspaceId)
         if (cancelGen.current !== gen) return
         finalize(t2?.status === 'failed' ? 'failed' : 'completed', t2?.error)
       } else {
-        const task = await runDispatch(msgId, localId, text, mode, targetAgent || undefined)
+        const task = await runDispatch(msgId, localId, text, mode, targetAgent || undefined, workspaceId)
         if (cancelGen.current !== gen) return
         const errs = asRecord(task?.errors)
         const status: TaskItem['status'] = task?.status === 'failed' ? 'failed'

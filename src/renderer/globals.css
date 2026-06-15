@@ -239,6 +239,163 @@ body {
 .ah-hint { font-size: 11.5px; color: var(--tx-3); }
 .ah-label { font-size: 12px; color: var(--tx-2); }
 
+/* ---------- Chat timeline ---------- */
+.ah-chat-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 6px 4px 12px;
+}
+
+.ah-chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ah-chat-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+}
+
+.ah-chat-row.user {
+  justify-content: flex-end;
+}
+
+.ah-chat-row.agent {
+  justify-content: flex-start;
+}
+
+.ah-chat-user-stack,
+.ah-chat-agent-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ah-chat-user-stack {
+  align-items: flex-end;
+  max-width: min(72%, 760px);
+}
+
+.ah-chat-user-line {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.ah-chat-agent-stack {
+  align-items: flex-start;
+  max-width: min(72%, 820px);
+}
+
+.ah-chat-bubble {
+  border: 1px solid var(--glass-border);
+  padding: 9px 13px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  min-height: 36px;
+}
+
+.ah-chat-bubble.user {
+  color: #07120d;
+  background: var(--mint);
+  border-color: rgba(95, 212, 154, 0.62);
+  border-radius: 12px 4px 12px 12px;
+  max-width: calc(100% - 44px);
+}
+
+.ah-chat-bubble.agent {
+  color: var(--tx-1);
+  background: rgba(255,255,255,0.075);
+  border-radius: 4px 12px 12px 12px;
+}
+
+.ah-chat-avatar {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--tx-1);
+  background: rgba(255,255,255,0.09);
+  border: 1px solid var(--glass-border);
+}
+
+.ah-chat-avatar.user {
+  color: #07120d;
+  background: var(--mint);
+  border-color: rgba(95, 212, 154, 0.55);
+}
+
+.ah-chat-agent-name {
+  font-size: 11.5px;
+  color: var(--tx-3);
+  padding-left: 2px;
+}
+
+.ah-chat-muted {
+  color: var(--tx-3);
+}
+
+.ah-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tx-2);
+}
+
+.ah-thinking-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ah-thinking-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--tx-2);
+  opacity: 0.35;
+  animation: ah-thinking-dot 1.05s ease-in-out infinite;
+}
+
+.ah-thinking-dots i:nth-child(2) { animation-delay: 0.14s; }
+.ah-thinking-dots i:nth-child(3) { animation-delay: 0.28s; }
+
+@keyframes ah-thinking-dot {
+  0%, 70%, 100% { opacity: 0.32; transform: translateY(0); }
+  35% { opacity: 0.92; transform: translateY(-3px); }
+}
+
+.ah-chat-caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  background: var(--mint);
+  margin-left: 2px;
+  vertical-align: -2px;
+  animation: ah-pulse 0.8s infinite;
+}
+
+@media (max-width: 760px) {
+  .ah-chat-user-stack,
+  .ah-chat-agent-stack {
+    max-width: calc(100% - 52px);
+  }
+}
+
 /* ============================================================
    动效系统 — 三档：off / subtle / rich（html[data-motion]）
    入场用 JS 切换 class + CSS transition（避免动画冻结在首帧）

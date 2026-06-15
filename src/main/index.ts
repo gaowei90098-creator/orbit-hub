@@ -1,10 +1,9 @@
-﻿import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell } from "electron"
+﻿import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, dialog } from "electron"
 import { join, resolve } from "path"
 import { HubServer } from "./hub/server"
 import { AgentRegistry } from "./hub/registry"
 import { EventPipeline } from "./hub/pipeline"
 import { KeywordRouter } from "./hub/router"
-import { Aggregator } from "./hub/aggregator"
 import { Dispatcher, StreamEvent } from "./hub/dispatcher"
 import { store } from "./store"
 import { detectAgentsAsync } from "./hub/agent-detector"
@@ -14,6 +13,8 @@ import { locateAgentCandidates } from "./hub/agent-locator"
 import { takeoverStatus, takeoverApply, takeoverRestore } from "./routing/takeover"
 import { syncRegistryFromBindings } from "./hub/agent-connections"
 import { routePreview } from "./hub/route-preview"
+import { MemoryCategory, MemoryLibrary } from "./memory-library"
+import { getWorkspaceManager, WorkspaceNotFoundError, WorkspacePathInvalidError } from "./hub/workspace"
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -21,10 +22,15 @@ let hub: HubServer | null = null
 const registry = new AgentRegistry()
 const pipeline = new EventPipeline()
 const router = new KeywordRouter()
-const aggregator = new Aggregator()
 const providerMgr = getProviderManager()
 let dispatcher: Dispatcher | null = null
 const proxy = getLocalProxy()
+let memoryLibrary: MemoryLibrary | null = null
+
+function memory(): MemoryLibrary {
+  if (!memoryLibrary) memoryLibrary = new MemoryLibrary(app.getPath("userData"))
+  return memoryLibrary
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -93,16 +99,16 @@ async function initHub(): Promise<void> {
       return event
     }
   })
-  dispatcher = new Dispatcher(registry, pipeline)
+  dispatcher = new Dispatcher(registry, pipeline, () => memory().getCatalog().entries.slice(0, 12))
   hub = new HubServer(registry)
 
-  hub.on("client:message", async ({ clientId, message }) => {
+  hub.on("client:message", async ({ clientId: _clientId, message }) => {
     if (message.type === "chat:message") {
       const task = await dispatcher!.dispatch(
         message.payload.text,
         message.payload.mode || "auto",
         message.payload.targetAgent,
-        { thinking: message.payload.thinking }
+        { thinking: message.payload.thinking, workspaceId: message.payload.workspaceId ?? null }
       )
       hub?.broadcast("chat:response", {
         taskId: task.id,
@@ -161,7 +167,7 @@ ipcMain.handle("hub:status", () => ({
 }))
 
 ipcMain.handle("hub:dispatch", async (_event, payload) => {
-  return dispatcher?.dispatch(payload.text, payload.mode || "auto", payload.targetAgent, { thinking: payload.thinking })
+  return dispatcher?.dispatch(payload.text, payload.mode || "auto", payload.targetAgent, { thinking: payload.thinking, workspaceId: payload.workspaceId ?? null })
 })
 ipcMain.handle("hub:routePreview", async (_event, text: string) => routePreview(text, registry, router))
 
@@ -177,6 +183,11 @@ ipcMain.handle("hub:rescan", async () => {
 ipcMain.handle("hub:cancel", async (_event, taskId: string) => dispatcher?.cancel(taskId))
 ipcMain.handle("store:get", async (_event, key: string) => store.get(key))
 ipcMain.handle("store:set", async (_event, key: string, value: any) => { store.set(key, value); return true })
+ipcMain.handle("memory:catalog", async () => memory().getCatalog())
+ipcMain.handle("memory:list", async (_event, category?: MemoryCategory) => memory().listEntries(category))
+ipcMain.handle("memory:addEntry", async (_event, entry) => memory().upsertEntry(entry))
+ipcMain.handle("memory:loadState", async () => memory().loadRuntimeState())
+ipcMain.handle("memory:saveState", async (_event, state) => memory().saveRuntimeState(state))
 
 ipcMain.handle("providers:get", async () => providerMgr.getConfig())
 ipcMain.handle("providers:upsert", async (_e, p) => { providerMgr.upsertProvider(p); registerAgentsFromBindings(); return providerMgr.getConfig() })
@@ -224,6 +235,34 @@ ipcMain.handle("agents:locate", async () => locateAgentCandidates())
 ipcMain.handle("app:openExternal", async (_e, url: string) => {
   if (/^https?:\/\//.test(url) || /^mailto:/.test(url)) await shell.openExternal(url)
 })
+ipcMain.handle("app:pickFolder", async () => {
+  if (!mainWindow) return null
+  const r = await dialog.showOpenDialog(mainWindow, { properties: ["openDirectory"] })
+  return r.canceled || r.filePaths.length === 0 ? null : r.filePaths[0]
+})
+
+// 工作区：CRUD + 活动态；落盘在 store.workspaces.v1（与 providers.config.v1 同级）
+ipcMain.handle("workspaces:list", () => getWorkspaceManager().list())
+ipcMain.handle("workspaces:create", (_e, input: { name: string; rootPath: string }) => {
+  try { return getWorkspaceManager().create(input) } catch (e) { throw serialiseWsError(e) }
+})
+ipcMain.handle("workspaces:update", (_e, id: string, patch: { name?: string; rootPath?: string; bootstrapFiles?: string[] }) => {
+  try { return getWorkspaceManager().update(id, patch) } catch (e) { throw serialiseWsError(e) }
+})
+ipcMain.handle("workspaces:remove", (_e, id: string) => {
+  try { return getWorkspaceManager().remove(id) } catch (e) { throw serialiseWsError(e) }
+})
+ipcMain.handle("workspaces:getActive", () => getWorkspaceManager().getActive())
+ipcMain.handle("workspaces:setActive", (_e, id: string | null) => {
+  try { getWorkspaceManager().setActive(id); return getWorkspaceManager().getActive() } catch (e) { throw serialiseWsError(e) }
+})
+
+function serialiseWsError(e: unknown): Error {
+  if (e instanceof WorkspaceNotFoundError || e instanceof WorkspacePathInvalidError) {
+    const err = new Error(e.message); (err as any).code = (e as any).code; return err
+  }
+  return e as Error
+}
 ipcMain.handle("win:minimize", () => { mainWindow?.minimize() })
 ipcMain.handle("win:maximizeToggle", () => {
   if (!mainWindow) return false
