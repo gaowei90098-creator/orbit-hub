@@ -272,10 +272,8 @@ export class LocalProxy extends EventEmitter {
       return
     }
     const systemPrompt = flattenAnthropicSystem(parsed.system)
-    const messages: ChatCompletionMessage[] = parsed.messages.map((m: any) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: flattenContent(m.content)
-    }))
+    // 入站工具透传：保留 tool_use / tool_result 结构（转 OpenAI 形状），client 出站再转上游协议。
+    const messages = anthropicMessagesToOpenai(parsed.messages)
     const noStream = parsed.stream !== true
     const primary = this.resolvePrimary(parsed.model, "claude")
     const candidates = this.buildCandidates(primary, primary?.model.id)
@@ -284,8 +282,10 @@ export class LocalProxy extends EventEmitter {
       res.end(JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "no usable provider. Configure API keys in AgentHub → 设置 → 提供商" } }))
       return
     }
+    const tools = anthropicToolsToOpenai(parsed.tools)
+    const toolChoice = anthropicToolChoiceToOpenai(parsed.tool_choice)
     await this.streamWithFailover(res, "anthropic", noStream, parsed.model || candidates[0].model.id, candidates, messages, systemPrompt,
-      { temperature: parsed.temperature, maxTokens: parsed.max_tokens })
+      { temperature: parsed.temperature, maxTokens: parsed.max_tokens, tools, toolChoice })
   }
 
   private async countTokens(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
@@ -430,10 +430,10 @@ export class LocalProxy extends EventEmitter {
           },
           onToolCallDelta: (tc) => {
             arm(IDLE_MS)
-            // 工具流重编码仅用于 OpenAI 入站；anthropic 入站未转发工具，不会到这
-            if (noStream || wire !== "openai") return
+            if (noStream) return
             if (!started) { started = true; emitter.begin() }
-            ;(emitter as OpenAIWire).toolCallDelta(tc)
+            // OpenAI 入站 1:1 透传；Anthropic 入站重编码为 tool_use content block
+            ;(emitter as any).toolCallDelta(tc)
           },
           onDone: (final) => {
             if (settled) return
@@ -442,7 +442,8 @@ export class LocalProxy extends EventEmitter {
               emitter.json(content, thinkingTxt, final.usage, final.finishReason, final.toolCalls)
             } else {
               if (!started) { started = true; emitter.begin() }
-              emitter.done(final.usage, final.finishReason)
+              // toolCalls 兜底：上游 anthropic/gemini 无流式工具增量时，done 阶段补发完整 tool_use 块
+              emitter.done(final.usage, final.finishReason, final.toolCalls)
             }
             resolve()
           },
@@ -541,7 +542,8 @@ class OpenAIWire {
   thinking(d: string): void { this.chunk({ reasoning_content: d }) }
   toolCallDelta(tc: any[]): void { this.chunk({ tool_calls: tc }) }   // 1:1 透传 OpenAI 工具流增量
 
-  done(usage: any, finishReason?: string): void {
+  // 第三参数 _toolCalls 仅为与 AnthropicWire.done 同签名；OpenAI 流式工具已经过 toolCallDelta 发出
+  done(usage: any, finishReason?: string, _toolCalls?: any[]): void {
     this.chunk({}, finishReason || "stop")   // 归一值 stop|length|tool_calls|content_filter 即 OpenAI 格式
     if (usage) {
       this.res.write("data: " + JSON.stringify({
@@ -567,10 +569,12 @@ class OpenAIWire {
 }
 
 /** Anthropic messages SSE（message_start → content_block_* → message_delta → message_stop）/ message JSON */
-class AnthropicWire {
+export class AnthropicWire {
   private id = "msg_agenthub_" + Date.now()
   private blockIndex = -1
-  private blockType: "thinking" | "text" | null = null
+  private blockType: "thinking" | "text" | "tool" | null = null
+  /** OpenAI 工具 index → 已分配的 anthropic content block index（流式去重 + arguments 续写定位） */
+  private toolIdxMap = new Map<number, number>()
   constructor(private res: http.ServerResponse, private model: string) {}
 
   private ev(event: string, data: any): void {
@@ -621,7 +625,43 @@ class AnthropicWire {
     this.ev("content_block_delta", { type: "content_block_delta", index: this.blockIndex, delta: { type: "text_delta", text: d } })
   }
 
-  done(usage: any, finishReason?: string): void {
+  /** 上游 OpenAI 工具流增量 → anthropic tool_use content block（首帧 start + 后续 input_json_delta）。 */
+  toolCallDelta(deltas: any[]): void {
+    for (const d of (deltas || [])) {
+      const oi = typeof d.index === "number" ? d.index : 0
+      if (!this.toolIdxMap.has(oi)) {
+        this.closeBlock()
+        this.blockIndex++
+        this.blockType = "tool"
+        this.toolIdxMap.set(oi, this.blockIndex)
+        this.ev("content_block_start", {
+          type: "content_block_start", index: this.blockIndex,
+          content_block: { type: "tool_use", id: d.id || ("call_" + this.blockIndex), name: d.function?.name || "", input: {} }
+        })
+      }
+      const bi = this.toolIdxMap.get(oi)!
+      const args = d.function?.arguments
+      if (typeof args === "string" && args) {
+        this.ev("content_block_delta", { type: "content_block_delta", index: bi, delta: { type: "input_json_delta", partial_json: args } })
+      }
+    }
+  }
+
+  done(usage: any, finishReason?: string, toolCalls?: any[]): void {
+    // 上游 anthropic/gemini 无流式工具增量：收尾阶段一次性补发完整 tool_use 块（流式已发过则跳过）
+    if (toolCalls && toolCalls.length && this.toolIdxMap.size === 0) {
+      for (const tc of toolCalls) {
+        this.closeBlock()
+        this.blockIndex++
+        this.blockType = "tool"
+        this.ev("content_block_start", {
+          type: "content_block_start", index: this.blockIndex,
+          content_block: { type: "tool_use", id: tc.id || ("call_" + this.blockIndex), name: tc.function?.name || "", input: {} }
+        })
+        const args = typeof tc.function?.arguments === "string" ? tc.function.arguments : JSON.stringify(tc.function?.arguments ?? {})
+        if (args) this.ev("content_block_delta", { type: "content_block_delta", index: this.blockIndex, delta: { type: "input_json_delta", partial_json: args } })
+      }
+    }
     this.closeBlock()
     this.ev("message_delta", {
       type: "message_delta",
@@ -632,11 +672,17 @@ class AnthropicWire {
     this.res.end()
   }
 
-  json(content: string, thinking: string, usage: any, finishReason?: string, _toolCalls?: any[]): void {
+  json(content: string, thinking: string, usage: any, finishReason?: string, toolCalls?: any[]): void {
     this.res.writeHead(200, { "content-type": "application/json" })
     const blocks: any[] = []
     if (thinking) blocks.push({ type: "thinking", thinking })
-    blocks.push({ type: "text", text: content })
+    if (content) blocks.push({ type: "text", text: content })
+    for (const tc of (toolCalls || [])) {
+      let input: any = {}
+      try { input = JSON.parse(tc.function?.arguments || "{}") } catch { input = {} }
+      blocks.push({ type: "tool_use", id: tc.id || ("call_" + blocks.length), name: tc.function?.name || "", input })
+    }
+    if (blocks.length === 0) blocks.push({ type: "text", text: "" })
     this.res.end(JSON.stringify({
       id: this.id, type: "message", role: "assistant", model: this.model,
       content: blocks, stop_reason: anthropicStop(finishReason), stop_sequence: null,
@@ -691,6 +737,74 @@ function flattenContent(content: any): string {
   }
   if (content == null) return ""
   return JSON.stringify(content)
+}
+
+/* ============ Anthropic 入站工具/消息 → OpenAI 中性形状（纯函数，便于单测） ============ */
+
+/** anthropic tools [{name,description,input_schema}] → OpenAI function tools；空/无效 → undefined。 */
+export function anthropicToolsToOpenai(tools: any): any[] | undefined {
+  if (!Array.isArray(tools)) return undefined
+  const out = tools
+    .filter(t => t && typeof t.name === "string" && t.name)
+    .map(t => ({
+      type: "function",
+      function: { name: t.name, description: t.description || "", parameters: t.input_schema || { type: "object", properties: {} } }
+    }))
+  return out.length ? out : undefined
+}
+
+/** anthropic tool_choice {type:auto|any|tool,name?} → OpenAI tool_choice。 */
+export function anthropicToolChoiceToOpenai(tc: any): any | undefined {
+  if (!tc || typeof tc !== "object") return undefined
+  if (tc.type === "auto") return "auto"
+  if (tc.type === "any") return "required"
+  if (tc.type === "tool" && tc.name) return { type: "function", function: { name: tc.name } }
+  return undefined
+}
+
+/** tool_result.content 可为 string 或内容块数组 → 纯文本。 */
+export function anthropicToolResultContent(c: any): string {
+  if (typeof c === "string") return c
+  if (Array.isArray(c)) return c.map(b => (typeof b === "string" ? b : (b?.text ?? ""))).filter(Boolean).join("\n")
+  if (c == null) return ""
+  try { return JSON.stringify(c) } catch { return String(c) }
+}
+
+/** anthropic messages → OpenAI ChatCompletionMessage[]，保留 tool_use(assistant.tool_calls)/tool_result(role:'tool') 结构。 */
+export function anthropicMessagesToOpenai(messages: any[]): ChatCompletionMessage[] {
+  const out: ChatCompletionMessage[] = []
+  for (const m of (messages || [])) {
+    const role = m?.role === "assistant" ? "assistant" : "user"
+    const c = m?.content
+    if (typeof c === "string") { out.push({ role, content: c }); continue }
+    if (!Array.isArray(c)) { out.push({ role, content: flattenContent(c) }); continue }
+
+    if (role === "assistant") {
+      let text = ""
+      const toolCalls: any[] = []
+      for (const b of c) {
+        if (b?.type === "text") text += b.text || ""
+        else if (b?.type === "tool_use") toolCalls.push({ id: b.id, type: "function", function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) } })
+        // thinking / redacted_thinking 块不回灌给上游
+      }
+      const msg: ChatCompletionMessage = { role: "assistant", content: text }
+      if (toolCalls.length) msg.tool_calls = toolCalls
+      out.push(msg)
+    } else {
+      // user turn：tool_result → 独立 role:'tool' 消息（OpenAI 要求紧跟带 tool_calls 的 assistant）；text → user 消息
+      const texts: string[] = []
+      const toolResults: Array<{ id: string; content: string }> = []
+      for (const b of c) {
+        if (b?.type === "tool_result") toolResults.push({ id: b.tool_use_id, content: anthropicToolResultContent(b.content) })
+        else if (b?.type === "text") texts.push(b.text || "")
+        else if (typeof b === "string") texts.push(b)
+      }
+      for (const tr of toolResults) out.push({ role: "tool", tool_call_id: tr.id, content: tr.content })
+      if (texts.length) out.push({ role: "user", content: texts.join("\n") })
+      if (!toolResults.length && !texts.length) out.push({ role: "user", content: flattenContent(c) })
+    }
+  }
+  return out
 }
 
 let _instance: LocalProxy | null = null

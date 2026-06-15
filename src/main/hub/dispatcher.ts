@@ -14,6 +14,7 @@ import { getSkillManager } from "../skills/manager"
 import { buildSkillBlock } from "../skills/inject"
 import { runAgenticHttp } from "../agentic/executor"
 import { isHttpAgenticEnabled } from "../agentic/capabilities"
+import { getApprovalConfig, ApprovalRequest, GuardedTool } from "../agentic/approval"
 // --- /AgentHub skills + native agentic ---
 
 export type DispatchMode = "auto" | "broadcast" | "chain" | "orchestrate"
@@ -22,6 +23,9 @@ export type DispatchMode = "auto" | "broadcast" | "chain" | "orchestrate"
 const STDIO_THINKING_DIRECTIVE =
   "[Reasoning mode] Think through the problem step by step and weigh edge cases before answering. " +
   "Do not print raw chain-of-thought; provide the well-reasoned final result."
+
+/** 'ask' 审批等待上限：超时自动拒绝，避免回环永久挂起（用户也可取消任务）。 */
+const APPROVAL_TIMEOUT_MS = 2 * 60 * 1000
 
 /** 宽松判断 thinking 是否开启（兼容 {enabled} / {level} 等形态）。 */
 function thinkingRequested(th: any): boolean {
@@ -59,6 +63,8 @@ export type StreamEvent =
   | { kind: "error"; taskId: string; agentId: string; providerId?: string; modelId?: string; error: string }
   // agentic 活动步骤（stdio stream-json / 未来 HTTP act-observe 解析所得）；UI 按 step.id upsert
   | { kind: "activity"; taskId: string; agentId: string; step: { id: string; kind?: string; tool?: string; label?: string; detail?: string; output?: string; status: string } }
+  // 写/执行审批请求（'ask' 策略命中时发出）；渲染层弹窗 → agentic:resolveApproval 回传决策
+  | { kind: "approval"; taskId: string; agentId: string; request: { id: string; tool: GuardedTool; toolName: string; label?: string; detail?: string } }
   // 编排模式（Orchestrator）
   | { kind: "orchestrate:plan"; taskId: string; leadAgentId?: string; subtasks: Array<{ id: string; title: string; detail?: string; agentId?: string }> }
   | { kind: "orchestrate:subtask"; taskId: string; subtaskId: string; agentId?: string; status: "pending" | "running" | "done" | "error"; content?: string }
@@ -70,6 +76,9 @@ export type StreamEvent =
 export class Dispatcher extends EventEmitter {
   private tasks: Map<string, DispatchTask> = new Map()
   private taskCounter = 0
+  /** 'ask' 审批待决池：requestId → {resolve,timer}。requestId 以 `appr-<taskId>-` 前缀便于按任务清理。 */
+  private pendingApprovals: Map<string, { resolve: (v: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map()
+  private approvalSeq = 0
 
   constructor(
     private registry: AgentRegistry,
@@ -409,6 +418,9 @@ export class Dispatcher extends EventEmitter {
         resolved,
         thinking,
         root,
+        agentId,
+        policyFor: (tool) => getApprovalConfig().policyFor(agentId, tool),
+        requestApproval: (req) => this.requestApprovalFor(task, agentId, req),
         isCancelled: () => (task as any).status === "cancelled",
         emit: {
           delta: (channel, textDelta) => this.emit("stream", { kind: "delta", taskId: task.id, agentId, providerId, modelId, channel, text: textDelta }),
@@ -446,9 +458,42 @@ export class Dispatcher extends EventEmitter {
     const task = this.tasks.get(taskId)
     if (task && task.status === "running") {
       task.status = "cancelled"
+      // 清理该任务所有待决审批（拒绝放行），避免工具回环在 await 上永久挂起
+      for (const [id, p] of this.pendingApprovals) {
+        if (id.startsWith(`appr-${taskId}-`)) {
+          clearTimeout(p.timer)
+          this.pendingApprovals.delete(id)
+          p.resolve(false)
+        }
+      }
       return true
     }
     return false
+  }
+
+  /** 渲染层审批决策回传：true=放行，false=拒绝。返回是否命中一个待决请求（用于 IPC 反馈）。 */
+  resolveApproval(requestId: string, approved: boolean): boolean {
+    const p = this.pendingApprovals.get(requestId)
+    if (!p) return false
+    clearTimeout(p.timer)
+    this.pendingApprovals.delete(requestId)
+    p.resolve(approved)
+    return true
+  }
+
+  /** 发起一次写/执行审批：emit approval 事件 + 注册待决 Promise（超时自动拒绝）。 */
+  private requestApprovalFor(task: DispatchTask, agentId: string, req: ApprovalRequest): Promise<boolean> {
+    const requestId = `appr-${task.id}-${++this.approvalSeq}`
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.pendingApprovals.delete(requestId)) resolve(false)
+      }, APPROVAL_TIMEOUT_MS)
+      this.pendingApprovals.set(requestId, { resolve, timer })
+      this.emit("stream", {
+        kind: "approval", taskId: task.id, agentId,
+        request: { id: requestId, tool: req.tool, toolName: req.toolName, label: req.label, detail: req.detail }
+      })
+    })
   }
 
   getTask(taskId: string): DispatchTask | undefined {

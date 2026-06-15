@@ -12,6 +12,7 @@
 import { buildProviderClient, ResolvedCall } from '../providers/client'
 import { ChatCompletionMessage, ThinkingConfig } from '../providers/types'
 import { AGENTIC_TOOLS, executeTool, ToolContext } from './tools'
+import { ApprovalPolicy, ApprovalRequest, GuardedTool, guardedToolFor } from './approval'
 
 export interface AgenticActivityStep {
   id: string
@@ -40,6 +41,12 @@ export interface RunAgenticParams {
   isCancelled: () => boolean
   emit: AgenticEmit
   maxRounds?: number
+  /** 派发的 agentId（用于审批请求标注）；缺省 'agent' */
+  agentId?: string
+  /** 受管工具（write/exec）策略查询；缺省一律 'allow'（零回归，与 0.3.0 行为一致） */
+  policyFor?: (tool: GuardedTool) => ApprovalPolicy
+  /** 'ask' 策略时请求用户逐次审批；返回 true=放行。缺省视为拒绝（无 UI 可弹时不放行写/执行）。 */
+  requestApproval?: (req: ApprovalRequest) => Promise<boolean>
 }
 
 const DEFAULT_MAX_ROUNDS = 8
@@ -104,6 +111,34 @@ export async function runAgenticHttp(p: RunAgenticParams): Promise<{ content: st
         const stepId = 'tool-' + (++stepSeq)
         const label = labelFor(name, parsed)
         const detail = summarizeArgs(name, parsed)
+
+        // 写/执行审批门禁：只读工具（fs_read/fs_list）guarded=null，不门禁。
+        // deny/ask-denied 也要回灌一条 role:'tool' 结果，否则下一轮请求缺 tool_call 应答会 400。
+        const guarded = guardedToolFor(name)
+        if (guarded) {
+          const policy = p.policyFor ? p.policyFor(guarded) : 'allow'
+          if (policy === 'deny') {
+            const out = `Rejected by approval policy: '${guarded}' is denied for this agent.`
+            p.emit.activity({ id: stepId, kind: 'tool', tool: name, label, detail, output: out, status: 'error' })
+            messages.push({ role: 'tool', tool_call_id: tc.id, content: out })
+            continue
+          }
+          if (policy === 'ask') {
+            // 先发 awaiting 态供步骤卡标注「等待审批」，再 await 用户决策
+            p.emit.activity({ id: stepId, kind: 'tool', tool: name, label, detail, status: 'awaiting' })
+            const approved = p.requestApproval
+              ? await p.requestApproval({ stepId, agentId: p.agentId || 'agent', tool: guarded, toolName: name, label, detail })
+              : false
+            if (p.isCancelled()) break
+            if (!approved) {
+              const out = 'Rejected by user (approval denied).'
+              p.emit.activity({ id: stepId, kind: 'tool', tool: name, label, detail, output: out, status: 'error' })
+              messages.push({ role: 'tool', tool_call_id: tc.id, content: out })
+              continue
+            }
+          }
+        }
+
         p.emit.activity({ id: stepId, kind: 'tool', tool: name, label, detail, status: 'running' })
         const result = await executeTool(name, parsed, ctx)
         p.emit.activity({ id: stepId, kind: 'tool', tool: name, label, detail, output: result.output, status: result.ok ? 'done' : 'error' })

@@ -21,6 +21,7 @@ import { getSkillManager } from "./skills/manager"
 import { BUILTIN_SKILLS } from "./skills/types"
 import { getCapabilityMatrix } from "./agentic/capabilities"
 import { getAgenticConfig } from "./agentic/config"
+import { getApprovalConfig, GuardedTool, ApprovalPolicy } from "./agentic/approval"
 // --- /AgentHub skills + native agentic ---
 
 let mainWindow: BrowserWindow | null = null
@@ -297,6 +298,11 @@ ipcMain.handle("agentic:getEnabled", () => getAgenticConfig().getEnabled())
 ipcMain.handle("agentic:setEnabled", (_e, agentId: string, on: boolean) => getAgenticConfig().setEnabled(agentId, on))
 ipcMain.handle("agentic:getMode", () => getAgenticConfig().getMode())
 ipcMain.handle("agentic:setMode", (_e, mode: 'all' | 'selected') => getAgenticConfig().setMode(mode))
+// 写/执行审批门禁：策略读写 + 运行时决策回传
+ipcMain.handle("agentic:getApprovalConfig", () => getApprovalConfig().getConfig())
+ipcMain.handle("agentic:setApprovalDefault", (_e, tool: GuardedTool, policy: ApprovalPolicy) => getApprovalConfig().setDefault(tool, policy))
+ipcMain.handle("agentic:setApprovalOverride", (_e, agentId: string, tool: GuardedTool, policy: ApprovalPolicy | null) => getApprovalConfig().setOverride(agentId, tool, policy))
+ipcMain.handle("agentic:resolveApproval", (_e, requestId: string, approved: boolean) => dispatcher?.resolveApproval(requestId, approved) ?? false)
 // --- /AgentHub skills + native agentic ---
 
 ipcMain.handle("win:minimize", () => { mainWindow?.minimize() })

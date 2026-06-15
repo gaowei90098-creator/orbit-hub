@@ -5,9 +5,16 @@
    ============================================================ */
 
 import React, { useState, useEffect, useCallback } from 'react'
-import { Icon, IC, Enter, AgentMark, Switch } from '../glass/ui'
+import { Icon, IC, Enter, AgentMark, Switch, Seg } from '../glass/ui'
 import { AGENT_META } from '../glass/meta'
 import { tr } from '../glass/i18n'
+
+type Pol = 'allow' | 'ask' | 'deny'
+interface ApprovalCfg {
+  version: 1
+  default: { write: Pol; exec: Pol }
+  overrides: Record<string, { write?: Pol; exec?: Pol }>
+}
 
 interface SkillDef {
   id: string; name: string; description: string; instructions: string
@@ -96,6 +103,8 @@ export function SkillsTab() {
 
       <CapabilityMatrix caps={caps} onToggleAgentic={setAgentic} mode={mode} onSetMode={setAgenticMode} />
 
+      {caps.length > 0 && <ApprovalPolicyPanel caps={caps} />}
+
       <SkillCatalog skills={skills} onChanged={refresh} onRemove={removeSkill} onEdit={editSkill}
         onInstallAll={installAllForSkill} installs={installs} agentIds={agentIds} />
 
@@ -171,6 +180,97 @@ function CapabilityMatrix({ caps, onToggleAgentic, mode, onSetMode }: {
         {tr('开启 Agentic 需该 agent 走 HTTP 绑定；建议先在「设置 → 工作区」指定一个项目目录，否则只读（禁止写文件/执行命令）。',
             'Enabling Agentic requires an HTTP binding; set a workspace under Settings → Workspaces first, otherwise it stays read-only (no writes / no command execution).')}
       </div>
+    </Enter>
+  )
+}
+
+/* ---------- 审批策略（写/执行门禁） ---------- */
+function ApprovalPolicyPanel({ caps }: { caps: CapState[] }) {
+  const [cfg, setCfg] = useState<ApprovalCfg | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    try {
+      const c = await api()?.agentic?.getApprovalConfig?.() as ApprovalCfg
+      if (c && c.default) setCfg(c)
+    } catch (e: any) { setErr(e?.message || 'load failed') }
+  }, [])
+  useEffect(() => { load() }, [load])
+  if (!cfg) return null
+
+  const setDefault = async (tool: 'write' | 'exec', policy: Pol) => {
+    try { await api()?.agentic?.setApprovalDefault?.(tool, policy); await load() } catch (e: any) { setErr(e?.message || 'failed') }
+  }
+  const setOverride = async (agentId: string, tool: 'write' | 'exec', policy: Pol | null) => {
+    try { await api()?.agentic?.setApprovalOverride?.(agentId, tool, policy); await load() } catch (e: any) { setErr(e?.message || 'failed') }
+  }
+
+  const POL_OPTS = [
+    { value: 'allow', label: tr('允许', 'Allow') },
+    { value: 'ask', label: tr('询问', 'Ask') },
+    { value: 'deny', label: tr('拒绝', 'Deny') }
+  ]
+  const OVR_OPTS = [{ value: 'default', label: tr('默认', 'Default') }, ...POL_OPTS]
+
+  return (
+    <Enter className="glass" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }} delay={90}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <Icon d={IC.bolt} size={17} style={{ color: '#f5b45a' }} />
+        <div style={{ fontWeight: 700 }}>{tr('审批策略', 'Approval policy')}</div>
+        <span className="ah-hint">{tr('agentic 写文件 / 执行命令前的放行规则', 'gate writes & command execution in the agentic loop')}</span>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="ah-label">{tr('全局默认', 'Global default')}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ width: 92, fontSize: 12.5 }}>{tr('写文件', 'Write files')}</span>
+          <Seg options={POL_OPTS} value={cfg.default.write} onChange={v => setDefault('write', v as Pol)} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ width: 92, fontSize: 12.5 }}>{tr('执行命令', 'Run commands')}</span>
+          <Seg options={POL_OPTS} value={cfg.default.exec} onChange={v => setDefault('exec', v as Pol)} />
+        </div>
+      </div>
+
+      <div className="ah-label" style={{ marginTop: 4 }}>{tr('按 Agent 覆盖', 'Per-agent overrides')}</div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12.5 }}>
+          <thead>
+            <tr style={{ color: 'var(--tx-3)', textAlign: 'left' }}>
+              <th style={{ padding: '6px 10px', fontWeight: 600 }}>Agent</th>
+              <th style={{ padding: '6px 10px', fontWeight: 600 }}>{tr('写文件', 'Write')}</th>
+              <th style={{ padding: '6px 10px', fontWeight: 600 }}>{tr('执行命令', 'Exec')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {caps.map(a => {
+              const o = cfg.overrides[a.agentId] || {}
+              return (
+                <tr key={a.agentId} style={{ borderTop: '1px solid var(--glass-border)' }}>
+                  <td style={{ padding: '8px 10px' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {AGENT_META[a.agentId] ? <AgentMark id={a.agentId} size={22} radius={6} /> : null}
+                      <span style={{ fontWeight: 600 }}>{AGENT_META[a.agentId]?.name || a.name}</span>
+                    </span>
+                  </td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <Seg options={OVR_OPTS} value={o.write ?? 'default'} onChange={v => setOverride(a.agentId, 'write', v === 'default' ? null : (v as Pol))} />
+                  </td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <Seg options={OVR_OPTS} value={o.exec ?? 'default'} onChange={v => setOverride(a.agentId, 'exec', v === 'default' ? null : (v as Pol))} />
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="ah-hint" style={{ fontSize: 11.5, color: 'var(--tx-3)' }}>
+        {tr('「询问」会在运行时弹窗逐次审批；「拒绝」直接挡下并告知模型。只读（读/列文件）永不受限。默认全部「允许」，与旧版行为一致。',
+            'Ask prompts you at run time; Deny blocks and tells the model. Read-only tools are never gated. Defaults to Allow (same as before).')}
+      </div>
+      {err && <div style={{ color: 'var(--st-error)', fontSize: 12 }}>{err}</div>}
     </Enter>
   )
 }

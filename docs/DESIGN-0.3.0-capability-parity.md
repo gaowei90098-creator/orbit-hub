@@ -156,13 +156,15 @@ renderer → hub:dispatch(text, mode, agent, {thinking, workspaceId})
 
 ---
 
-## 6. 🔭 本版不做（列入后续）
+## 6. 🔭 本版（0.3.0）不做 → 0.4.0 进展
 
-| 项 | 原因 | 后续 |
+> 下表为 0.3.0 列出的后续项（Item K）。**0.4.0 已落地前两项**（审批门禁 + proxy Anthropic 工具透传），详见 [AGENTIC.md](./AGENTIC.md) §0。
+
+| 项 | 状态 | 说明 |
 |----|------|------|
-| 写/执行的逐次交互审批 | UX 较重，当前为"按 agent 开关 + 无工作区只读"的粗粒度门禁，已可控 | 0.3.x/0.4.0 加审批弹窗或 allow/deny 规则 |
-| openclaw/hermes/minimax-code 的 CLI 活动解析器 | 需各自 CLI 的真实输出样本，盲写会出错 | 拿到样本后按 claude/codex 套路补 `activityParser` |
-| proxy 的 Anthropic 入站工具透传 | 受益面小、需联机验证 | 单独排期 |
+| 写/执行的逐次交互审批 | ✅ 0.4.0 | per-agent × per-tool 的 `allow/ask/deny`（默认 `allow`，零回归）；`ask` 运行时弹窗逐次审批，`deny` 直接挡下并回灌模型。`agentic/approval.ts` + `executor.ts` 门禁 + dispatcher `approval` 事件/`resolveApproval` + `glass/approval-dialog.tsx` 弹窗 + 能力矩阵「审批策略」UI，含单测。 |
+| proxy 的 Anthropic 入站工具透传 | ✅ 0.4.0 | `/v1/messages` 解析入站 `tools`/`tool_choice`、保留 `tool_use`/`tool_result` 多轮结构、上游 tool_calls 回写为 anthropic `tool_use` SSE 块（流式 + done 兜底）。协议层单测；端到端需联机验证。 |
+| openclaw/hermes/minimax-code 的 CLI 活动解析器 | ⏳ 待样本 | 需各自 CLI 真实输出样本，盲写会出错。三者已确认装于本机（`hermes.exe` / `openclaw.ps1` / `opencode.exe`），但「活动事件流」样本需跑真实任务（联网/可能计费）取得。 |
 
 ---
 

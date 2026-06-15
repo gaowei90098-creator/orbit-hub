@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 当前代码版本：`0.3.0`
-- 当前发布状态：`0.3.0` 已完成本地验证并推送到 GitHub（全员 Agent 能力对齐）
+- 当前代码版本：`0.4.0`
+- 当前发布状态：`0.4.0` 已完成本地验证并推送到 GitHub（写/执行审批门禁 + proxy Anthropic 工具透传）
 - 版本来源：以 `package.json` 的 `version` 与 `build.buildVersion` 为准；两者必须同步
 
 ## 升版规则
@@ -92,8 +92,22 @@
   - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（126 passed / 25 files，exit 0）
   - `npm run build`（exit 0）
 
+### 0.4.0
+
+- 状态：已完成本地验证，推送到 GitHub（tag `v0.4.0`）。
+- 摘要：**Item K 后续能力**（0.3.0 列入后续的两项落地）：
+  - **写/执行审批门禁**：新增 `agentic/approval.ts`，per-agent × per-tool 的 `allow/ask/deny` 策略（默认全 `allow`，零回归）。`executor.ts` 执行 `fs_write`/`exec` 前查策略：`deny` 直接挡下并回灌模型，`ask` 经 dispatcher `approval` 流事件 → 渲染层弹窗（`glass/approval-dialog.tsx`）→ `agentic:resolveApproval` 回传（超时/取消自动拒绝）。只读工具永不门禁。配置 UI 在能力矩阵下方「审批策略」（全局默认 + 按 agent 覆盖）。
+  - **proxy Anthropic 入站工具透传**：`routing/proxy.ts` 的 `/v1/messages` 解析入站 `tools`/`tool_choice`、保留 `tool_use`/`tool_result` 多轮结构（转 OpenAI 形状经 client 出站到任意上游），并把上游 tool_calls 回写为 anthropic `tool_use` SSE 块（流式增量 + 上游无增量时 done 兜底补发）；非流式 json 同样含 tool_use。
+- 主要文件：`agentic/approval.ts`(新)、`agentic/executor.ts`、`hub/dispatcher.ts`、`routing/proxy.ts`、`index.ts`、`preload/index.ts`、`renderer/vite-env.d.ts`、`renderer/App.tsx`、`renderer/glass/approval-dialog.tsx`(新)、`renderer/screens/Skills.tsx`、`docs/AGENTIC.md`、`docs/DESIGN-0.3.0-capability-parity.md`，以及 3 个测试（`approval.test.ts`、`proxy-anthropic-tools.test.ts` 新增，`executor.test.ts` 补门禁用例）。
+- 未覆盖（仍待办）：openclaw/hermes/minimax-code 的 CLI 活动解析器（需各自真实输出样本）；proxy 工具透传的端到端正确性需联机 Claude Code + 支持工具的上游验证。
+- 验证（全绿）：
+  - `npm run typecheck`（exit 0）
+  - `npx eslint src`（exit 0）
+  - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（141 passed / 27 files，exit 0）
+  - `npm run build`（exit 0）
+
 ### 下一个候选版本
 
-- 默认候选：`0.3.1`（小修复/小增强）；下一个较大功能版本 `0.4.0`。
-- 适用范围：后续 agentic / 工作区 / 技能流程修复、验证和小增强。
+- 默认候选：`0.4.1`（小修复/小增强）；下一个较大功能版本 `0.5.0`。
+- 适用范围：CLI 活动解析器（待样本）、proxy 工具透传联机验证、后续 agentic / 工作区 / 技能流程修复与小增强。
 - 登记要求：完成后补充改动摘要、验证命令、提交哈希或发布 tag。

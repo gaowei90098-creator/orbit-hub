@@ -109,7 +109,15 @@ const api = {
     getEnabled: () => ipcRenderer.invoke('agentic:getEnabled'),
     setEnabled: (agentId: string, on: boolean) => ipcRenderer.invoke('agentic:setEnabled', agentId, on),
     getMode: () => ipcRenderer.invoke('agentic:getMode'),
-    setMode: (mode: 'all' | 'selected') => ipcRenderer.invoke('agentic:setMode', mode)
+    setMode: (mode: 'all' | 'selected') => ipcRenderer.invoke('agentic:setMode', mode),
+    // 写/执行审批门禁
+    getApprovalConfig: () => ipcRenderer.invoke('agentic:getApprovalConfig'),
+    setApprovalDefault: (tool: 'write' | 'exec', policy: 'allow' | 'ask' | 'deny') =>
+      ipcRenderer.invoke('agentic:setApprovalDefault', tool, policy),
+    setApprovalOverride: (agentId: string, tool: 'write' | 'exec', policy: 'allow' | 'ask' | 'deny' | null) =>
+      ipcRenderer.invoke('agentic:setApprovalOverride', agentId, tool, policy),
+    resolveApproval: (requestId: string, approved: boolean) =>
+      ipcRenderer.invoke('agentic:resolveApproval', requestId, approved)
   },
   // --- /AgentHub skills + native agentic ---
   platform: process.platform

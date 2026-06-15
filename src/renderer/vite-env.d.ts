@@ -90,6 +90,10 @@ interface ElectronAPI {
     setEnabled: (agentId: string, on: boolean) => Promise<string[]>
     getMode: () => Promise<'all' | 'selected'>
     setMode: (mode: 'all' | 'selected') => Promise<'all' | 'selected'>
+    getApprovalConfig: () => Promise<{ version: 1; default: { write: 'allow' | 'ask' | 'deny'; exec: 'allow' | 'ask' | 'deny' }; overrides: Record<string, { write?: 'allow' | 'ask' | 'deny'; exec?: 'allow' | 'ask' | 'deny' }> }>
+    setApprovalDefault: (tool: 'write' | 'exec', policy: 'allow' | 'ask' | 'deny') => Promise<any>
+    setApprovalOverride: (agentId: string, tool: 'write' | 'exec', policy: 'allow' | 'ask' | 'deny' | null) => Promise<any>
+    resolveApproval: (requestId: string, approved: boolean) => Promise<boolean>
   }
   platform: string
 }

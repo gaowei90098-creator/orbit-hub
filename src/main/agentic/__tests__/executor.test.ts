@@ -70,4 +70,59 @@ describe('runAgenticHttp', () => {
     expect(h.toolCalls).toBe(0)
     expect(res.content).toBe('hello')
   })
+
+  it('审批 deny：受管工具不执行，回灌拒绝信息并 error，次轮收尾', async () => {
+    const { runAgenticHttp } = await import('../executor')
+    h.script = [
+      (cb) => { cb.onDone({ finishReason: 'tool_calls', toolCalls: [{ id: 'w1', function: { name: 'fs_write', arguments: '{"path":"a.txt","content":"x"}' } }] }) },
+      (cb) => { cb.onContent('done'); cb.onDone({ finishReason: 'stop' }) }
+    ]
+    const activities: any[] = []
+    const res = await runAgenticHttp({
+      userText: 'write', systemPrompt: 's', resolved: {} as any, thinking: {} as any, root: '/ws',
+      policyFor: () => 'deny',
+      isCancelled: () => false,
+      emit: { delta: () => {}, activity: (s) => activities.push(s) }
+    })
+    expect(h.toolCalls).toBe(0)                                  // 工具未执行
+    expect(activities.some(a => a.status === 'error')).toBe(true) // 发了拒绝态
+    expect(res.content).toBe('done')                            // 次轮正常收尾
+  })
+
+  it('审批 ask：批准→执行；拒绝→不执行', async () => {
+    const { runAgenticHttp } = await import('../executor')
+    const base = {
+      userText: 'run', systemPrompt: 's', resolved: {} as any, thinking: {} as any, root: '/ws',
+      policyFor: () => 'ask' as const, isCancelled: () => false,
+      emit: { delta: () => {}, activity: () => {} }
+    }
+    h.script = [
+      (cb) => { cb.onDone({ finishReason: 'tool_calls', toolCalls: [{ id: 'e1', function: { name: 'exec', arguments: '{"command":"ls"}' } }] }) },
+      (cb) => { cb.onContent('ok'); cb.onDone({ finishReason: 'stop' }) }
+    ]
+    await runAgenticHttp({ ...base, requestApproval: async () => true })
+    expect(h.toolCalls).toBe(1)                                  // 批准 → 执行
+
+    h.streamCalls = 0; h.toolCalls = 0
+    h.script = [
+      (cb) => { cb.onDone({ finishReason: 'tool_calls', toolCalls: [{ id: 'e2', function: { name: 'exec', arguments: '{"command":"ls"}' } }] }) },
+      (cb) => { cb.onContent('blocked'); cb.onDone({ finishReason: 'stop' }) }
+    ]
+    await runAgenticHttp({ ...base, requestApproval: async () => false })
+    expect(h.toolCalls).toBe(0)                                  // 拒绝 → 不执行
+  })
+
+  it('缺省 policyFor：受管工具按 allow 正常执行（零回归）', async () => {
+    const { runAgenticHttp } = await import('../executor')
+    h.script = [
+      (cb) => { cb.onDone({ finishReason: 'tool_calls', toolCalls: [{ id: 'w1', function: { name: 'fs_write', arguments: '{"path":"a.txt","content":"x"}' } }] }) },
+      (cb) => { cb.onContent('ok'); cb.onDone({ finishReason: 'stop' }) }
+    ]
+    await runAgenticHttp({
+      userText: 'w', systemPrompt: 's', resolved: {} as any, thinking: {} as any, root: '/ws',
+      isCancelled: () => false,
+      emit: { delta: () => {}, activity: () => {} }
+    })
+    expect(h.toolCalls).toBe(1)
+  })
 })

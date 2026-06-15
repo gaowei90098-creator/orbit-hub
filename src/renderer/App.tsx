@@ -22,6 +22,7 @@ import { getBudget, getBudgetMode } from './glass/budget'
 import { applyOrchestrateEvent } from './glass/orchestrate-reducer'
 import { upsertStep } from './glass/chat-transcript'
 import { SetupTab, summarizeAgentConnections } from './glass/connection-status'
+import { ApprovalDialog, ApprovalItem } from './glass/approval-dialog'
 
 type AgentMap = Record<string, { status: AgentUIStatus }>
 
@@ -47,6 +48,7 @@ export default function App() {
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([])  // 写/执行待审批队列（'ask' 策略）
   const [motion, setMotion] = useState<MotionLevel>(() => {
     try { return (localStorage.getItem('ah-motion') as MotionLevel) || 'rich' } catch { return 'rich' }
   })
@@ -162,6 +164,14 @@ export default function App() {
     const off = window.electronAPI?.hub?.onStream?.((e: any) => {
       const tid: string = e.taskId
       if (!tid || ignoredTasks.current.has(tid)) return
+
+      // 写/执行审批请求：交给全局覆盖层弹窗，不依赖消息簿记（不入 msgId 流程）
+      if (e.kind === 'approval' && e.request) {
+        const req = e.request
+        setApprovals(qs => qs.some(q => q.id === req.id) ? qs
+          : [...qs, { id: req.id, taskId: tid, agentId: e.agentId, tool: req.tool, toolName: req.toolName, label: req.label, detail: req.detail }])
+        return
+      }
 
       let msgId = taskToMsg.current.get(tid)
       if (!msgId && pendingMsgId.current) {
@@ -339,6 +349,12 @@ export default function App() {
     }
   }, [streaming, bindings, runDispatch, refreshStatus, tasks])
 
+  const onApprovalDecide = useCallback((item: ApprovalItem, approved: boolean, remember: boolean) => {
+    if (remember) window.electronAPI?.agentic?.setApprovalOverride?.(item.agentId, item.tool, approved ? 'allow' : 'deny').catch(() => {})
+    window.electronAPI?.agentic?.resolveApproval?.(item.id, approved).catch(() => {})
+    setApprovals(qs => qs.filter(q => q.id !== item.id))
+  }, [])
+
   const onCancel = useCallback(() => {
     cancelGen.current++
     for (const tid of activeTaskIds.current) {
@@ -359,6 +375,7 @@ export default function App() {
       ? { ...t, status: 'cancelled' } : t))
     setBusyOverride({})
     setStreaming(false)
+    setApprovals([])   // 取消后后端已拒绝所有待决审批，前端弹窗一并清空
     refreshStatus()
   }, [refreshStatus])
 
@@ -465,6 +482,7 @@ export default function App() {
           </div>
         </div>
       </div>
+      <ApprovalDialog items={approvals} onDecide={onApprovalDecide} />
     </>
   )
 }
