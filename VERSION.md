@@ -16,6 +16,14 @@
 - 不允许只改 `package.json.version` 而不改 `build.buildVersion`
 - 不允许未完成验证就登记为已发布版本
 
+## 公开版发布规则
+
+- 开发仓库：`hycailxy/agenthubworkspace`（private），继续按开发版本号递增。
+- 公开仓库：`hycailxy/AgentHub`（public），只发布已从开发版完整验证通过的版本。
+- 当前首个公开版命名为 `0.1.0 Beta`，Git tag 使用 `v0.1.0-beta`。
+- 后续公开版沿用开发版的递增规则；包含新功能的公开版，在公开版本名后追加 `Beta`，tag 使用小写 `-beta` 后缀。
+- 公开版必须上传可直接安装/使用的打包产物；Windows 至少提供 `AgentHub-Setup-<公开版本>.exe`。
+
 ## 发版前检查
 
 发版 Agent 必须完成：
