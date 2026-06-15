@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 当前代码版本：`0.5.0`
-- 当前发布状态：`0.5.0` 已完成本地验证并推送到 GitHub（ACP 统一接入：hermes/openclaw/opencode）
+- 当前代码版本：`0.5.1`
+- 当前发布状态：`0.5.1` 已完成本地验证，推送到 GitHub（tag `v0.5.1`，ACP request_permission 审批桥接）
 - 版本来源：以 `package.json` 的 `version` 与 `build.buildVersion` 为准；两者必须同步
 
 ## 升版规则
@@ -123,10 +123,21 @@
   - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（149 passed / 28 files，exit 0）
   - `npm run build`（exit 0）
   - **端到端握手**：真实 `opencode acp` 跑通 `initialize`（protocolVersion=1 + agentCapabilities）+ `session/new`（sessionId），证明 JSON-RPC 编解码与真实 server 互通。
-- 未覆盖（仍待办，见 DESIGN-0.5.0-acp §4）：`session/prompt` 完整对话流的联机验证；request_permission 对接审批门禁；client fs/terminal handler；server 复用/会话记忆；openclaw .ps1/.cmd spawn 细节。
+- 未覆盖（仍待办，见 DESIGN-0.5.0-acp §4）：`session/prompt` 完整对话流的联机验证；client fs/terminal handler；server 复用/会话记忆；openclaw .ps1/.cmd spawn 细节。
+
+### 0.5.1
+
+- 状态：已完成本地验证，推送到 GitHub（tag `v0.5.1`）。
+- 摘要：ACP `session/request_permission` 对接 0.4.0 审批门禁。`acp-client.ts` 规范化 ACP permission 请求，把写入类请求映射为 `write`、命令类请求映射为 `exec`；dispatcher 按 per-agent 审批策略处理 `allow / deny / ask`，并复用既有审批弹窗与 `agentic:resolveApproval` 回传。只读或未知权限请求继续自动放行，保持兼容性。
+- 主要文件：`src/main/hub/adapters/acp-client.ts`、`src/main/hub/dispatcher.ts`、`src/main/hub/adapters/__tests__/acp-client.test.ts`、`package.json`、`package-lock.json`、`docs/DESIGN-0.5.0-acp.md`、`docs/AGENTIC.md`。
+- 验证：
+  - `npm run typecheck`
+  - `npx eslint src`
+  - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（152 passed / 28 files）
+  - `npm run build`
 
 ### 下一个候选版本
 
-- 默认候选：`0.5.1`（小修复/小增强）；下一个较大功能版本 `0.6.0`。
-- 适用范围：ACP 增强（审批对接 / fs handler / server 复用）、session/prompt 联机验证、后续 agentic / 工作区 / 技能流程修复与小增强。
+- 默认候选：`0.5.2`（小修复/小增强）；下一个较大功能版本 `0.6.0`。
+- 适用范围：ACP 增强（fs handler / server 复用）、session/prompt 联机验证、后续 agentic / 工作区 / 技能流程修复与小增强。
 - 登记要求：完成后补充改动摘要、验证命令、提交哈希或发布 tag。

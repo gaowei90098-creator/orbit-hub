@@ -664,7 +664,8 @@ export class Dispatcher extends EventEmitter {
       const stopReason: string = await adapter.runPrompt(agentPrompt, cwd, {
         onChunk: (t: string) => { content += t; this.emit("stream", { kind: "delta", taskId: task.id, agentId, providerId, modelId, channel: "content", text: t }) },
         onThought: (t: string) => this.emit("stream", { kind: "delta", taskId: task.id, agentId, providerId, modelId, channel: "thinking", text: t }),
-        onActivity: (step: any) => this.emit("stream", { kind: "activity", taskId: task.id, agentId, step })
+        onActivity: (step: any) => this.emit("stream", { kind: "activity", taskId: task.id, agentId, step }),
+        onRequestPermission: (req: any) => this.requestAcpPermission(task, agentId, req)
       })
       if ((task as any).status === "cancelled") return { content }
       // refusal 且无任何内容 → 作为错误外显；否则按已收内容正常收尾
@@ -687,5 +688,65 @@ export class Dispatcher extends EventEmitter {
       try { await adapter.stop() } catch { /* noop */ }
       this.registry.setStatus(agentId, "idle")
     }
+  }
+
+  private async requestAcpPermission(task: DispatchTask, agentId: string, req: any): Promise<boolean> {
+    if (!req?.tool) return true
+    const stepId = String(
+      req.raw?.toolCall?.toolCallId ||
+      req.raw?.toolCall?.id ||
+      req.raw?.toolCallId ||
+      `acp-perm-${task.id}-${++this.approvalSeq}`
+    )
+    const tool = req.tool as GuardedTool
+    const toolName = req.toolName || (tool === "exec" ? "exec" : "fs_write")
+    const label = req.label || toolName
+    const detail = req.detail || ""
+    const policy = getApprovalConfig().policyFor(agentId, tool)
+
+    if (policy === "allow") return true
+
+    if (policy === "deny") {
+      this.emit("stream", {
+        kind: "activity",
+        taskId: task.id,
+        agentId,
+        step: {
+          id: stepId,
+          kind: "tool",
+          tool: toolName,
+          label,
+          detail,
+          output: `Rejected by approval policy: '${tool}' is denied for this agent.`,
+          status: "error"
+        }
+      })
+      return false
+    }
+
+    this.emit("stream", {
+      kind: "activity",
+      taskId: task.id,
+      agentId,
+      step: { id: stepId, kind: "tool", tool: toolName, label, detail, status: "awaiting" }
+    })
+    const approved = await this.requestApprovalFor(task, agentId, { stepId, agentId, tool, toolName, label, detail })
+    if (!approved) {
+      this.emit("stream", {
+        kind: "activity",
+        taskId: task.id,
+        agentId,
+        step: {
+          id: stepId,
+          kind: "tool",
+          tool: toolName,
+          label,
+          detail,
+          output: "Rejected by user (approval denied).",
+          status: "error"
+        }
+      })
+    }
+    return approved
   }
 }

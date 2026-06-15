@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mapAcpUpdate, acpBlockText, acpToolContent } from '../acp-client'
+import { mapAcpUpdate, acpBlockText, acpToolContent, acpPermissionRequest } from '../acp-client'
 
 /**
  * ACP 协议核心单测 —— session/update → AgentHub 活动模型的纯函数映射。
@@ -62,5 +62,38 @@ describe('mapAcpUpdate', () => {
     expect(mapAcpUpdate({ sessionUpdate: 'plan', entries: [] })).toBeNull()
     expect(mapAcpUpdate({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'x' } })).toBeNull()
     expect(mapAcpUpdate(null)).toBeNull()
+  })
+})
+
+describe('acpPermissionRequest', () => {
+  it('maps shell/command permission requests to exec', () => {
+    const req = acpPermissionRequest({
+      sessionId: 's1',
+      toolCall: { kind: 'terminal', title: 'Run tests', rawInput: { command: 'npm test' } }
+    })
+
+    expect(req.tool).toBe('exec')
+    expect(req.toolName).toBe('terminal')
+    expect(req.label).toBe('Run tests')
+    expect(req.detail).toBe('npm test')
+  })
+
+  it('maps edit/write permission requests to write', () => {
+    const req = acpPermissionRequest({
+      toolCall: { name: 'edit_file', title: 'Edit config', input: { path: 'config.json', newText: '{}' } }
+    })
+
+    expect(req.tool).toBe('write')
+    expect(req.toolName).toBe('edit_file')
+    expect(req.detail).toBe('config.json')
+  })
+
+  it('leaves read-only permission requests unguarded', () => {
+    const req = acpPermissionRequest({
+      toolCall: { kind: 'read', title: 'Read README', input: { path: 'README.md' } }
+    })
+
+    expect(req.tool).toBeNull()
+    expect(req.toolName).toBe('read')
   })
 })

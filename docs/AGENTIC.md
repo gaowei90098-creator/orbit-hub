@@ -20,7 +20,9 @@
 
 **0.5.0 新增：ACP 统一接入。** 发现 hermes / openclaw / minimax-code(opencode) 都支持 **ACP（Agent Client Protocol，JSON-RPC over stdio 标准）**，故以「一个 ACP 客户端适配器」统一接入，取代 0.3.0 设想的「各写文本活动解析器」：结构化活动（工具 / 文件 / 思考 / 正文）开箱即有，不靠脆弱的文本逆向。落地 `adapters/acp-client.ts`（协议核心 + `mapAcpUpdate` 纯函数映射）、`adapters/acp-adapter.ts`、dispatcher `sendToAgentAcp` 路径、`protocol:'acp'` 全链路、设置→路由的 **ACP** 后端选项与能力矩阵展示。端到端 `initialize`+`session/new` 握手已用真实 `opencode acp` 验证；`session/prompt` 完整对话流走同一套 JSON-RPC，需配好 provider 后联机验证。详见 [DESIGN-0.5.0-acp.md](./DESIGN-0.5.0-acp.md)。
 
-**仍待办：** ACP 的 `request_permission` 对接 0.4.0 审批门禁、client fs/terminal handler、server 复用 / 会话记忆（见 [DESIGN-0.5.0-acp.md](./DESIGN-0.5.0-acp.md) §4）。
+**0.5.1 新增：ACP 权限请求接入审批门禁。** `session/request_permission` 现在会规范化 ACP tool call 权限请求，把写入类请求映射为 `write`、命令类请求映射为 `exec`，并复用 0.4.0 的 per-agent 审批策略（`allow / ask / deny`）。未知或只读请求继续按 ACP allow 选项放行，避免破坏只读/非门禁能力。
+
+**仍待办：** ACP 的 `session/prompt` 完整联机验证、client fs/terminal handler、server 复用 / 会话记忆（见 [DESIGN-0.5.0-acp.md](./DESIGN-0.5.0-acp.md) §4）。
 
 ## 1. 现状诊断（按集成路径，附 file:line 证据）
 

@@ -8,8 +8,8 @@
  * prompt(sessionId, text, handlers)=`session/prompt`，期间消费 `session/update` 通知，
  * 直到收到 prompt 响应里的 `stopReason`。cancel() 发 `session/cancel`。
  *
- * 第一阶段：clientCapabilities.fs=false（三个 agent 都自带文件/执行能力，由其自身在 cwd 内操作）；
- * 收到 `session/request_permission` 时自动放行（allow_once）。审批门禁对接 / client fs handler 留作后续。
+ * clientCapabilities.fs=false（三个 agent 都自带文件/执行能力，由其自身在 cwd 内操作）；
+ * 收到 `session/request_permission` 时把写/执行权限请求桥接到 AgentHub 审批门禁。
  */
 import { spawn, ChildProcess } from 'node:child_process'
 
@@ -33,6 +33,15 @@ export interface AcpPromptHandlers {
   onChunk?: (text: string) => void
   onThought?: (text: string) => void
   onActivity?: (step: AcpActivityStep) => void
+  onRequestPermission?: (req: AcpPermissionRequest) => Promise<boolean>
+}
+
+export interface AcpPermissionRequest {
+  tool: 'write' | 'exec' | null
+  toolName: string
+  label: string
+  detail: string
+  raw: any
 }
 
 const STATUS_MAP: Record<string, 'running' | 'done' | 'error'> = {
@@ -116,6 +125,63 @@ export function mapAcpUpdate(update: any): MappedUpdate | null {
 
 function safeJson(v: any): string {
   try { return JSON.stringify(v) } catch { return String(v) }
+}
+
+function firstString(...values: any[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function hasAnyKey(obj: any, keys: string[]): boolean {
+  if (!obj || typeof obj !== 'object') return false
+  return keys.some(k => Object.prototype.hasOwnProperty.call(obj, k))
+}
+
+export function acpPermissionRequest(params: any): AcpPermissionRequest {
+  const toolCall = params?.toolCall || params?.tool_call || params?.tool || params?.call || {}
+  const input = toolCall.rawInput || toolCall.input || params?.rawInput || params?.input || {}
+  const toolName = firstString(
+    toolCall.kind,
+    toolCall.name,
+    toolCall.tool,
+    params?.kind,
+    params?.toolName,
+    params?.permission,
+    params?.action
+  ) || 'tool'
+  const label = firstString(toolCall.title, params?.title, params?.description, toolName)
+  const haystack = [
+    toolName,
+    label,
+    params?.description,
+    params?.action,
+    params?.permission,
+    input?.command,
+    input?.cmd,
+    input?.shell
+  ].filter(Boolean).join(' ').toLowerCase()
+
+  let tool: AcpPermissionRequest['tool'] = null
+  if (/\b(exec|bash|shell|terminal|command|run_command|run)\b/.test(haystack) || typeof input?.command === 'string') {
+    tool = 'exec'
+  } else if (
+    /\b(write|edit|modify|delete|create|save|patch|apply_patch|move|rename)\b/.test(haystack) ||
+    hasAnyKey(input, ['content', 'newText', 'oldText', 'edits', 'patch', 'diff'])
+  ) {
+    tool = 'write'
+  } else if (/\b(read|list|grep|glob|search|view)\b/.test(haystack)) {
+    tool = null
+  }
+
+  const detail = clip(
+    firstString(input?.command, input?.path, input?.file_path, input?.filepath) ||
+    (Object.keys(input || {}).length ? safeJson(input) : safeJson(params)),
+    800
+  )
+
+  return { tool, toolName, label, detail, raw: params }
 }
 
 type Pending = { resolve: (v: any) => void; reject: (e: any) => void }
@@ -273,10 +339,7 @@ export class AcpClient {
 
   private handleServerRequest(msg: any): void {
     if (msg.method === 'session/request_permission') {
-      // 第一阶段：自动放行（优先 allow_once，退而求其次取第一个 allow* 选项）。审批对接留作后续。
-      const opts: any[] = Array.isArray(msg.params?.options) ? msg.params.options : []
-      const pick = opts.find(o => o.kind === 'allow_once') || opts.find(o => o.kind === 'allow_always') || opts[0]
-      this.respond(msg.id, pick ? { outcome: { outcome: 'selected', optionId: pick.optionId } } : { outcome: { outcome: 'cancelled' } })
+      void this.handlePermissionRequest(msg)
       return
     }
     // 其余 server→client 请求（fs/terminal）：第一阶段未声明能力，理应不会收到；保守回错误避免挂起。
@@ -284,6 +347,26 @@ export class AcpClient {
       try {
         this.proc.stdin?.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'method not supported by client' } }) + '\n')
       } catch { /* noop */ }
+    }
+  }
+
+  private async handlePermissionRequest(msg: any): Promise<void> {
+    const opts: any[] = Array.isArray(msg.params?.options) ? msg.params.options : []
+    const pick = opts.find(o => o.kind === 'allow_once') || opts.find(o => o.kind === 'allow_always') || opts[0]
+    const deny = opts.find(o => /deny|reject/i.test(String(o.kind || o.optionId || o.name || '')))
+    const req = acpPermissionRequest(msg.params)
+    let approved = true
+    const sid = msg.params?.sessionId
+    const handler = sid ? this.promptHandlers.get(sid)?.onRequestPermission : undefined
+    if (handler && req.tool) {
+      try { approved = await handler(req) } catch { approved = false }
+    }
+    if (approved && pick) {
+      this.respond(msg.id, { outcome: { outcome: 'selected', optionId: pick.optionId } })
+    } else if (!approved && deny) {
+      this.respond(msg.id, { outcome: { outcome: 'selected', optionId: deny.optionId } })
+    } else {
+      this.respond(msg.id, { outcome: { outcome: 'cancelled' } })
     }
   }
 
