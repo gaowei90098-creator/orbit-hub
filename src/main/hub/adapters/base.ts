@@ -7,6 +7,7 @@ import { HermesAdapter } from "./hermes"
 import { OpenClawAdapter } from "./openclaw"
 import { MarvisAdapter } from "./marvis"
 import { MinimaxCodeAdapter } from "./minimax-code"
+import { AcpAgentAdapter, acpDefaults } from "./acp-adapter"
 
 
 
@@ -14,7 +15,7 @@ export interface AgentAdapter {
   id: string
   name: string
   binary: string
-  protocol: "stdio-ndjson" | "stdio-plain" | "http"
+  protocol: "stdio-ndjson" | "stdio-plain" | "http" | "acp"
   mode: "interactive" | "oneshot"
   start(): Promise<void>
   stop(): Promise<void>
@@ -70,10 +71,16 @@ const STDIO_FACTORIES: Record<string, () => StdioAgentAdapter> = {
 export function createAdapter(
   agentId: string,
   agentName: string,
-  protocol?: "http" | "stdio-plain",
+  protocol?: "http" | "stdio-plain" | "acp",
   binary?: string,
   args?: string[]
 ): AgentAdapter {
+  if (protocol === "acp") {
+    const d = acpDefaults(agentId)
+    const bin = (binary && binary.trim()) || d?.binary || agentId
+    const acpArgs = (args && args.length > 0) ? args : (d?.args || ["acp"])
+    return new AcpAgentAdapter(agentId, agentName, bin, acpArgs)
+  }
   if (protocol === "stdio-plain") {
     const make = STDIO_FACTORIES[agentId]
     if (make) {

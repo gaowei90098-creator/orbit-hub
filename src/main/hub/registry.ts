@@ -8,7 +8,7 @@ export interface AgentInfo {
   name: string
   status: AgentStatus
   mode: "interactive" | "oneshot"
-  protocol: "stdio-ndjson" | "stdio-plain" | "http"
+  protocol: "stdio-ndjson" | "stdio-plain" | "http" | "acp"
   adapter: AgentAdapter
   capabilities: string[]
   lastActive: Date

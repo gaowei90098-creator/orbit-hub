@@ -1,0 +1,53 @@
+# AgentHub 0.5.0 设计方案 — ACP（Agent Client Protocol）统一接入
+
+> 目标版本：`0.4.0 → 0.5.0`（较大功能版本）。
+> 状态：✅ 已实现（本工作树） ｜ ⏳ 后续 ｜ 配套：[AGENTIC.md](./AGENTIC.md)、[DESIGN-0.3.0-capability-parity.md](./DESIGN-0.3.0-capability-parity.md)。
+
+---
+
+## 1. 背景
+
+0.3.0 的 Item K 把「为 openclaw/hermes/minimax-code 各写 stdio 文本活动解析器」列为后续（需各自真实输出样本、盲写易错）。0.5.0 prep 期对三者做运行时探查，发现**三者都支持 ACP（Agent Client Protocol，Zed 推的 JSON-RPC over stdio 标准）**：`hermes acp` / `openclaw acp` / `opencode acp`（minimax-code = opencode）。
+
+ACP 把工具调用、文件改动、思考、正文都表达为**结构化消息**，因此「写一个 ACP 客户端适配器统一接入三者」是比各写文本解析器**更优**的路线：结构化活动开箱即有、一套适配器接三个 agent、不靠脆弱的文本逆向。
+
+## 2. 设计
+
+### 2.1 协议核心 ✅ `adapters/acp-client.ts`
+- `AcpClient`：一个 ACP server 子进程的 JSON-RPC 2.0 客户端（NDJSON，按行收发）。
+- 生命周期：`start()`=spawn server + `initialize` 握手 → `newSession(cwd)`=`session/new` → `prompt(sessionId, text, handlers)`=`session/prompt`，期间消费 `session/update` 通知，直到响应里的 `stopReason`；`cancel()`=`session/cancel`。
+- 收到 `session/request_permission` → 第一阶段自动放行（`allow_once`）；未声明 fs/terminal 能力（三个 agent 自带文件/执行能力，在 cwd 内自主操作）。
+- `mapAcpUpdate()`（纯函数，单测）：`session/update.update` → AgentHub 活动模型（`agent_message_chunk`=正文 / `agent_thought_chunk`=思考 / `tool_call`+`tool_call_update`=结构化步骤卡），复用既有 ActivityStep 形状。
+
+### 2.2 适配器 ✅ `adapters/acp-adapter.ts`
+- `AcpAgentAdapter`：实现 `AgentAdapter` 接口（`protocol:'acp'`），用 `AcpClient` 提供 `runPrompt(text, cwd, handlers)`。
+- `acpDefaults(agentId)`：各 agent 的 acp 启动默认（binary 自动探测 + 子命令参数）—— opencode `acp` / hermes `acp --accept-hooks` / openclaw `acp`。
+- 第一阶段每轮结束 `stop()` 杀 server（无状态泄漏）；server 复用 + 会话记忆为后续优化。
+
+### 2.3 派发链路 ✅ `hub/dispatcher.ts`
+- 新增 `sendToAgentAcp`：与 stdio 路径平级。`protocol==='acp'` 时走它。
+- 完成判定靠 `session/prompt` 的 `stopReason`（不像 stdio oneshot 靠进程退出）；`session/update` 经 handlers 透传为 `delta`(content/thinking) + `activity` 步骤事件；取消轮询 `task.status` 发 `session/cancel`。
+- prompt 构建与 stdio 一致：技能注入 + 工作区 bootstrap + 用户任务（+ 可选 thinking 指令）；工作区 rootPath → `session/new` 的 cwd。
+
+### 2.4 类型 / 工厂 / 配置 / UI ✅
+- `protocol` 联合类型加 `'acp'`（AgentAdapter / AgentInfo / AgentRouteBinding / 渲染层 BindingDef）。
+- `createAdapter` 加 acp 分支 → `AcpAgentAdapter`。
+- 能力矩阵：acp 展示为 `ACP` 后端 + 全能力（fs/exec/agentic-loop，原生 agentic）。
+- 设置 → 路由：后端协议 Seg 新增 **ACP** 选项（仅对 hermes/openclaw/minimax-code 可选），复用「使用版本 / 附加参数」配置区。
+
+## 3. 验证
+
+- 单测：`acp-client.test.ts` 覆盖 `mapAcpUpdate` / `acpBlockText` / `acpToolContent`（8 用例）。
+- **端到端握手（已验证）**：真实 `opencode acp` 跑通 `initialize`（protocolVersion=1 + agentCapabilities）+ `session/new`（返回 sessionId）—— 证明 JSON-RPC 编解码与真实 server 互通（不调 LLM、不联网、无费用）。
+- 全套：`tsc --noEmit` / `eslint src` / `vitest`（149 passed / 28 files）/ `electron-vite build` 均 exit 0。
+
+## 4. ⏳ 后续（0.5.x / 0.6.0）
+
+| 项 | 说明 |
+|----|------|
+| `session/prompt` 端到端联机验证 | 需 agent 配好 provider + 真实 LLM 调用；走同一套 JSON-RPC，置信度高但未实跑。 |
+| `request_permission` 对接 0.4.0 审批门禁 | 当前自动放行；可映射 tool kind→write/exec 后走审批弹窗（ACP 权限模型与审批门禁天然契合）。 |
+| client fs/terminal handler | 声明 fs capability 并复用 tools.ts 沙箱在 cwd 内读写；当前依赖 agent 自带能力。 |
+| server 复用 + 会话记忆 | 当前每轮 spawn/stop；复用 server + `session/load` 支持多轮记忆。 |
+| openclaw .ps1/.cmd spawn 细节 | openclaw 为 npm 脚本，Windows 下 spawn 可能需 shell 包装；opencode/hermes（.exe）已直接可用。 |
+| plan / usage_update 等 update 类型 | 当前仅呈现正文/思考/工具；plan、用量可后续接 UI。 |

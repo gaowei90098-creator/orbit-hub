@@ -85,7 +85,7 @@ interface ElectronAPI {
     uninstall: (agentId: string, skillId: string) => Promise<Record<string, string[]>>
   }
   agentic: {
-    capabilities: () => Promise<Array<{ agentId: string; name: string; protocol: 'http' | 'stdio-plain'; nativeCli: boolean; httpAgentic: boolean; capabilities: string[] }>>
+    capabilities: () => Promise<Array<{ agentId: string; name: string; protocol: 'http' | 'stdio-plain' | 'acp'; nativeCli: boolean; httpAgentic: boolean; capabilities: string[] }>>
     getEnabled: () => Promise<string[]>
     setEnabled: (agentId: string, on: boolean) => Promise<string[]>
     getMode: () => Promise<'all' | 'selected'>

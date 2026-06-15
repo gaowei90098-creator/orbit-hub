@@ -27,8 +27,8 @@ const NATIVE_CLI_AGENTS = new Set(['codex', 'claude'])
 export interface AgentCapabilityState {
   agentId: string
   name: string
-  protocol: 'http' | 'stdio-plain'
-  /** stdio 原生 CLI agentic（codex/claude） */
+  protocol: 'http' | 'stdio-plain' | 'acp'
+  /** stdio 原生 CLI agentic（codex/claude）或 ACP（结构化原生 agentic） */
   nativeCli: boolean
   /** HTTP 上开启了 AgentHub 自带 executor */
   httpAgentic: boolean
@@ -36,9 +36,10 @@ export interface AgentCapabilityState {
 }
 
 /** 由（协议 + 是否开启 HTTP executor）推导真实能力集合。 */
-export function capabilitiesFor(protocol: 'http' | 'stdio-plain', httpAgentic: boolean): AgentCapability[] {
+export function capabilitiesFor(protocol: 'http' | 'stdio-plain' | 'acp', httpAgentic: boolean): AgentCapability[] {
   const caps: AgentCapability[] = ['skills'] // 任何 agent 都能接收注入的技能
-  if (protocol === 'stdio-plain' || httpAgentic) {
+  // stdio-plain / acp 天然在工作区动手；http 需开启 executor（agentic）才有
+  if (protocol === 'stdio-plain' || protocol === 'acp' || httpAgentic) {
     caps.push('fs-read', 'fs-write', 'exec', 'agentic-loop')
   }
   return caps
@@ -59,20 +60,21 @@ export function getCapabilityMatrix(): AgentCapabilityState[] {
   const cfg = getAgenticConfig()
   const byId = new Map<string, AgentCapabilityState>()
 
-  const put = (agentId: string, protocol: 'http' | 'stdio-plain') => {
+  const put = (agentId: string, protocol: 'http' | 'stdio-plain' | 'acp') => {
     const httpAgentic = protocol === 'http' && cfg.isEnabled(agentId)
     byId.set(agentId, {
       agentId,
       name: agentName(agentId),
       protocol,
-      nativeCli: protocol === 'stdio-plain' && NATIVE_CLI_AGENTS.has(agentId),
+      // acp = 结构化原生 agentic；stdio 的 codex/claude 为原生 CLI agentic
+      nativeCli: protocol === 'acp' || (protocol === 'stdio-plain' && NATIVE_CLI_AGENTS.has(agentId)),
       httpAgentic,
       capabilities: capabilitiesFor(protocol, httpAgentic)
     })
   }
 
   for (const a of AGENTS) put(a.id, 'http')
-  for (const b of bindings) put(b.agentId, b.protocol === 'stdio-plain' ? 'stdio-plain' : 'http')
+  for (const b of bindings) put(b.agentId, b.protocol === 'stdio-plain' ? 'stdio-plain' : b.protocol === 'acp' ? 'acp' : 'http')
 
   return Array.from(byId.values())
 }

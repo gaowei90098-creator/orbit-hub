@@ -21,7 +21,7 @@ interface SkillDef {
   tags: string[]; source: string; createdAt: number; updatedAt: number
 }
 interface CapState {
-  agentId: string; name: string; protocol: 'http' | 'stdio-plain'
+  agentId: string; name: string; protocol: 'http' | 'stdio-plain' | 'acp'
   nativeCli: boolean; httpAgentic: boolean; capabilities: string[]
 }
 type Installs = Record<string, string[]>
@@ -157,7 +157,7 @@ function CapabilityMatrix({ caps, onToggleAgentic, mode, onSetMode }: {
                   </span>
                 </td>
                 <td style={{ padding: '8px 10px' }}>
-                  <span className="ah-chip" style={{ fontSize: 10.5 }}>{a.protocol === 'stdio-plain' ? (a.nativeCli ? 'StdIO·CLI' : 'StdIO') : 'HTTP'}</span>
+                  <span className="ah-chip" style={{ fontSize: 10.5 }}>{a.protocol === 'acp' ? 'ACP' : a.protocol === 'stdio-plain' ? (a.nativeCli ? 'StdIO·CLI' : 'StdIO') : 'HTTP'}</span>
                 </td>
                 {CAP_ORDER.map(c => (
                   <td key={c} style={{ padding: '8px 10px', textAlign: 'center' }}>

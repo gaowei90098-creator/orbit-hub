@@ -9,6 +9,7 @@ import { buildAgentRuntimeSystemPrompt, buildAgentTaskPrompt, RuntimeMemoryEntry
 import { decompositionPrompt, parsePlan, synthesisPrompt, verifyPrompt, parseVerdict, retryPrompt, ORCHESTRATOR_LEAD_SYSTEM } from "./orchestrator"
 import { ChatCompletionMessage, ThinkingConfig } from "../providers/types"
 import { getWorkspaceManager } from "./workspace"
+import { homedir } from "node:os"
 // --- AgentHub skills + native agentic (Claude-B 新增) ---
 import { getSkillManager } from "../skills/manager"
 import { buildSkillBlock } from "../skills/inject"
@@ -276,6 +277,9 @@ export class Dispatcher extends EventEmitter {
     const resolved = mgr.resolveBinding(agentId)
  // stdio routing: 若 registry 注册的是 stdio adapter(非 http),则走本地 CLI 子进程
  const agentInfo = this.registry.get(agentId)
+ if (agentInfo && (agentInfo.adapter as any).protocol === 'acp') {
+ return this.sendToAgentAcp(task, agentId, text, opts, agentInfo.adapter)
+ }
  if (agentInfo && (agentInfo.adapter as any).protocol && (agentInfo.adapter as any).protocol !== 'http') {
  const binding = mgr.getBinding(agentId)
  return this.sendToAgentStdio(task, agentId, text, opts, resolved, agentInfo.adapter, binding)
@@ -620,6 +624,66 @@ export class Dispatcher extends EventEmitter {
       this.emit("stream", { kind: "error", taskId: task.id, agentId, providerId, modelId, error: e.message })
       return { content, error: e.message }
     } finally {
+      try { await adapter.stop() } catch { /* noop */ }
+      this.registry.setStatus(agentId, "idle")
+    }
+  }
+
+  /**
+   * ACP 路径：常驻 server，靠 session/prompt 的 stopReason 判完成（不像 stdio oneshot 靠进程退出）。
+   * session/update 通知经 adapter.runPrompt 的 handlers 透传为 delta(content/thinking) + activity 步骤。
+   * 取消：轮询 task.status，cancelled 时发 session/cancel。每轮结束 stop() 杀掉 server（第一阶段不复用）。
+   */
+  private async sendToAgentAcp(task: DispatchTask, agentId: string, text: string, opts: DispatchOptions, adapter: any): Promise<{ content: string; error?: string }> {
+    this.registry.setStatus(agentId, "busy")
+    const providerId = "local-acp"
+    const modelId = "acp"
+    this.emit("stream", { kind: "start", taskId: task.id, agentId, providerId, modelId, mode: "content" })
+    const start = Date.now()
+    let content = ""
+
+    // prompt 构建与 stdio 一致：技能注入 + 工作区 bootstrap + 用户任务（+ 可选 thinking 指令）
+    let agentPrompt = this.promptForAgent(agentId, text, opts.workspaceId)
+    if (thinkingRequested(opts.thinking)) agentPrompt = STDIO_THINKING_DIRECTIVE + "\n\n" + agentPrompt
+
+    // 工作区 → ACP session/new 的 cwd；未指定/不存在 → home（并在 prompt 顶部提示）
+    let cwd = homedir()
+    const wsId = opts.workspaceId ?? null
+    if (wsId) {
+      const ws = getWorkspaceManager().getById(wsId)
+      if (ws?.rootPath) cwd = ws.rootPath
+      else agentPrompt = '[AgentHub 提示] 指定的工作区不存在或已被删除；本次派发将在 home 目录运行（agent 看不到项目文件）。\n\n' + agentPrompt
+    }
+
+    const cancelPoll = setInterval(() => {
+      if ((task as any).status === "cancelled") { try { adapter.cancel() } catch { /* noop */ } }
+    }, 300)
+
+    try {
+      await this.pipeline.process(agentPrompt, agentId)
+      const stopReason: string = await adapter.runPrompt(agentPrompt, cwd, {
+        onChunk: (t: string) => { content += t; this.emit("stream", { kind: "delta", taskId: task.id, agentId, providerId, modelId, channel: "content", text: t }) },
+        onThought: (t: string) => this.emit("stream", { kind: "delta", taskId: task.id, agentId, providerId, modelId, channel: "thinking", text: t }),
+        onActivity: (step: any) => this.emit("stream", { kind: "activity", taskId: task.id, agentId, step })
+      })
+      if ((task as any).status === "cancelled") return { content }
+      // refusal 且无任何内容 → 作为错误外显；否则按已收内容正常收尾
+      if (stopReason === "refusal" && !content) {
+        const err = "ACP agent 拒绝了本次请求（refusal）"
+        task.errors.set(agentId, err)
+        this.emit("stream", { kind: "error", taskId: task.id, agentId, providerId, modelId, error: err })
+        return { content: "", error: err }
+      }
+      task.results.set(agentId, content)
+      this.emit("stream", { kind: "done", taskId: task.id, agentId, providerId, modelId, content, durationMs: Date.now() - start })
+      return { content }
+    } catch (e: any) {
+      const err = e?.message || String(e)
+      task.errors.set(agentId, err)
+      this.emit("stream", { kind: "error", taskId: task.id, agentId, providerId, modelId, error: err })
+      return { content, error: err }
+    } finally {
+      clearInterval(cancelPoll)
       try { await adapter.stop() } catch { /* noop */ }
       this.registry.setStatus(agentId, "idle")
     }

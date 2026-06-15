@@ -5,7 +5,7 @@ export interface AgentAdapter {
  id: string
  name: string
  binary: string
- protocol: "stdio-ndjson" | "stdio-plain" | "http"
+ protocol: "stdio-ndjson" | "stdio-plain" | "http" | "acp"
  mode: "interactive" | "oneshot"
  start(): Promise<void>
  stop(): Promise<void>
@@ -19,7 +19,7 @@ export abstract class BaseAgentAdapter extends EventEmitter implements AgentAdap
  abstract id: string
  abstract name: string
  abstract binary: string
- abstract protocol: "stdio-ndjson" | "stdio-plain" | "http"
+ abstract protocol: "stdio-ndjson" | "stdio-plain" | "http" | "acp"
  abstract mode: "interactive" | "oneshot"
 
  status: "idle" | "busy" | "error" = "idle"

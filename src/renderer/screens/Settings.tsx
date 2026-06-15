@@ -490,7 +490,9 @@ function BindingRow({ b, providers, patch, candidates }: {
   const meta = AGENT_META[b.agentId]
   const prov = providers.find(p => p.id === b.providerId)
   const stdioSupported = b.agentId in AGENT_META
+  const acpSupported = ['hermes', 'openclaw', 'minimax-code'].includes(b.agentId)
   const isStdio = b.protocol === 'stdio-plain'
+  const isAcp = b.protocol === 'acp'
   const [binary, setBinary] = useState<string | null>(null)
   const [args, setArgs] = useState<string | null>(null)
   const [customMode, setCustomMode] = useState(false)
@@ -536,12 +538,13 @@ function BindingRow({ b, providers, patch, candidates }: {
           <div className="ah-hint">{agentDesc(b.agentId, meta.desc)}</div>
         </div>
         <span className="ah-label">{tr('后端', 'Backend')}</span>
-        <Seg value={b.protocol || 'http'} disabledKeys={stdioSupported ? [] : ['stdio-plain']}
+        <Seg value={b.protocol || 'http'}
+          disabledKeys={[...(stdioSupported ? [] : ['stdio-plain']), ...(acpSupported ? [] : ['acp'])]}
           onChange={v => patch(b.agentId, x => ({ ...x, protocol: v as BindingDef['protocol'] }))}
-          options={[{ value: 'http', label: 'HTTP' }, { value: 'stdio-plain', label: 'StdIO' }]} />
+          options={[{ value: 'http', label: 'HTTP' }, { value: 'stdio-plain', label: 'StdIO' }, { value: 'acp', label: 'ACP' }]} />
       </div>
 
-      {isStdio ? (
+      {(isStdio || isAcp) ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <div>
@@ -555,9 +558,9 @@ function BindingRow({ b, providers, patch, candidates }: {
               </select>
             </div>
             <div>
-              <div className="ah-label" style={{ marginBottom: 5 }}>{tr('附加参数', 'Extra args')} <span className="ah-hint">{tr(`{prompt} 占位符=作参数，否则走 stdin`, `{prompt} placeholder = as argv, otherwise stdin`)}</span></div>
+              <div className="ah-label" style={{ marginBottom: 5 }}>{tr('附加参数', 'Extra args')} <span className="ah-hint">{isAcp ? tr('acp 子命令参数（留空用默认）', 'acp subcommand flags (blank = default)') : tr(`{prompt} 占位符=作参数，否则走 stdin`, `{prompt} placeholder = as argv, otherwise stdin`)}</span></div>
               <input className="ah-input mono" value={args ?? b.args ?? ''}
-                placeholder={DEFAULT_STDIO_ARGS[b.agentId] || ''}
+                placeholder={isAcp ? 'acp' : (DEFAULT_STDIO_ARGS[b.agentId] || '')}
                 onChange={e => setArgs(e.target.value)}
                 onBlur={commitArgs}
                 onKeyDown={e => { if (e.key === 'Enter') commitArgs() }} />
@@ -574,7 +577,10 @@ function BindingRow({ b, providers, patch, candidates }: {
             </div>
           )}
           <div className="ah-hint">
-            {tr('派发将 spawn 本地子进程，stdout 实时回流为流式输出；提供商/模型设置在 StdIO 模式下不生效。',
+            {isAcp
+              ? tr('ACP 模式：spawn 常驻 Agent Client Protocol server（JSON-RPC over stdio），工具/文件/思考等结构化活动直接呈现为步骤卡；附加参数为 acp 子命令参数（留空用默认）。提供商/模型设置不生效。',
+                   'ACP mode: spawns a persistent Agent Client Protocol server (JSON-RPC over stdio); structured activity (tools/files/thoughts) renders as step cards. Extra args are acp subcommand flags (blank = default). Provider/model settings do not apply.')
+              : tr('派发将 spawn 本地子进程，stdout 实时回流为流式输出；提供商/模型设置在 StdIO 模式下不生效。',
                 'Dispatch spawns a local child process; stdout streams back live. Provider/model settings do not apply in StdIO mode.')}
             {candidates.length > 0
               ? tr(` 检测到 ${candidates.length} 个安装${matched ? `，当前使用：${matched.label}` : b.binary ? '' : `，自动使用 ${candidates[0].label}`}。`,

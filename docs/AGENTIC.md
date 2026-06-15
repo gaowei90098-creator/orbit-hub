@@ -18,7 +18,9 @@
 - **写/执行审批门禁已落地**：per-agent × per-tool 的 `allow / ask / deny` 策略（默认全 `allow`，零回归）。`ask` 在运行时弹窗逐次审批（dispatcher 发 `approval` 流事件 → 渲染层弹窗 → `agentic:resolveApproval` 回传，超时/取消自动拒绝），`deny` 直接挡下并把拒绝信息回灌模型；只读工具（读/列文件）永不门禁。配置在「设置 → 技能 → 审批策略」。见 `agentic/approval.ts`、`agentic/executor.ts`、`hub/dispatcher.ts`、`glass/approval-dialog.tsx`。
 - **proxy 的 Anthropic 入站工具透传已补齐**：`/v1/messages`（Claude Code 接管口）解析入站 `tools`/`tool_choice`、保留 `tool_use`/`tool_result` 多轮结构（转 OpenAI 形状经 client 出站到任意上游），并把上游 tool_calls 回写为 anthropic `tool_use` SSE 块（流式增量 + 上游无增量时 done 阶段兜底补发）。协议编解码已单测；端到端正确性需联机 Claude Code + 支持工具的上游验证。见 `routing/proxy.ts`。
 
-**仍待办：** 为 openclaw/hermes/minimax-code 的 CLI 输出补结构化活动解析器（需各自真实输出样本）。
+**0.5.0 新增：ACP 统一接入。** 发现 hermes / openclaw / minimax-code(opencode) 都支持 **ACP（Agent Client Protocol，JSON-RPC over stdio 标准）**，故以「一个 ACP 客户端适配器」统一接入，取代 0.3.0 设想的「各写文本活动解析器」：结构化活动（工具 / 文件 / 思考 / 正文）开箱即有，不靠脆弱的文本逆向。落地 `adapters/acp-client.ts`（协议核心 + `mapAcpUpdate` 纯函数映射）、`adapters/acp-adapter.ts`、dispatcher `sendToAgentAcp` 路径、`protocol:'acp'` 全链路、设置→路由的 **ACP** 后端选项与能力矩阵展示。端到端 `initialize`+`session/new` 握手已用真实 `opencode acp` 验证；`session/prompt` 完整对话流走同一套 JSON-RPC，需配好 provider 后联机验证。详见 [DESIGN-0.5.0-acp.md](./DESIGN-0.5.0-acp.md)。
+
+**仍待办：** ACP 的 `request_permission` 对接 0.4.0 审批门禁、client fs/terminal handler、server 复用 / 会话记忆（见 [DESIGN-0.5.0-acp.md](./DESIGN-0.5.0-acp.md) §4）。
 
 ## 1. 现状诊断（按集成路径，附 file:line 证据）
 

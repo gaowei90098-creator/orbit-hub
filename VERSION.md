@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 当前代码版本：`0.4.0`
-- 当前发布状态：`0.4.0` 已完成本地验证并推送到 GitHub（写/执行审批门禁 + proxy Anthropic 工具透传）
+- 当前代码版本：`0.5.0`
+- 当前发布状态：`0.5.0` 已完成本地验证并推送到 GitHub（ACP 统一接入：hermes/openclaw/opencode）
 - 版本来源：以 `package.json` 的 `version` 与 `build.buildVersion` 为准；两者必须同步
 
 ## 升版规则
@@ -106,8 +106,25 @@
   - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（141 passed / 27 files，exit 0）
   - `npm run build`（exit 0）
 
+### 0.5.0
+
+- 状态：已完成本地验证，推送到 GitHub（tag `v0.5.0`）。
+- 摘要：**ACP（Agent Client Protocol）统一接入** —— 0.3.0 Item K 的「三线 CLI 活动接入」改用更优的 ACP 路线落地。发现 hermes/openclaw/minimax-code(opencode) 都支持 ACP（JSON-RPC over stdio 标准），故写一个 ACP 客户端适配器统一接入，结构化活动（工具/文件/思考/正文）开箱即有。
+  - `adapters/acp-client.ts`(新)：ACP JSON-RPC 客户端（initialize→session/new→session/prompt→stopReason，消费 session/update）+ `mapAcpUpdate` 纯函数映射；request_permission 第一阶段自动放行。
+  - `adapters/acp-adapter.ts`(新)：`AcpAgentAdapter`（protocol:'acp'）+ `acpDefaults`（各 agent acp 启动默认）。
+  - `hub/dispatcher.ts`：`sendToAgentAcp` 路径（stopReason 判完成、session/update→delta+activity、取消发 session/cancel）。
+  - 类型/工厂/能力/UI：`protocol:'acp'` 全链路；createAdapter acp 分支；能力矩阵 ACP 展示；设置→路由 ACP 后端选项（hermes/openclaw/minimax-code）。
+- 主要文件：`adapters/acp-client.ts`(新)、`adapters/acp-adapter.ts`(新)、`adapters/__tests__/acp-client.test.ts`(新)、`adapters/base.ts`、`adapters/agent-adapter.ts`、`hub/registry.ts`、`hub/dispatcher.ts`、`providers/types.ts`、`agentic/capabilities.ts`、`renderer/glass/meta.ts`、`renderer/screens/Skills.tsx`、`renderer/screens/Settings.tsx`、`renderer/vite-env.d.ts`、`docs/AGENTIC.md`、`docs/DESIGN-0.5.0-acp.md`(新)。
+- 验证：
+  - `npm run typecheck`（exit 0）
+  - `npx eslint src`（exit 0）
+  - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（149 passed / 28 files，exit 0）
+  - `npm run build`（exit 0）
+  - **端到端握手**：真实 `opencode acp` 跑通 `initialize`（protocolVersion=1 + agentCapabilities）+ `session/new`（sessionId），证明 JSON-RPC 编解码与真实 server 互通。
+- 未覆盖（仍待办，见 DESIGN-0.5.0-acp §4）：`session/prompt` 完整对话流的联机验证；request_permission 对接审批门禁；client fs/terminal handler；server 复用/会话记忆；openclaw .ps1/.cmd spawn 细节。
+
 ### 下一个候选版本
 
-- 默认候选：`0.4.1`（小修复/小增强）；下一个较大功能版本 `0.5.0`。
-- 适用范围：CLI 活动解析器（待样本）、proxy 工具透传联机验证、后续 agentic / 工作区 / 技能流程修复与小增强。
+- 默认候选：`0.5.1`（小修复/小增强）；下一个较大功能版本 `0.6.0`。
+- 适用范围：ACP 增强（审批对接 / fs handler / server 复用）、session/prompt 联机验证、后续 agentic / 工作区 / 技能流程修复与小增强。
 - 登记要求：完成后补充改动摘要、验证命令、提交哈希或发布 tag。
