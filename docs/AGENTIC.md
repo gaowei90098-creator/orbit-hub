@@ -22,7 +22,9 @@
 
 **0.5.1 新增：ACP 权限请求接入审批门禁。** `session/request_permission` 现在会规范化 ACP tool call 权限请求，把写入类请求映射为 `write`、命令类请求映射为 `exec`，并复用 0.4.0 的 per-agent 审批策略（`allow / ask / deny`）。未知或只读请求继续按 ACP allow 选项放行，避免破坏只读/非门禁能力。
 
-**仍待办：** ACP 的 `session/prompt` 完整联机验证、client fs/terminal handler、server 复用 / 会话记忆（见 [DESIGN-0.5.0-acp.md](./DESIGN-0.5.0-acp.md) §4）。
+**0.5.2 新增：ACP client fs handler。** `initialize` 声明 `fs.readTextFile/writeTextFile`，ACP agent 可通过标准 `fs/read_text_file` / `fs/write_text_file` 访问 AgentHub 当前 session 工作区；路径解析保留在 workspace 内并防符号链接逃逸。直接写文件也走 `write` 审批策略，避免绕过 `request_permission`。
+
+**仍待办：** ACP 的 `session/prompt` 完整联机验证、client terminal handler、server 复用 / 会话记忆（见 [DESIGN-0.5.0-acp.md](./DESIGN-0.5.0-acp.md) §4）。
 
 ## 1. 现状诊断（按集成路径，附 file:line 证据）
 

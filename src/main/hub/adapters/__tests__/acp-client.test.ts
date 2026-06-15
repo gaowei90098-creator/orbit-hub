@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { mapAcpUpdate, acpBlockText, acpToolContent, acpPermissionRequest } from '../acp-client'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import {
+  mapAcpUpdate,
+  acpBlockText,
+  acpToolContent,
+  acpPermissionRequest,
+  acpReadTextFile,
+  acpWriteTextFile,
+  acpResolveWorkspacePath
+} from '../acp-client'
 
 /**
  * ACP 协议核心单测 —— session/update → AgentHub 活动模型的纯函数映射。
@@ -95,5 +106,46 @@ describe('acpPermissionRequest', () => {
 
     expect(req.tool).toBeNull()
     expect(req.toolName).toBe('read')
+  })
+})
+
+describe('ACP client fs helpers', () => {
+  it('reads text files with 1-based line and limit support', () => {
+    const root = mkdtempSync(join(tmpdir(), 'agenthub-acp-'))
+    try {
+      const file = join(root, 'notes.txt')
+      writeFileSync(file, 'one\ntwo\nthree\nfour', 'utf-8')
+
+      const res = acpReadTextFile(root, { path: file, line: 2, limit: 2 })
+
+      expect(res.ok).toBe(true)
+      expect(res.content).toBe('two\nthree')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('writes text files inside the workspace', () => {
+    const root = mkdtempSync(join(tmpdir(), 'agenthub-acp-'))
+    try {
+      const res = acpWriteTextFile(root, { path: 'sub/out.txt', content: 'hello' })
+
+      expect(res.ok).toBe(true)
+      expect(readFileSync(join(root, 'sub', 'out.txt'), 'utf-8')).toBe('hello')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects paths outside the workspace', () => {
+    const root = mkdtempSync(join(tmpdir(), 'agenthub-acp-'))
+    try {
+      const res = acpResolveWorkspacePath(root, '../escape.txt')
+
+      expect(res.ok).toBe(false)
+      expect(res.error).toContain('escapes')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

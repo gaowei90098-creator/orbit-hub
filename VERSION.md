@@ -4,8 +4,8 @@
 
 ## 当前版本
 
-- 当前代码版本：`0.5.1`
-- 当前发布状态：`0.5.1` 已完成本地验证，推送到 GitHub（tag `v0.5.1`，ACP request_permission 审批桥接）
+- 当前代码版本：`0.5.2`
+- 当前发布状态：`0.5.2` 已完成本地验证，推送到 GitHub（tag `v0.5.2`，ACP client fs handler）
 - 版本来源：以 `package.json` 的 `version` 与 `build.buildVersion` 为准；两者必须同步
 
 ## 升版规则
@@ -136,8 +136,21 @@
   - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`（152 passed / 28 files）
   - `npm run build`
 
+### 0.5.2
+
+- 状态：已完成本地验证，推送到 GitHub（tag `v0.5.2`）。
+- 摘要：ACP client fs handler 落地。`initialize` 现在声明 `clientCapabilities.fs.readTextFile/writeTextFile=true`；ACP server 调用 `fs/read_text_file` / `fs/write_text_file` 时由 AgentHub 在 session 工作区内执行。路径解析同时支持 ACP 传入的绝对路径和相对路径，真实路径必须留在 workspace 内，拒绝 `..`、绝对路径逃逸和符号链接逃逸。直接 `fs/write_text_file` 写入也复用 0.4.0 per-agent `write` 审批策略，避免绕过 `session/request_permission`。
+- 主要文件：`src/main/hub/adapters/acp-client.ts`、`src/main/hub/adapters/__tests__/acp-client.test.ts`、`package.json`、`package-lock.json`、`docs/DESIGN-0.5.0-acp.md`、`docs/AGENTIC.md`、`docs/开发日志.md`。
+- 验证：
+  - `npm run typecheck`
+  - `npx eslint src`
+  - `npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'`
+  - `npm run build`
+  - `npm run build:win`
+- 本机安装验证：已卸载旧版 `AgentHub 0.1.0`，安装并启动 `AgentHub 0.5.2`（`C:\Users\Admin\AppData\Local\Programs\AgentHub\AgentHub.exe`）。
+
 ### 下一个候选版本
 
-- 默认候选：`0.5.2`（小修复/小增强）；下一个较大功能版本 `0.6.0`。
-- 适用范围：ACP 增强（fs handler / server 复用）、session/prompt 联机验证、后续 agentic / 工作区 / 技能流程修复与小增强。
+- 默认候选：`0.5.3`（小修复/小增强）；下一个较大功能版本 `0.6.0`。
+- 适用范围：ACP 增强（terminal handler / server 复用）、session/prompt 联机验证、后续 agentic / 工作区 / 技能流程修复与小增强。
 - 登记要求：完成后补充改动摘要、验证命令、提交哈希或发布 tag。

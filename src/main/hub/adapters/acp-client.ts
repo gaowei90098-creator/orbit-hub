@@ -8,10 +8,12 @@
  * prompt(sessionId, text, handlers)=`session/prompt`，期间消费 `session/update` 通知，
  * 直到收到 prompt 响应里的 `stopReason`。cancel() 发 `session/cancel`。
  *
- * clientCapabilities.fs=false（三个 agent 都自带文件/执行能力，由其自身在 cwd 内操作）；
+ * clientCapabilities.fs=true 时，`fs/read_text_file` / `fs/write_text_file` 由 AgentHub 在工作区内执行；
  * 收到 `session/request_permission` 时把写/执行权限请求桥接到 AgentHub 审批门禁。
  */
 import { spawn, ChildProcess } from 'node:child_process'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 
 export interface AcpActivityStep {
   id: string
@@ -42,6 +44,13 @@ export interface AcpPermissionRequest {
   label: string
   detail: string
   raw: any
+}
+
+export interface AcpFileResult {
+  ok: boolean
+  path?: string
+  content?: string
+  error?: string
 }
 
 const STATUS_MAP: Record<string, 'running' | 'done' | 'error'> = {
@@ -139,6 +148,76 @@ function hasAnyKey(obj: any, keys: string[]): boolean {
   return keys.some(k => Object.prototype.hasOwnProperty.call(obj, k))
 }
 
+function isWithin(root: string, target: string): boolean {
+  const rel = relative(root, target)
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + sep) && !rel.startsWith('../') && !isAbsolute(rel))
+}
+
+function firstExistingAncestor(path: string): string | null {
+  let cur = path
+  for (let i = 0; i < 64; i++) {
+    try {
+      statSync(cur)
+      return cur
+    } catch {
+      const parent = dirname(cur)
+      if (parent === cur) return null
+      cur = parent
+    }
+  }
+  return null
+}
+
+export function acpResolveWorkspacePath(root: string, requested: unknown): AcpFileResult {
+  if (typeof requested !== 'string' || !requested.trim()) return { ok: false, error: 'path must be a non-empty string' }
+  let rootReal: string
+  try { rootReal = realpathSync(root) } catch { return { ok: false, error: 'workspace root is not accessible' } }
+  const raw = requested.trim()
+  const abs = isAbsolute(raw) ? resolve(raw) : resolve(rootReal, raw)
+  if (!isWithin(rootReal, abs)) return { ok: false, error: 'path escapes the workspace' }
+  const ancestor = firstExistingAncestor(abs)
+  if (!ancestor) return { ok: false, error: 'path has no existing ancestor' }
+  let ancestorReal: string
+  try { ancestorReal = realpathSync(ancestor) } catch { return { ok: false, error: 'path ancestor is not accessible' } }
+  if (!isWithin(rootReal, ancestorReal)) return { ok: false, error: 'path escapes the workspace through a symlink' }
+  return { ok: true, path: abs }
+}
+
+export function acpReadTextFile(root: string, params: any): AcpFileResult {
+  const resolved = acpResolveWorkspacePath(root, params?.path)
+  if (!resolved.ok || !resolved.path) return resolved
+  let content: string
+  try {
+    const st = statSync(resolved.path)
+    if (!st.isFile()) return { ok: false, error: 'not a file' }
+    content = readFileSync(resolved.path, 'utf-8')
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+  const line = Number(params?.line)
+  const limit = Number(params?.limit)
+  if (Number.isFinite(line) || Number.isFinite(limit)) {
+    const lines = content.split(/\r?\n/)
+    const start = Number.isFinite(line) ? Math.max(0, Math.floor(line) - 1) : 0
+    const end = Number.isFinite(limit) ? start + Math.max(0, Math.floor(limit)) : undefined
+    content = lines.slice(start, end).join('\n')
+  }
+  return { ok: true, path: resolved.path, content }
+}
+
+export function acpWriteTextFile(root: string, params: any): AcpFileResult {
+  const resolved = acpResolveWorkspacePath(root, params?.path)
+  if (!resolved.ok || !resolved.path) return resolved
+  if (typeof params?.content !== 'string') return { ok: false, error: 'content must be a string' }
+  try {
+    mkdirSync(dirname(resolved.path), { recursive: true })
+    writeFileSync(resolved.path, params.content, 'utf-8')
+    return { ok: true, path: resolved.path }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+}
+
 export function acpPermissionRequest(params: any): AcpPermissionRequest {
   const toolCall = params?.toolCall || params?.tool_call || params?.tool || params?.call || {}
   const input = toolCall.rawInput || toolCall.input || params?.rawInput || params?.input || {}
@@ -199,6 +278,8 @@ export class AcpClient {
   private initResult: any = null
   /** 当前活跃 prompt 的 update 处理器（按 sessionId） */
   private promptHandlers = new Map<string, AcpPromptHandlers>()
+  /** ACP sessionId → workspace root，用于 client fs handler 的沙箱边界。 */
+  private sessionRoots = new Map<string, string>()
   /** server 崩溃 / 退出回调（adapter 用于把错误外显） */
   onCrash: ((e: Error) => void) | null = null
 
@@ -228,8 +309,8 @@ export class AcpClient {
 
     this.initResult = await this.request('initialize', {
       protocolVersion: 1,
-      clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
-      clientInfo: { name: 'AgentHub', version: '0.5.0' }
+      clientCapabilities: { fs: { readTextFile: true, writeTextFile: true } },
+      clientInfo: { name: 'AgentHub', version: '0.5.2' }
     })
   }
 
@@ -238,7 +319,9 @@ export class AcpClient {
     const res = await this.request('session/new', { cwd, mcpServers: [] })
     const sid = res?.sessionId
     if (!sid) throw new Error('ACP session/new 未返回 sessionId')
-    return String(sid)
+    const sessionId = String(sid)
+    this.sessionRoots.set(sessionId, cwd)
+    return sessionId
   }
 
   /** 发一轮 prompt，消费 session/update 直到 prompt 响应返回 stopReason。 */
@@ -299,6 +382,13 @@ export class AcpClient {
     } catch { /* noop */ }
   }
 
+  private respondError(id: number | string, code: number, message: string): void {
+    if (!this.proc) return
+    try {
+      this.proc.stdin?.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } }) + '\n')
+    } catch { /* noop */ }
+  }
+
   private onStdout(d: Buffer): void {
     this.buf += this.decoder.decode(d, { stream: true })
     let nl: number
@@ -342,12 +432,46 @@ export class AcpClient {
       void this.handlePermissionRequest(msg)
       return
     }
-    // 其余 server→client 请求（fs/terminal）：第一阶段未声明能力，理应不会收到；保守回错误避免挂起。
-    if (this.proc) {
-      try {
-        this.proc.stdin?.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'method not supported by client' } }) + '\n')
-      } catch { /* noop */ }
+    if (msg.method === 'fs/read_text_file') {
+      const root = this.sessionRoots.get(String(msg.params?.sessionId || ''))
+      if (!root) return this.respondError(msg.id, -32000, 'unknown ACP session')
+      const res = acpReadTextFile(root, msg.params)
+      if (res.ok) this.respond(msg.id, { content: res.content ?? '' })
+      else this.respondError(msg.id, -32000, res.error || 'read_text_file failed')
+      return
     }
+    if (msg.method === 'fs/write_text_file') {
+      void this.handleWriteTextFileRequest(msg)
+      return
+    }
+    this.respondError(msg.id, -32601, 'method not supported by client')
+  }
+
+  private async handleWriteTextFileRequest(msg: any): Promise<void> {
+    const sid = String(msg.params?.sessionId || '')
+    const root = this.sessionRoots.get(sid)
+    if (!root) return this.respondError(msg.id, -32000, 'unknown ACP session')
+
+    const handler = this.promptHandlers.get(sid)?.onRequestPermission
+    if (!handler) return this.respondError(msg.id, -32000, 'write_text_file requires an active prompt approval context')
+
+    let approved = false
+    try {
+      approved = await handler({
+        tool: 'write',
+        toolName: 'fs/write_text_file',
+        label: 'Write file',
+        detail: firstString(msg.params?.path) || safeJson(msg.params),
+        raw: msg.params
+      })
+    } catch {
+      approved = false
+    }
+    if (!approved) return this.respondError(msg.id, -32000, 'write_text_file denied by approval policy')
+
+    const res = acpWriteTextFile(root, msg.params)
+    if (res.ok) this.respond(msg.id, null)
+    else this.respondError(msg.id, -32000, res.error || 'write_text_file failed')
   }
 
   private async handlePermissionRequest(msg: any): Promise<void> {
@@ -388,6 +512,7 @@ export class AcpClient {
     for (const [, p] of this.pending) p.reject(err)
     this.pending.clear()
     this.promptHandlers.clear()
+    this.sessionRoots.clear()
     if (this.onCrash) this.onCrash(err)
   }
 }
