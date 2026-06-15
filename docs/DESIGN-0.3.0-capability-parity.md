@@ -50,8 +50,8 @@
 | F | `index.ts` / `preload/index.ts` / `vite-env.d.ts` | 新增 `agentic:getMode/setMode` IPC + preload + 类型 | ✅ |
 | G | `renderer/screens/Skills.tsx` | 技能编辑 UI + 能力矩阵"默认全员 Agentic"总开关 | ✅ |
 | H | `agentic/executor.ts` 注释 / `docs/AGENTIC.md` | 注释与文档纠偏到实现现状 | ✅ |
-| I | 测试补全（config / bootstrap / executor loop / inject / stdio） | 见 §5.8 | ⏳ |
-| J | 验证（typecheck/lint/test/build）+ 升 0.3.0 + 登记 VERSION.md + 推 GitHub | 见 §5.9 | ⏳ |
+| I | 测试补全（config / bootstrap / executor loop / inject / stdio） | 见 §5.8 | ✅ |
+| J | 验证（typecheck/lint/test/build）+ 升 0.3.0 + 登记 VERSION.md + 推 GitHub | 见 §5.9 | ✅ |
 | K | 逐次审批 / 三线 CLI 活动解析器 / proxy Anthropic 入站 | 见 §6 | 🔭 |
 
 ---
@@ -108,7 +108,7 @@
 - `executor.ts` 头部"anthropic/gemini 工具未补齐"已过时 → 改为"三线均已实现"；`userText/systemPrompt` 注释纠正为"bootstrap 注入 systemPrompt"。
 - `AGENTIC.md` 顶部新增 §0「实现现状（0.3.0）」，纠正过时诊断、记录已落地项与待办，保留历史路线图。
 
-### 3.8 ⏳ 测试方案（待完成）
+### 3.8 ✅ 测试方案（已落地）
 | 测试 | 文件 | 覆盖点 |
 |------|------|--------|
 | agentic 配置 | `agentic/__tests__/config.test.ts` | 默认 `all` → 全员 enabled；`all` 下 setEnabled 关 = 进 disabled；切 `selected` 语义；v1→v2 迁移 |
@@ -119,11 +119,13 @@
 
 验收：`npx eslint src` exit 0；`npx vitest run --exclude '**/.cc-switch-src/**' --exclude '**/output/**'` 全绿；`npm run typecheck`、`npm run build` exit 0。
 
-### 3.9 ⏳ 验证与发版
+### 3.9 ✅ 验证与发版（已完成）
 1. 跑发版前必检（见上，注意本机 `.cc-switch-src/`、`output/` 杂物会让全量 `eslint .`/`vitest` 假失败，限定 src 验证）。
 2. `package.json` `version` + `build.buildVersion` → `0.3.0`。
 3. `VERSION.md` 登记 0.3.0（摘要 + 验证 + 候选推进到 0.3.1 或 0.4.0）。
 4. 只暂存本方案涉及文件，提交（subject 末尾 `(0.3.0)` + Co-Authored-By），打 tag `v0.3.0`，`git fetch` 后推 master + tag。
+
+**结果（已完成）**：0.3.0 已落地为提交 `7e1c863`（`feat: 全员 Agent 能力对齐 …（0.3.0）`），含 §3.8 全部 5 个测试文件，已推送 `origin/master`。复核验证（2026-06-16）：`tsc --noEmit` exit 0；`eslint src` exit 0；`vitest run`（排除 `.cc-switch-src/`、`output/`）= 25 文件 / 126 用例全绿；`electron-vite build` exit 0。Item K（逐次审批 / 三线 CLI 活动解析器 / proxy Anthropic 入站）按计划留作 0.3.x/0.4.0 后续。
 
 ---
 
