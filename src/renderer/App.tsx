@@ -20,6 +20,7 @@ import { SettingsScreen, MotionLevel } from './screens/Settings'
 import { useLang, tr } from './glass/i18n'
 import { getBudget, getBudgetMode } from './glass/budget'
 import { applyOrchestrateEvent } from './glass/orchestrate-reducer'
+import { upsertStep } from './glass/chat-transcript'
 import { SetupTab, summarizeAgentConnections } from './glass/connection-status'
 
 type AgentMap = Record<string, { status: AgentUIStatus }>
@@ -206,6 +207,16 @@ export default function App() {
                 : r)
             }
           : m))
+      } else if (e.kind === 'activity' && e.step) {
+        // Track A/B：结构化活动步骤（工具调用/思考），按 step.id upsert 进对应 reply 的 steps[]
+        setMessages(ms => ms.map(m => {
+          if (m.id !== msgId) return m
+          const exists = m.replies.some(r => r.agentId === e.agentId)
+          const replies = exists
+            ? m.replies.map(r => r.agentId === e.agentId ? { ...r, steps: upsertStep(r.steps, e.step) } : r)
+            : [...m.replies, { agentId: e.agentId, thinking: '', text: '', done: false, steps: upsertStep(undefined, e.step) }]
+          return { ...m, replies }
+        }))
       } else if (e.kind === 'done') {
         setBusyOverride(o => ({ ...o, [e.agentId]: undefined }))
         setMessages(ms => ms.map(m => m.id === msgId

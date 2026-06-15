@@ -184,6 +184,28 @@ export const sumCost = (m?: Record<string, TokenUsage>): number | null => {
 export const fmtCost = (n: number): string =>
   n === 0 ? '$0' : n < 0.01 ? '<$0.01' : '$' + n.toFixed(n < 1 ? 3 : 2)
 
+/* ---------- agentic 活动轨迹（Track A/B 共享）----------
+   stdio CLI（claude/codex stream-json）或 HTTP act-observe 回环把每一步工具调用/思考
+   解析成结构化 ActivityStep，经 `kind:'activity'` 流事件喂进对应 reply 的 steps[]。
+   解析失败软回退：不发 activity，UI 照常显示纯文本，无步骤卡，零回归。 */
+export type ActivityKind = 'tool' | 'thinking' | 'text' | 'note'
+export type ActivityStatus = 'running' | 'done' | 'error'
+
+export interface ActivityStep {
+  /** 稳定 id（如 tool_use id 或序号），UI 按它做增量 upsert */
+  id: string
+  kind: ActivityKind
+  /** 原始工具名（用于图标/分类，如 Write/Bash/Read/Edit/Grep） */
+  tool?: string
+  /** 一行标题，如 "Write · hello.txt"、"Bash · ls -la" */
+  label: string
+  /** 可展开细节：命令全文 / 文件路径 / 输入参数摘要 */
+  detail?: string
+  /** 可展开输出：工具结果预览（截断） */
+  output?: string
+  status: ActivityStatus
+}
+
 export interface ReplyState {
   agentId: string
   thinking: string
@@ -191,6 +213,8 @@ export interface ReplyState {
   done: boolean
   cancelled?: boolean
   error?: string
+  /** Track A：stdio agentic 过程的结构化步骤（claude/codex stream-json 解析而来） */
+  steps?: ActivityStep[]
 }
 
 export interface ChatMessage {

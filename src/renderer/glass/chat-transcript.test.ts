@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest"
 import {
   curateAgentReply,
   visibleSequentialReplies,
-  orchestrationReplies
+  orchestrationReplies,
+  upsertStep
 } from "./chat-transcript"
-import type { ReplyState } from "./meta"
+import type { ActivityStep, ReplyState } from "./meta"
 import type { OrchestrateState } from "./orchestrate-view"
 
 const reply = (patch: Partial<ReplyState>): ReplyState => ({
@@ -67,5 +68,35 @@ describe("chat transcript helpers", () => {
     expect(turns.map(t => t.agentId)).toEqual(["claude", "codex"])
     expect(turns[0].text).toBe("结论：采用微信式气泡。")
     expect(turns[1].done).toBe(false)
+  })
+})
+
+const step = (patch: Partial<ActivityStep> & Pick<ActivityStep, "id">): ActivityStep => ({
+  kind: "tool",
+  label: patch.id,
+  status: "running",
+  ...patch
+})
+
+describe("upsertStep", () => {
+  it("appends a new step preserving arrival order", () => {
+    const a = upsertStep(undefined, step({ id: "1", label: "Read foo.ts" }))
+    const b = upsertStep(a, step({ id: "2", label: "Write bar.ts" }))
+    expect(b.map(s => s.id)).toEqual(["1", "2"])
+    expect(b).not.toBe(a) // immutable
+  })
+
+  it("merges by id, only overwriting provided fields (running -> done + output)", () => {
+    const running = upsertStep(undefined, step({ id: "t1", tool: "Bash", label: "Bash · ls", status: "running" }))
+    const done = upsertStep(running, { id: "t1", kind: "tool", label: "Bash · ls", status: "done", output: "a.ts\nb.ts" })
+    expect(done).toHaveLength(1)
+    expect(done[0]).toMatchObject({ id: "t1", tool: "Bash", status: "done", output: "a.ts\nb.ts" })
+  })
+
+  it("does not mutate the input array and ignores steps without an id", () => {
+    const orig = upsertStep(undefined, step({ id: "x" }))
+    const same = upsertStep(orig, undefined as unknown as ActivityStep)
+    expect(same).toEqual(orig)
+    expect(same).not.toBe(orig)
   })
 })

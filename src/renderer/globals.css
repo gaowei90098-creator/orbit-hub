@@ -396,6 +396,46 @@ body {
   }
 }
 
+/* ---------- agentic 活动轨迹：折叠步骤卡（Track A/B 共享，append-only） ---------- */
+.ah-act { display: flex; flex-direction: column; gap: 4px; }
+.ah-act-head {
+  display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer; user-select: none;
+  font-size: 11.5px; color: var(--tx-3); padding: 1px 0;
+  align-self: flex-start;
+}
+.ah-act-head:hover { color: var(--tx-2); }
+.ah-act-chev { display: inline-flex; transition: transform 0.15s ease; }
+.ah-act-chev.open { transform: rotate(90deg); }
+.ah-act-list {
+  display: flex; flex-direction: column; gap: 2px;
+  border-left: 1.5px solid var(--glass-border);
+  padding-left: 9px; margin-left: 4px;
+}
+.ah-act-step { display: flex; flex-direction: column; }
+.ah-act-row {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; color: var(--tx-2); padding: 2px 0; min-width: 0;
+}
+.ah-act-row.clickable { cursor: pointer; }
+.ah-act-row.clickable:hover { color: var(--tx-1); }
+.ah-act-ico { flex: none; display: inline-flex; opacity: 0.85; }
+.ah-act-label {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ah-act-st { flex: none; width: 14px; display: inline-flex; align-items: center; justify-content: center; }
+.ah-act-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.ah-act-running-dot { animation: ah-pulse 0.9s ease-in-out infinite; }
+.ah-act-detail {
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+  color: var(--tx-3); background: rgba(255,255,255,0.04);
+  border: 1px solid var(--glass-border); border-radius: 7px;
+  padding: 6px 8px; margin: 1px 0 3px 21px;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 220px; overflow: auto;
+}
+
 /* ============================================================
    动效系统 — 三档：off / subtle / rich（html[data-motion]）
    入场用 JS 切换 class + CSS transition（避免动画冻结在首帧）
