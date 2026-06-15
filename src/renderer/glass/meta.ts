@@ -102,10 +102,11 @@ export interface BindingDef {
   args?: string
 }
 
-/** StdIO 模式各 Agent 的默认 oneshot 参数（与主进程 adapter 默认一致，仅用于 UI 提示） */
+/** StdIO 模式各 Agent 的默认 oneshot 参数（与主进程 adapter 默认一致，仅用于 UI 提示）。
+    codex/claude 为 agentic 默认（在工作区读写文件、跑命令），留空即用这套参数。 */
 export const DEFAULT_STDIO_ARGS: Record<string, string> = {
-  codex: 'exec --skip-git-repo-check -',
-  claude: '--print',
+  codex: 'exec --sandbox workspace-write --skip-git-repo-check -',
+  claude: '--print --permission-mode acceptEdits',
   hermes: '（无参数，prompt 走 stdin）',
   openclaw: 'crestodian --message {prompt}',
   marvis: '（Marvis 暂无官方 CLI，建议用 HTTP 绑定）',

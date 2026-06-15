@@ -44,7 +44,7 @@ export function SettingsScreen({ providers, bindings, onSetEnabled, onSetKey, on
       <SetupNextStep summary={connectionSummary} onTab={setTab} goChat={goChat} />
       {tab === 'providers' && <ProvidersTab providers={providers} onSetEnabled={onSetEnabled} onSetKey={onSetKey} onReload={onReload}
         onUpsert={onUpsertProvider} onDelete={onDeleteProvider} />}
-      {tab === 'routing' && <RoutingTab providers={providers} bindings={bindings} onSetBinding={onSetBinding} />}
+      {tab === 'routing' && <RoutingTab providers={providers} bindings={bindings} onSetBinding={onSetBinding} onTab={setTab} />}
       {tab === 'workspaces' && <WorkspacesTab />}
       {tab === 'proxy' && <ProxyTab providers={providers} fallbackChain={fallbackChain} onSetFallback={onSetFallback} />}
       {tab === 'sites' && <AgentSitesTab />}
@@ -373,10 +373,11 @@ const LEVEL_OPTS = ['minimal', 'low', 'medium', 'high', 'xhigh']
 
 interface BinaryCandidate { source: 'desktop' | 'terminal'; label: string; path: string }
 
-function RoutingTab({ providers, bindings, onSetBinding }: {
+function RoutingTab({ providers, bindings, onSetBinding, onTab }: {
   providers: ProviderDef[]
   bindings: BindingDef[]
   onSetBinding: (b: BindingDef) => void
+  onTab: (tab: SetupTab | 'appearance') => void
 }) {
   const [located, setLocated] = useState<Record<string, BinaryCandidate[]>>({})
   useEffect(() => {
@@ -388,6 +389,7 @@ function RoutingTab({ providers, bindings, onSetBinding }: {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <AgenticEnableBanner bindings={bindings} located={located} onSetBinding={onSetBinding} onTab={onTab} />
       <div className="ah-hint" style={{ padding: '0 4px' }}>
         {tr('每个 Agent 可绑定到 HTTP 提供商（模型即点即切、实时生效），或切换为 StdIO 直连本地 CLI 子进程；终端版与桌面版同时安装时在 StdIO 的「使用版本」里选择。',
             'Bind each agent to an HTTP provider (models switch instantly), or use StdIO to drive the local CLI directly; pick terminal vs desktop builds under "Version" when both are installed.')}
@@ -395,6 +397,81 @@ function RoutingTab({ providers, bindings, onSetBinding }: {
       {bindings.map((b, i) => <Enter key={b.agentId} delay={i * 60}>
         <BindingRow b={b} providers={providers} patch={patch} candidates={located[b.agentId] ?? []} />
       </Enter>)}
+    </div>
+  )
+}
+
+/* 一键开启 agentic：把"检测到本机 CLI 但仍走 HTTP"的 agent 翻成 stdio-plain 直连，
+   binary 留空(auto 用首选安装)、args 留空(用主进程 adapter 的 agentic 默认参数：
+   codex `exec --sandbox workspace-write …` / claude `--print --permission-mode acceptEdits`)，
+   从"会描述行动"升级到"真在工作区读写文件、跑命令"，过程经 Phase 0 步骤卡呈现。 */
+function AgenticEnableBanner({ bindings, located, onSetBinding, onTab }: {
+  bindings: BindingDef[]
+  located: Record<string, BinaryCandidate[]>
+  onSetBinding: (b: BindingDef) => void
+  onTab: (tab: SetupTab | 'appearance') => void
+}) {
+  const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null)
+  useEffect(() => {
+    window.electronAPI?.workspaces?.list?.()
+      .then((ws: Array<unknown>) => setHasWorkspace(Array.isArray(ws) && ws.length > 0))
+      .catch(() => setHasWorkspace(null))
+  }, [])
+
+  const hasCli = (agentId: string) => (located[agentId]?.length ?? 0) > 0
+  const isAgentic = (b: BindingDef) => b.protocol === 'stdio-plain'
+  const eligible = bindings.filter(b => b.agentId in AGENT_META && hasCli(b.agentId) && !isAgentic(b))
+  const enabledCount = bindings.filter(b => isAgentic(b) && (hasCli(b.agentId) || !!b.binary)).length
+
+  const enable = (b: BindingDef) => onSetBinding({ ...b, thinking: { ...b.thinking }, protocol: 'stdio-plain', binary: '', args: '' })
+
+  if (eligible.length === 0) {
+    if (enabledCount === 0) return null
+    return (
+      <div className="glass" style={{ padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 9 }}>
+        <Icon d={IC.check} size={16} style={{ color: 'var(--st-idle)', flex: 'none' }} />
+        <span className="ah-hint" style={{ color: 'var(--tx-2)' }}>
+          {tr(`已为 ${enabledCount} 个本地 CLI 开启 agentic — 直连子进程，在工作区读写文件、跑命令，过程以步骤卡呈现。`,
+              `Agentic enabled for ${enabledCount} local CLI — direct subprocess that reads/writes files and runs commands in the workspace, shown as step cards.`)}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="glass" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 11, borderColor: 'color-mix(in srgb, var(--ag-codex) 40%, var(--glass-border))' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <Icon d={IC.bolt} size={18} style={{ color: 'var(--ag-codex)', flex: 'none' }} />
+        <div style={{ fontWeight: 700 }}>{tr('开启 agentic 能力', 'Turn on agentic capability')}</div>
+      </div>
+      <div className="ah-hint" style={{ lineHeight: 1.6 }}>
+        {tr('默认走 HTTP 时 Agent 只会"描述"该怎么做。检测到本机已装下面这些 CLI——一键切到直连模式后，它们能真正在工作区读写文件、运行命令，每一步以折叠步骤卡实时呈现。',
+            'On HTTP, agents only "describe" what to do. These CLIs are installed locally — one click switches them to direct mode so they actually read/write files and run commands in your workspace, with every step shown as a collapsible card.')}
+      </div>
+      {hasWorkspace === false && (
+        <div className="ah-hint" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--st-busy)' }}>
+          <Icon d={IC.folder} size={14} style={{ flex: 'none' }} />
+          <span>{tr('还没有工作区。不设也能跑（用主目录），但建议先指定一个项目目录让 agent 在里面动手。', 'No workspace yet. It still runs (in your home dir), but pointing it at a project folder is recommended.')}</span>
+          <button className="ah-btn sm" onClick={() => onTab('workspaces')}>{tr('去设置工作区', 'Set workspace')}</button>
+        </div>
+      )}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        {eligible.map(b => (
+          <button key={b.agentId} className="ah-btn sm" onClick={() => enable(b)}>
+            <Icon d={IC.bolt} size={13} style={{ marginRight: 5, verticalAlign: '-2px' }} />
+            {tr(`开启 ${AGENT_META[b.agentId]?.name ?? b.agentId}`, `Enable ${AGENT_META[b.agentId]?.name ?? b.agentId}`)}
+          </button>
+        ))}
+        {eligible.length > 1 && (
+          <button className="ah-btn sm primary" onClick={() => eligible.forEach(enable)}>
+            {tr(`全部开启（${eligible.length}）`, `Enable all (${eligible.length})`)}
+          </button>
+        )}
+      </div>
+      <div className="ah-hint" style={{ fontSize: 11.5, color: 'var(--tx-3)' }}>
+        {tr('需对应 CLI 已在本机登录（如 claude / codex 各自的 login）；未登录时派发会返回"去登录"提示。随时可在下方切回 HTTP。',
+            'Requires each CLI to be logged in locally (e.g. claude / codex login); otherwise dispatch returns a "please log in" hint. You can switch back to HTTP below anytime.')}
+      </div>
     </div>
   )
 }
