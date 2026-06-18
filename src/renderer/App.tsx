@@ -11,7 +11,7 @@ import { Sidebar, PageId } from './glass/Sidebar'
 import { Enter } from './glass/ui'
 import {
   AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, ChatMessage,
-  DispatchMode, nowHHMM, sumTokens, sumCost
+  DispatchMode, nowHHMM, sumTokens, sumCost, ConversationItem, WorkspaceItem
 } from './glass/meta'
 import { HomeScreen } from './screens/Home'
 import { ChatScreen } from './screens/Chat'
@@ -23,6 +23,7 @@ import { applyOrchestrateEvent } from './glass/orchestrate-reducer'
 import { upsertStep } from './glass/chat-transcript'
 import { SetupTab, summarizeAgentConnections } from './glass/connection-status'
 import { ApprovalDialog, ApprovalItem } from './glass/approval-dialog'
+import { OrbitAurora } from './glass/orbit-aurora'
 
 type AgentMap = Record<string, { status: AgentUIStatus }>
 
@@ -32,6 +33,68 @@ const asRecord = (v: any): Record<string, string> => {
   if (Array.isArray(v)) return Object.fromEntries(v)
   return v
 }
+
+type ListUpdater<T> = React.SetStateAction<T[]>
+
+const sameWorkspace = (a: string | null | undefined, b: string | null | undefined) => (a ?? null) === (b ?? null)
+
+const shortConversationTitle = (text: string): string => {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  return compact ? compact.slice(0, 32) : '新对话'
+}
+
+const makeConversation = (workspaceId: string | null, title = '新对话'): ConversationItem => {
+  const now = Date.now()
+  return {
+    id: 'conv-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+    workspaceId,
+    title,
+    createdAt: now,
+    updatedAt: now,
+    messages: [],
+    tasks: []
+  }
+}
+
+const normalizeConversations = (state: any, fallbackWorkspaceId: string | null): {
+  conversations: ConversationItem[]
+  activeConversationId: string | null
+} => {
+  const fromState = Array.isArray(state?.conversations)
+    ? state.conversations
+        .filter((c: any) => c && typeof c.id === 'string')
+        .map((c: any) => ({
+          id: c.id,
+          workspaceId: typeof c.workspaceId === 'string' ? c.workspaceId : null,
+          title: typeof c.title === 'string' && c.title.trim() ? c.title.trim() : '新对话',
+          createdAt: typeof c.createdAt === 'number' ? c.createdAt : Date.now(),
+          updatedAt: typeof c.updatedAt === 'number' ? c.updatedAt : Date.now(),
+          messages: Array.isArray(c.messages) ? c.messages : [],
+          tasks: Array.isArray(c.tasks) ? c.tasks : []
+        })) as ConversationItem[]
+    : []
+
+  const legacyMessages = Array.isArray(state?.messages) ? state.messages as ChatMessage[] : []
+  const legacyTasks = Array.isArray(state?.tasks) ? state.tasks as TaskItem[] : []
+  if (fromState.length === 0 && (legacyMessages.length > 0 || legacyTasks.length > 0)) {
+    const title = legacyMessages[0]?.text ? shortConversationTitle(legacyMessages[0].text) : '迁移的对话'
+    const conv = makeConversation(fallbackWorkspaceId, title)
+    conv.messages = legacyMessages
+    conv.tasks = legacyTasks
+    conv.updatedAt = Date.now()
+    fromState.push(conv)
+  }
+
+  if (fromState.length === 0) fromState.push(makeConversation(fallbackWorkspaceId))
+  fromState.sort((a, b) => b.updatedAt - a.updatedAt)
+  const activeConversationId = typeof state?.activeConversationId === 'string' && fromState.some(c => c.id === state.activeConversationId)
+    ? state.activeConversationId
+    : fromState[0]?.id ?? null
+  return { conversations: fromState, activeConversationId }
+}
+
+const latestConversationForWorkspace = (items: ConversationItem[], workspaceId: string | null): ConversationItem | undefined =>
+  items.filter(c => sameWorkspace(c.workspaceId, workspaceId)).sort((a, b) => b.updatedAt - a.updatedAt)[0]
 
 export default function App() {
   const [page, setPage] = useState<PageId>('home')
@@ -45,8 +108,13 @@ export default function App() {
   const [providers, setProviders] = useState<ProviderDef[]>([])
   const [bindings, setBindings] = useState<BindingDef[]>([])
   const [fallbackChain, setFallbackChain] = useState<string[]>([])
-  const [tasks, setTasks] = useState<TaskItem[]>([])
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([])
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null)
+  const [conversations, setConversations] = useState<ConversationItem[]>([])
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  const activeConversation = conversations.find(c => c.id === activeConversationId) ?? conversations[0] ?? null
+  const tasks = activeConversation?.tasks ?? []
+  const messages = activeConversation?.messages ?? []
   const [streaming, setStreaming] = useState(false)
   const [approvals, setApprovals] = useState<ApprovalItem[]>([])  // 写/执行待审批队列（'ask' 策略）
   const [motion, setMotion] = useState<MotionLevel>(() => {
@@ -55,14 +123,18 @@ export default function App() {
 
   /* 流式派发簿记 */
   const taskToMsg = useRef<Map<string, string>>(new Map())
+  const taskToConversation = useRef<Map<string, string>>(new Map())
   const pendingMsgId = useRef<string | null>(null)
+  const pendingConversationId = useRef<string | null>(null)
   const ignoredTasks = useRef<Set<string>>(new Set())
   const ignoredMsgs = useRef<Set<string>>(new Set())
   const activeTaskIds = useRef<Set<string>>(new Set())
   const localTaskId = useRef<Map<string, string>>(new Map()) // 后端 taskId → 本地任务行 id
   const currentMsgId = useRef<string | null>(null)
+  const currentConversationId = useRef<string | null>(null)
   const cancelGen = useRef(0)
   const memoryReady = useRef(false)
+  const [runtimeReady, setRuntimeReady] = useState(false)
   const orchestrateTasks = useRef<Set<string>>(new Set())  // 编排模式任务 id（其内部 agent 事件不渲染气泡）
 
   /* 动效档位 → html[data-motion] */
@@ -71,21 +143,68 @@ export default function App() {
     try { localStorage.setItem('ah-motion', motion) } catch { /* noop */ }
   }, [motion])
 
+  const updateConversation = useCallback((conversationId: string, updater: (conversation: ConversationItem) => ConversationItem) => {
+    setConversations(prev => prev.map(conv => conv.id === conversationId ? updater(conv) : conv))
+  }, [])
+
+  const updateConversationMessages = useCallback((conversationId: string, updater: ListUpdater<ChatMessage>) => {
+    updateConversation(conversationId, conv => {
+      const nextMessages = typeof updater === 'function'
+        ? (updater as (prev: ChatMessage[]) => ChatMessage[])(conv.messages)
+        : updater
+      return { ...conv, messages: nextMessages, updatedAt: Date.now() }
+    })
+  }, [updateConversation])
+
+  const updateConversationTasks = useCallback((conversationId: string, updater: ListUpdater<TaskItem>) => {
+    updateConversation(conversationId, conv => {
+      const nextTasks = typeof updater === 'function'
+        ? (updater as (prev: TaskItem[]) => TaskItem[])(conv.tasks)
+        : updater
+      return { ...conv, tasks: nextTasks, updatedAt: Date.now() }
+    })
+  }, [updateConversation])
+
+  const updateTaskAcrossConversations = useCallback((updater: (tasks: TaskItem[]) => TaskItem[]) => {
+    setConversations(prev => prev.map(conv => ({ ...conv, tasks: updater(conv.tasks), updatedAt: Date.now() })))
+  }, [])
+
+  const loadWorkspaces = useCallback(async () => {
+    try {
+      const list = await (window.electronAPI as any)?.workspaces?.list?.()
+      const active = await (window.electronAPI as any)?.workspaces?.getActive?.()
+      const nextList = Array.isArray(list) ? list as WorkspaceItem[] : []
+      setWorkspaces(nextList)
+      setActiveWorkspaceId(typeof active === 'string' && nextList.some(w => w.id === active) ? active : null)
+    } catch {
+      setWorkspaces([])
+      setActiveWorkspaceId(null)
+    }
+  }, [])
+
   useEffect(() => {
     let alive = true
     const memoryApi = window.electronAPI?.memory
     if (!memoryApi?.loadState) {
       memoryReady.current = true
+      setRuntimeReady(true)
       return () => { alive = false }
     }
     memoryApi.loadState()
       .then(state => {
         if (!alive) return
-        if (Array.isArray(state?.messages) && state.messages.length > 0) setMessages(state.messages as ChatMessage[])
-        if (Array.isArray(state?.tasks) && state.tasks.length > 0) setTasks(state.tasks as TaskItem[])
+        const restored = normalizeConversations(state, typeof (state as any)?.activeWorkspaceId === 'string' ? (state as any).activeWorkspaceId : null)
+        setConversations(restored.conversations)
+        setActiveConversationId(restored.activeConversationId)
+        if (typeof (state as any)?.activeWorkspaceId === 'string') setActiveWorkspaceId((state as any).activeWorkspaceId)
       })
       .catch(() => {})
-      .finally(() => { if (alive) memoryReady.current = true })
+      .finally(() => {
+        if (alive) {
+          memoryReady.current = true
+          setRuntimeReady(true)
+        }
+      })
     return () => { alive = false }
   }, [])
 
@@ -94,10 +213,38 @@ export default function App() {
     const memoryApi = window.electronAPI?.memory
     if (!memoryApi?.saveState) return
     const timer = setTimeout(() => {
-      memoryApi.saveState({ messages, tasks }).catch(() => {})
+      memoryApi.saveState({
+        messages,
+        tasks,
+        conversations,
+        activeConversationId,
+        activeWorkspaceId
+      } as any).catch(() => {})
     }, 450)
     return () => clearTimeout(timer)
-  }, [messages, tasks])
+  }, [messages, tasks, conversations, activeConversationId, activeWorkspaceId])
+
+  useEffect(() => { loadWorkspaces() }, [loadWorkspaces])
+
+  useEffect(() => {
+    const refresh = () => { loadWorkspaces() }
+    window.addEventListener('orbit:workspaces-changed', refresh)
+    return () => window.removeEventListener('orbit:workspaces-changed', refresh)
+  }, [loadWorkspaces])
+
+  useEffect(() => {
+    if (!runtimeReady) return
+    const currentConv = conversations.find(c => c.id === activeConversationId)
+    if (currentConv && sameWorkspace(currentConv.workspaceId, activeWorkspaceId)) return
+    const latest = latestConversationForWorkspace(conversations, activeWorkspaceId)
+    if (latest) {
+      setActiveConversationId(latest.id)
+      return
+    }
+    const fresh = makeConversation(activeWorkspaceId)
+    setConversations(prev => [fresh, ...prev])
+    setActiveConversationId(fresh.id)
+  }, [activeConversationId, activeWorkspaceId, conversations, runtimeReady])
 
   /* ---------- 数据加载 ---------- */
   const loadConfig = useCallback(async () => {
@@ -117,7 +264,9 @@ export default function App() {
       for (const a of st?.agents ?? []) m[a.id] = a.status
       setHubAgents(m)
       if (st?.tasks) {
-        setTasks(prev => {
+        const convId = activeConversationId
+        if (!convId) return
+        updateConversationTasks(convId, prev => {
           const known = new Set(prev.map(t => t.id))
           const fromHub: TaskItem[] = (st.tasks as any[])
             .filter(t => !known.has(t.id) && ![...localTaskId.current.values()].includes(t.id) && !taskToMsg.current.has(t.id))
@@ -131,7 +280,7 @@ export default function App() {
         })
       }
     } catch { /* noop */ }
-  }, [])
+  }, [activeConversationId, updateConversationTasks])
 
   useEffect(() => {
     loadConfig()
@@ -164,6 +313,8 @@ export default function App() {
     const off = window.electronAPI?.hub?.onStream?.((e: any) => {
       const tid: string = e.taskId
       if (!tid || ignoredTasks.current.has(tid)) return
+      let conversationId = taskToConversation.current.get(tid) || pendingConversationId.current || currentConversationId.current || activeConversationId
+      if (conversationId && !taskToConversation.current.has(tid)) taskToConversation.current.set(tid, conversationId)
 
       // 写/执行审批请求：交给全局覆盖层弹窗，不依赖消息簿记（不入 msgId 流程）
       if (e.kind === 'approval' && e.request) {
@@ -179,17 +330,17 @@ export default function App() {
         taskToMsg.current.set(tid, msgId)
         activeTaskIds.current.add(tid)
       }
-      if (!msgId || ignoredMsgs.current.has(msgId)) return
+      if (!msgId || !conversationId || ignoredMsgs.current.has(msgId)) return
       const localId = localTaskId.current.get(tid) ?? tid
 
       // 编排模式：orchestrate:* 事件经 reducer 聚合到该消息的 orchestration；标记该任务
       if (typeof e.kind === 'string' && e.kind.startsWith('orchestrate:')) {
         orchestrateTasks.current.add(tid)
-        setMessages(ms => ms.map(m => m.id === msgId
+        updateConversationMessages(conversationId, ms => ms.map(m => m.id === msgId
           ? { ...m, orchestration: applyOrchestrateEvent(m.orchestration, e) } : m))
         if (e.kind === 'orchestrate:final' || e.kind === 'orchestrate:error') {
           setBusyOverride(o => ({ ...o }))
-          setTasks(ts => ts.map(t => t.id === localId
+          updateConversationTasks(conversationId, ts => ts.map(t => t.id === localId
             ? { ...t, results: { ...(t.results || {}), orchestrate: e.content || t.results?.orchestrate || '' } } : t))
         }
         return
@@ -199,15 +350,15 @@ export default function App() {
 
       if (e.kind === 'start') {
         setBusyOverride(o => ({ ...o, [e.agentId]: 'busy' }))
-        setMessages(ms => ms.map(m => {
+        updateConversationMessages(conversationId, ms => ms.map(m => {
           if (m.id !== msgId) return m
           if (m.replies.some(r => r.agentId === e.agentId)) return m
           return { ...m, replies: [...m.replies, { agentId: e.agentId, thinking: '', text: '', done: false }] }
         }))
-        setTasks(ts => ts.map(t => t.id === localId && !t.agents.includes(e.agentId)
+        updateConversationTasks(conversationId, ts => ts.map(t => t.id === localId && !t.agents.includes(e.agentId)
           ? { ...t, agents: [...t.agents, e.agentId] } : t))
       } else if (e.kind === 'delta') {
-        setMessages(ms => ms.map(m => m.id === msgId
+        updateConversationMessages(conversationId, ms => ms.map(m => m.id === msgId
           ? {
               ...m,
               replies: m.replies.map(r => r.agentId === e.agentId
@@ -219,7 +370,7 @@ export default function App() {
           : m))
       } else if (e.kind === 'activity' && e.step) {
         // Track A/B：结构化活动步骤（工具调用/思考），按 step.id upsert 进对应 reply 的 steps[]
-        setMessages(ms => ms.map(m => {
+        updateConversationMessages(conversationId, ms => ms.map(m => {
           if (m.id !== msgId) return m
           const exists = m.replies.some(r => r.agentId === e.agentId)
           const replies = exists
@@ -228,15 +379,15 @@ export default function App() {
           return { ...m, replies }
         }))
         // 同时落进任务历史，重启后仍可复查 agent 做了什么
-        setTasks(ts => ts.map(t => t.id === localId
+        updateConversationTasks(conversationId, ts => ts.map(t => t.id === localId
           ? { ...t, steps: { ...(t.steps || {}), [e.agentId]: upsertStep(t.steps?.[e.agentId], e.step) } }
           : t))
       } else if (e.kind === 'done') {
         setBusyOverride(o => ({ ...o, [e.agentId]: undefined }))
-        setMessages(ms => ms.map(m => m.id === msgId
+        updateConversationMessages(conversationId, ms => ms.map(m => m.id === msgId
           ? { ...m, replies: m.replies.map(r => r.agentId === e.agentId ? { ...r, done: true } : r) }
           : m))
-        setTasks(ts => ts.map(t => t.id === localId
+        updateConversationTasks(conversationId, ts => ts.map(t => t.id === localId
           ? {
               ...t,
               results: { ...(t.results || {}), [e.agentId]: e.content },
@@ -245,32 +396,53 @@ export default function App() {
           : t))
       } else if (e.kind === 'error') {
         setBusyOverride(o => ({ ...o, [e.agentId]: undefined }))
-        setMessages(ms => ms.map(m => m.id === msgId
+        updateConversationMessages(conversationId, ms => ms.map(m => m.id === msgId
           ? { ...m, replies: m.replies.map(r => r.agentId === e.agentId ? { ...r, done: true, error: e.error } : r) }
           : m))
-        setTasks(ts => ts.map(t => t.id === localId
+        updateConversationTasks(conversationId, ts => ts.map(t => t.id === localId
           ? { ...t, errors: { ...(t.errors || {}), [e.agentId]: e.error } }
           : t))
       }
     })
     return off
-  }, [])
+  }, [activeConversationId, updateConversationMessages, updateConversationTasks])
 
   /* ---------- 派发 ---------- */
-  const runDispatch = useCallback(async (msgId: string, localId: string, text: string, mode: DispatchMode, targetAgent?: string, workspaceId?: string | null) => {
+  const runDispatch = useCallback(async (conversationId: string, msgId: string, localId: string, text: string, mode: DispatchMode, targetAgent?: string, workspaceId?: string | null) => {
     pendingMsgId.current = msgId
+    pendingConversationId.current = conversationId
     try {
-      const task = await window.electronAPI.hub.dispatch(text, mode, targetAgent || undefined, { workspaceId: workspaceId ?? null })
+      const task = await window.electronAPI.hub.dispatch(text, mode, targetAgent || undefined, {
+        workspaceId: workspaceId ?? null,
+        requirePlanApproval: mode === 'orchestrate' && !targetAgent
+      })
       if (task?.id) {
         taskToMsg.current.set(task.id, msgId)
+        taskToConversation.current.set(task.id, conversationId)
         localTaskId.current.set(task.id, localId)
         activeTaskIds.current.delete(task.id)
       }
       return task
     } finally {
       pendingMsgId.current = null
+      pendingConversationId.current = null
     }
   }, [])
+
+  const ensureConversationForWorkspace = useCallback((workspaceId: string | null, seedTitle = '新对话'): string => {
+    const targetWorkspaceId = workspaceId ?? null
+    const active = conversations.find(c => c.id === activeConversationId)
+    if (active && sameWorkspace(active.workspaceId, targetWorkspaceId)) return active.id
+    const latest = latestConversationForWorkspace(conversations, targetWorkspaceId)
+    if (latest) {
+      setActiveConversationId(latest.id)
+      return latest.id
+    }
+    const fresh = makeConversation(targetWorkspaceId, seedTitle)
+    setConversations(prev => [fresh, ...prev])
+    setActiveConversationId(fresh.id)
+    return fresh.id
+  }, [activeConversationId, conversations])
 
   const onSend = useCallback(async (text: string, mode: DispatchMode, targetAgent: string | null, workspaceId?: string | null) => {
     if (streaming) return
@@ -285,6 +457,8 @@ export default function App() {
         return
       }
     }
+    const targetWorkspaceId = workspaceId ?? activeWorkspaceId ?? null
+    const conversationId = ensureConversationForWorkspace(targetWorkspaceId, shortConversationTitle(text))
     const msgId = 'm' + Date.now()
     const localId = 'local-' + Date.now()
     const gen = cancelGen.current
@@ -295,22 +469,32 @@ export default function App() {
       : [] // auto：由后端路由，start 事件补卡
 
     currentMsgId.current = msgId
-    setMessages(ms => [...ms, {
-      id: msgId, role: 'user', text, mode, taskId: localId,
-      replies: preTargets.map(a => ({ agentId: a, thinking: '', text: '', done: false }))
-    }])
-    setTasks(ts => [{
-      id: localId, text, mode, status: 'running', agents: preTargets,
-      durationMs: null, createdAt: nowHHMM(), results: {}, errors: {}
-    }, ...ts])
+    currentConversationId.current = conversationId
+    updateConversation(conversationId, conv => {
+      const firstUserMessage = conv.messages.length === 0
+      return {
+        ...conv,
+        workspaceId: targetWorkspaceId,
+        title: firstUserMessage || conv.title === '新对话' ? shortConversationTitle(text) : conv.title,
+        messages: [...conv.messages, {
+          id: msgId, role: 'user', text, mode, taskId: localId,
+          replies: preTargets.map(a => ({ agentId: a, thinking: '', text: '', done: false }))
+        }],
+        tasks: [{
+          id: localId, text, mode, status: 'running', agents: preTargets,
+          durationMs: null, createdAt: nowHHMM(), results: {}, errors: {}
+        }, ...conv.tasks],
+        updatedAt: Date.now()
+      }
+    })
     setStreaming(true)
     const start = Date.now()
 
     const finalize = (status: TaskItem['status'], globalError?: string) => {
-      setTasks(ts => ts.map(t => t.id === localId
+      updateConversationTasks(conversationId, ts => ts.map(t => t.id === localId
         ? { ...t, status, durationMs: Date.now() - start, ...(globalError ? { errors: { ...(t.errors || {}), 系统: globalError } } : {}) }
         : t))
-      setMessages(ms => ms.map(m => m.id === msgId
+      updateConversationMessages(conversationId, ms => ms.map(m => m.id === msgId
         ? {
             ...m,
             replies: m.replies.length === 0 && globalError
@@ -319,13 +503,14 @@ export default function App() {
           }
         : m))
       currentMsgId.current = null
+      currentConversationId.current = null
       setStreaming(false)
       refreshStatus()
     }
 
     try {
       if (isChain) {
-        const t1 = await runDispatch(msgId, localId, text, 'auto', 'codex', workspaceId)
+        const t1 = await runDispatch(conversationId, msgId, localId, text, 'auto', 'codex', targetWorkspaceId)
         if (cancelGen.current !== gen) return // 已手动停止
         const out = asRecord(t1?.results)['codex'] || ''
         const firstFailed = t1?.status === 'failed' || !out
@@ -333,11 +518,11 @@ export default function App() {
           finalize('failed', t1?.error || asRecord(t1?.errors)['codex'] || '链式第一步无输出')
           return
         }
-        const t2 = await runDispatch(msgId, localId, out, 'auto', 'claude', workspaceId)
+        const t2 = await runDispatch(conversationId, msgId, localId, out, 'auto', 'claude', targetWorkspaceId)
         if (cancelGen.current !== gen) return
         finalize(t2?.status === 'failed' ? 'failed' : 'completed', t2?.error)
       } else {
-        const task = await runDispatch(msgId, localId, text, mode, targetAgent || undefined, workspaceId)
+        const task = await runDispatch(conversationId, msgId, localId, text, mode, targetAgent || undefined, targetWorkspaceId)
         if (cancelGen.current !== gen) return
         const errs = asRecord(task?.errors)
         const status: TaskItem['status'] = task?.status === 'failed' ? 'failed'
@@ -347,12 +532,16 @@ export default function App() {
     } catch (e: any) {
       if (cancelGen.current === gen) finalize('failed', e?.message || String(e))
     }
-  }, [streaming, bindings, runDispatch, refreshStatus, tasks])
+  }, [activeWorkspaceId, bindings, ensureConversationForWorkspace, refreshStatus, runDispatch, streaming, tasks, updateConversation, updateConversationMessages, updateConversationTasks])
 
   const onApprovalDecide = useCallback((item: ApprovalItem, approved: boolean, remember: boolean) => {
     if (remember) window.electronAPI?.agentic?.setApprovalOverride?.(item.agentId, item.tool, approved ? 'allow' : 'deny').catch(() => {})
     window.electronAPI?.agentic?.resolveApproval?.(item.id, approved).catch(() => {})
     setApprovals(qs => qs.filter(q => q.id !== item.id))
+  }, [])
+
+  const onApprovePlan = useCallback((taskId: string, approved: boolean) => {
+    window.electronAPI?.hub?.approvePlan?.(taskId, approved).catch(() => {})
   }, [])
 
   const onCancel = useCallback(() => {
@@ -364,20 +553,26 @@ export default function App() {
     activeTaskIds.current.clear()
     if (currentMsgId.current) {
       ignoredMsgs.current.add(currentMsgId.current)
-      currentMsgId.current = null
     }
+    const convId = currentConversationId.current || activeConversationId
+    const msgId = currentMsgId.current
+    currentMsgId.current = null
+    currentConversationId.current = null
     pendingMsgId.current = null
-    setMessages(ms => ms.map(m => ({
-      ...m,
-      replies: m.replies.map(r => r.done ? r : { ...r, done: true, cancelled: true })
-    })))
-    setTasks(ts => ts.map(t => t.status === 'running' && t.id.startsWith('local-')
-      ? { ...t, status: 'cancelled' } : t))
+    pendingConversationId.current = null
+    if (convId && msgId) {
+      updateConversationMessages(convId, ms => ms.map(m => m.id === msgId ? {
+        ...m,
+        replies: m.replies.map(r => r.done ? r : { ...r, done: true, cancelled: true })
+      } : m))
+      updateConversationTasks(convId, ts => ts.map(t => t.status === 'running' && t.id.startsWith('local-')
+        ? { ...t, status: 'cancelled' } : t))
+    }
     setBusyOverride({})
     setStreaming(false)
     setApprovals([])   // 取消后后端已拒绝所有待决审批，前端弹窗一并清空
     refreshStatus()
-  }, [refreshStatus])
+  }, [activeConversationId, refreshStatus, updateConversationMessages, updateConversationTasks])
 
   const onCancelTask = useCallback((id: string) => {
     const backendIds = [...localTaskId.current.entries()].filter(([, l]) => l === id).map(([b]) => b)
@@ -386,8 +581,8 @@ export default function App() {
       ignoredTasks.current.add(tid)
       window.electronAPI.hub.cancel(tid).catch(() => {})
     }
-    setTasks(ts => ts.map(t => t.id === id ? { ...t, status: 'cancelled' } : t))
-  }, [])
+    updateTaskAcrossConversations(ts => ts.map(t => t.id === id ? { ...t, status: 'cancelled' } : t))
+  }, [updateTaskAcrossConversations])
 
   /* ---------- 设置操作 ---------- */
   const onSetEnabled = useCallback(async (id: string, enabled: boolean) => {
@@ -451,24 +646,65 @@ export default function App() {
     setSettingsTab(tab)
     setPage('settings')
   }
+  const selectWorkspace = useCallback(async (workspaceId: string | null) => {
+    setActiveWorkspaceId(workspaceId)
+    try { await (window.electronAPI as any)?.workspaces?.setActive?.(workspaceId) } catch { /* noop */ }
+    const latest = latestConversationForWorkspace(conversations, workspaceId)
+    if (latest) {
+      setActiveConversationId(latest.id)
+    } else {
+      const fresh = makeConversation(workspaceId)
+      setConversations(prev => [fresh, ...prev])
+      setActiveConversationId(fresh.id)
+    }
+    setActiveAgent(null)
+    setPage('chat')
+  }, [conversations])
+
+  const newConversation = useCallback((workspaceId: string | null = activeWorkspaceId) => {
+    const conv = makeConversation(workspaceId ?? null)
+    setConversations(prev => [conv, ...prev])
+    setActiveConversationId(conv.id)
+    setActiveWorkspaceId(workspaceId ?? null)
+    try { (window.electronAPI as any)?.workspaces?.setActive?.(workspaceId ?? null) } catch { /* noop */ }
+    setActiveAgent(null)
+    setPage('chat')
+  }, [activeWorkspaceId])
+
+  const selectConversation = useCallback((conversationId: string) => {
+    const conv = conversations.find(c => c.id === conversationId)
+    if (!conv) return
+    setActiveConversationId(conv.id)
+    setActiveWorkspaceId(conv.workspaceId)
+    try { (window.electronAPI as any)?.workspaces?.setActive?.(conv.workspaceId) } catch { /* noop */ }
+    setActiveAgent(null)
+    setPage('chat')
+  }, [conversations])
 
   const lang = useLang() // 语言切换时整树重挂载（key），组件内 tr() 直接生效
 
   return (
     <>
-      <div className="ah-backdrop"><div className="blob3"></div></div>
+      <div className="ah-backdrop"><OrbitAurora /></div>
       <div key={lang} style={{ position: 'relative', zIndex: 1, height: '100vh', display: 'flex', flexDirection: 'column' }}>
         <Titlebar search={search} onSearch={v => { setSearch(v); if (v && page !== 'tasks') setPage('tasks') }} hubRunning={hubRunning} />
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           <Sidebar page={page} setPage={setPage} agents={agents}
             activeAgent={activeAgent} setActiveAgent={setActiveAgent}
-            providerCount={providers.length || 4} proxyHost={proxyHost} />
+            providerCount={providers.length || 4} proxyHost={proxyHost}
+            workspaces={workspaces} activeWorkspaceId={activeWorkspaceId}
+            conversations={conversations} activeConversationId={activeConversationId}
+            onNewConversation={newConversation}
+            onSelectWorkspace={selectWorkspace}
+            onSelectConversation={selectConversation} />
           <div style={{ flex: 1, minWidth: 0, padding: '0 18px 14px 16px', overflowY: page === 'chat' ? 'hidden' : 'auto', display: 'flex', flexDirection: 'column' }}>
             <Enter key={page} style={page === 'chat' ? { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } : undefined}>
               {page === 'home' && <HomeScreen agents={agents} bindings={bindings} providers={providers} tasks={tasks} goChat={goChat}
                 connectionSummary={connectionSummary} openSetup={openSetup} />}
               {page === 'chat' && <ChatScreen activeAgent={activeAgent} setActiveAgent={setActiveAgent}
                 messages={messages} streaming={streaming} onSend={onSend} onCancel={onCancel}
+                onApprovePlan={onApprovePlan}
+                workspaceId={activeWorkspaceId} workspaces={workspaces} pickWorkspace={selectWorkspace}
                 connectionSummary={connectionSummary} openSetup={openSetup} />}
               {page === 'tasks' && <TasksScreen tasks={tasks} search={search} onCancelTask={onCancelTask}
                 openSetup={openSetup} />}

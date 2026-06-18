@@ -69,8 +69,8 @@ export function taskStatusLabel(s: TaskUIStatus): string {
 const AGENT_DESC_EN: Record<string, string> = {
   codex: 'Precise coding · debugging · refactors',
   claude: 'Analysis · writing · research',
-  hermes: 'Toolchains · system config · commands',
-  openclaw: 'Pipelines · deploys · scripted tasks',
+  hermes: 'Mobile notifications · remote requests · progress reports',
+  openclaw: 'Remote control · user notifications · approval relay',
   marvis: 'Knowledge base · browser automation · cloud phone',
   'minimax-code': 'Coding agent · OpenCode core'
 }

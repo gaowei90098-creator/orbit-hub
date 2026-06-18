@@ -20,6 +20,11 @@ export interface AgentMeta {
 }
 
 export const AGENT_META: Record<string, AgentMeta> = {
+  orbit: {
+    name: 'Orbit', nameZh: '主 Agent', icon: 'icons/orbit.png',
+    color: 'var(--mint)', colorRaw: '#8b91e8',
+    caps: ['planning', 'routing', 'supervision', 'synthesis'], desc: '主 Agent · 拆分 · 派发 · 汇总'
+  },
   codex: {
     name: 'Codex CLI', nameZh: '代码工程', icon: 'icons/codex.png',
     color: 'var(--ag-codex)', colorRaw: '#7b87fa',
@@ -31,14 +36,14 @@ export const AGENT_META: Record<string, AgentMeta> = {
     caps: ['analysis', 'writing', 'translation', 'research'], desc: '分析 · 写作 · 研究'
   },
   hermes: {
-    name: 'Hermes', nameZh: '系统自动化', icon: 'icons/hermes.png', tileLight: true,
+    name: 'Hermes', nameZh: '远程通报', icon: 'icons/hermes.png', tileLight: true,
     color: 'var(--ag-hermes)', colorRaw: '#aab4c4',
-    caps: ['tools', 'system', 'automation'], desc: '工具链 · 系统配置 · 命令执行'
+    caps: ['notify', 'remote', 'progress', 'approval'], desc: '手机通知 · 远程要求 · 进度通报'
   },
   openclaw: {
-    name: 'OpenClaw', nameZh: '部署流水线', icon: 'icons/openclaw.png',
+    name: 'OpenClaw', nameZh: '远程通道', icon: 'icons/openclaw.png',
     color: 'var(--ag-openclaw)', colorRaw: '#e04540',
-    caps: ['automation', 'deploy', 'pipeline', 'script'], desc: '流水线 · 部署 · 脚本任务'
+    caps: ['notify', 'remote', 'progress', 'approval'], desc: '远程操控 · 用户通知 · 确认回传'
   },
   marvis: {
     name: 'Marvis', nameZh: '腾讯智能体', icon: 'icons/marvis.png', tileLight: true,
@@ -52,7 +57,13 @@ export const AGENT_META: Record<string, AgentMeta> = {
   }
 }
 
-export const AGENT_IDS = Object.keys(AGENT_META)
+export const MAIN_AGENT_ID = 'orbit'
+export const AGENT_IDS = ['codex', 'claude', 'hermes', 'openclaw', 'marvis', 'minimax-code']
+export const USER_BRIDGE_AGENT_IDS = ['hermes', 'openclaw']
+export const EXECUTION_AGENT_IDS = AGENT_IDS.filter(id => !USER_BRIDGE_AGENT_IDS.includes(id))
+export const NOTIFICATION_BRIDGE_STORAGE_KEY = 'orbit.notificationBridge'
+export const DEFAULT_NOTIFICATION_BRIDGE_AGENT_ID = 'hermes'
+export const ROUTING_AGENT_IDS = [MAIN_AGENT_ID, ...AGENT_IDS]
 
 export type AgentUIStatus = 'idle' | 'busy' | 'error' | 'off'
 
@@ -62,7 +73,7 @@ export const STATUS_ZH: Record<AgentUIStatus, string> = {
 
 export type DispatchMode = 'auto' | 'broadcast' | 'chain' | 'orchestrate'
 
-export const MODE_ZH: Record<string, string> = { auto: '智能路由', broadcast: '广播', chain: '链式' }
+export const MODE_ZH: Record<string, string> = { auto: '智能路由', broadcast: '广播', chain: '链式', orchestrate: '编排' }
 
 export type TaskUIStatus = 'running' | 'completed' | 'failed' | 'cancelled'
 
@@ -149,9 +160,17 @@ export const fmtTokens = (n: number): string =>
    近似单价（USD / 1M tokens，{in:输入, out:输出}）。公开报价随时间变动，仅供估算。
    最后核对 2026-06；如过期在此更新。未列出的模型不显示费用（而非显示 $0）。 */
 const MODEL_PRICES: Array<{ match: RegExp; in: number; out: number }> = [
-  { match: /opus/i, in: 15, out: 75 },
-  { match: /haiku/i, in: 0.8, out: 4 },
+  { match: /^claude-fable/i, in: 10, out: 50 },
+  { match: /opus/i, in: 5, out: 25 },
+  { match: /haiku/i, in: 1, out: 5 },
   { match: /^claude/i, in: 3, out: 15 },        // sonnet 及其它 claude 取 3/15
+  { match: /^gpt-5\.5-pro/i, in: 30, out: 180 },
+  { match: /^gpt-5\.5/i, in: 5, out: 30 },
+  { match: /^gpt-5\.4-mini/i, in: 0.75, out: 4.5 },
+  { match: /^gpt-5\.4-nano/i, in: 0.2, out: 1.25 },
+  { match: /^gpt-5\.4/i, in: 2.5, out: 15 },
+  { match: /^gpt-5\.3-codex/i, in: 1.25, out: 10 },
+  { match: /^gpt-5/i, in: 1.25, out: 10 },
   { match: /^gpt-4o-mini/i, in: 0.15, out: 0.6 },
   { match: /^gpt-4o/i, in: 2.5, out: 10 },
   { match: /^gpt-4\.1-mini/i, in: 0.4, out: 1.6 },
@@ -229,6 +248,24 @@ export interface ChatMessage {
   replies: ReplyState[]
   /** 编排模式：由 orchestrate:* 事件经 reducer 聚合 */
   orchestration?: OrchestrateState
+}
+
+export interface WorkspaceItem {
+  id: string
+  name: string
+  rootPath: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ConversationItem {
+  id: string
+  workspaceId: string | null
+  title: string
+  createdAt: number
+  updatedAt: number
+  messages: ChatMessage[]
+  tasks: TaskItem[]
 }
 
 export const fmtDur = (ms: number | null): string =>

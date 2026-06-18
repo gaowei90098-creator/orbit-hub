@@ -4,12 +4,24 @@ import { EventPipeline } from "./pipeline"
 import { KeywordRouter } from "./router"
 import { getProviderManager } from "../providers/manager"
 import { buildProviderClient } from "../providers/client"
-import { agentSystemPrompt } from "./agents"
+import {
+  DEFAULT_NOTIFICATION_BRIDGE_AGENT_ID,
+  EXECUTION_WORKER_AGENT_IDS,
+  MAIN_AGENT_ID,
+  NOTIFICATION_BRIDGE_STORAGE_KEY,
+  agentSystemPrompt
+} from "./agents"
 import { buildAgentRuntimeSystemPrompt, buildAgentTaskPrompt, RuntimeMemoryEntry } from "./agent-runtime"
-import { decompositionPrompt, parsePlan, synthesisPrompt, verifyPrompt, parseVerdict, retryPrompt, ORCHESTRATOR_LEAD_SYSTEM } from "./orchestrator"
+import { decompositionPrompt, fallbackPlanArtifact, parsePlan, synthesisPrompt, verifyPrompt, parseVerdict, retryPrompt, subtaskContractPrompt, ORCHESTRATOR_LEAD_SYSTEM } from "./orchestrator"
 import { ChatCompletionMessage, ThinkingConfig } from "../providers/types"
 import { getWorkspaceManager } from "./workspace"
 import { homedir } from "node:os"
+import { store } from "../store"
+import { MissionStore } from "./mission-store"
+import { PlanArtifact, TaskContract, setPlanStatus } from "./plan-artifact"
+import { Supervisor, SupervisorDecision, SupervisorSignalKind } from "./supervisor"
+import { CollaborationBus } from "./collaboration-bus"
+import { CollaborationEventTypes, agentAddress, channelAddress, humanAddress } from "./collaboration-events"
 // --- AgentHub skills + native agentic (Claude-B 新增) ---
 import { getSkillManager } from "../skills/manager"
 import { buildSkillBlock } from "../skills/inject"
@@ -35,8 +47,17 @@ function thinkingRequested(th: any): boolean {
   return th.enabled === true || (typeof th.level === "string" && th.level !== "off" && th.level !== "none") || !!th.budgetTokens || !!th.budget
 }
 
+function isExecutionWorkerAgent(agentId: string): boolean {
+  return EXECUTION_WORKER_AGENT_IDS.includes(agentId)
+}
+
+function isBridgeRequest(text: string): boolean {
+  return /通知|通报|进度|远程|手机|提醒|确认|审批|notify|progress|remote|approval/i.test(text)
+}
+
 export interface DispatchTask {
   id: string
+  missionId?: string
   text: string
   mode: DispatchMode
   targetAgent?: string
@@ -46,6 +67,7 @@ export interface DispatchTask {
   errors: Map<string, string>
   usage: Map<string, { prompt_tokens: number; completion_tokens: number; total_tokens: number }>
   thinkingSummary: Map<string, { enabled: boolean; level?: string; budget?: number; preview?: string }>
+  planArtifact?: PlanArtifact
   error?: string
   createdAt: Date
 }
@@ -55,6 +77,8 @@ export interface DispatchOptions {
   systemPrompt?: string
   /** 工作区 ID：传 null = 不绑定（沿用 home）。stdIO 派发按此取 cwd。 */
   workspaceId?: string | null
+  /** 编排模式下先生成 PlanArtifact，等待用户确认后再执行子 Agent。 */
+  requirePlanApproval?: boolean
 }
 
 export type StreamEvent =
@@ -67,9 +91,21 @@ export type StreamEvent =
   // 写/执行审批请求（'ask' 策略命中时发出）；渲染层弹窗 → agentic:resolveApproval 回传决策
   | { kind: "approval"; taskId: string; agentId: string; request: { id: string; tool: GuardedTool; toolName: string; label?: string; detail?: string } }
   // 编排模式（Orchestrator）
-  | { kind: "orchestrate:plan"; taskId: string; leadAgentId?: string; subtasks: Array<{ id: string; title: string; detail?: string; agentId?: string }> }
+  | { kind: "orchestrate:plan"; taskId: string; missionId?: string; leadAgentId?: string; planArtifact?: PlanArtifact; subtasks: Array<{
+      id: string
+      title: string
+      detail?: string
+      agentId?: string
+      fileScope?: string[]
+      dependsOn?: string[]
+      doneWhen?: string
+      verifyCommand?: string
+      interfaceRef?: string
+    }> }
+  | { kind: "orchestrate:approval"; taskId: string; missionId: string; status: "awaiting" | "approved" | "rejected"; planArtifact?: PlanArtifact }
   | { kind: "orchestrate:subtask"; taskId: string; subtaskId: string; agentId?: string; status: "pending" | "running" | "done" | "error"; content?: string }
   | { kind: "orchestrate:verdict"; taskId: string; subtaskId: string; pass: boolean; note?: string; attempt: number }
+  | { kind: "orchestrate:supervisor"; taskId: string; missionId: string; subtaskId: string; decision: SupervisorDecision }
   | { kind: "orchestrate:synthesizing"; taskId: string }
   | { kind: "orchestrate:final"; taskId: string; content: string }
   | { kind: "orchestrate:error"; taskId: string; error: string }
@@ -79,12 +115,16 @@ export class Dispatcher extends EventEmitter {
   private taskCounter = 0
   /** 'ask' 审批待决池：requestId → {resolve,timer}。requestId 以 `appr-<taskId>-` 前缀便于按任务清理。 */
   private pendingApprovals: Map<string, { resolve: (v: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map()
+  private pendingPlanApprovals: Map<string, { resolve: (v: boolean) => void }> = new Map()
   private approvalSeq = 0
 
   constructor(
     private registry: AgentRegistry,
     private pipeline: EventPipeline,
-    private memoryProvider: () => RuntimeMemoryEntry[] = () => []
+    private memoryProvider: () => RuntimeMemoryEntry[] = () => [],
+    private missionStore?: MissionStore,
+    private supervisor: Supervisor = new Supervisor(),
+    private collaborationBus?: CollaborationBus
   ) {
     super()
   }
@@ -101,6 +141,60 @@ export class Dispatcher extends EventEmitter {
 
   off(event: string | symbol, listener: (...args: any[]) => void): this {
     return super.off(event, listener)
+  }
+
+  private async recordCollaboration(input: {
+    type: string
+    missionId?: string
+    source?: string
+    target?: string
+    payload?: unknown
+    metadata?: Record<string, unknown>
+  }): Promise<void> {
+    if (!this.collaborationBus) return
+    try {
+      await this.collaborationBus.append({
+        type: input.type,
+        source: input.source || agentAddress('agenthub'),
+        target: input.target || (input.missionId ? channelAddress(input.missionId) : 'core'),
+        missionId: input.missionId,
+        channel: input.missionId,
+        visibility: input.missionId ? 'channel' : 'public',
+        payload: input.payload,
+        metadata: input.metadata || {}
+      })
+    } catch (e) {
+      console.warn('[Collaboration] failed to record event:', e)
+    }
+  }
+
+  private getUserBridgeAgentId(): string {
+    const configured = store.get(NOTIFICATION_BRIDGE_STORAGE_KEY, DEFAULT_NOTIFICATION_BRIDGE_AGENT_ID)
+    return configured === "openclaw" || configured === "hermes"
+      ? configured
+      : DEFAULT_NOTIFICATION_BRIDGE_AGENT_ID
+  }
+
+  private async recordUserNotification(
+    missionId: string | undefined,
+    phase: string,
+    payload: Record<string, unknown> = {},
+    source = agentAddress(MAIN_AGENT_ID)
+  ): Promise<void> {
+    if (!missionId) return
+    const bridgeAgentId = this.getUserBridgeAgentId()
+    await this.recordCollaboration({
+      type: CollaborationEventTypes.UserNotificationRequested,
+      missionId,
+      source,
+      target: agentAddress(bridgeAgentId),
+      payload: {
+        bridgeAgentId,
+        phase,
+        ...payload
+      },
+      metadata: { role: "user-bridge" }
+    })
   }
 
   /**
@@ -148,7 +242,7 @@ export class Dispatcher extends EventEmitter {
         if ((task as any).status !== "cancelled") task.status = task.errors.size === targets.length && targets.length > 0 ? "failed" : "completed"
       }
     } catch (e: any) {
-      task.status = "failed"
+      if (task.status !== "cancelled") task.status = "failed"
       task.error = e.message
     }
     return task
@@ -156,17 +250,22 @@ export class Dispatcher extends EventEmitter {
 
   private resolveTargets(task: DispatchTask, mode: DispatchMode, targetAgent?: string): Array<{ agentId: string }> {
     const mgr = getProviderManager()
-    const bindings = mgr.getBindings()
+    const bindings = mgr.getBindings().filter(binding => binding.agentId !== MAIN_AGENT_ID)
+    const executionBindings = bindings.filter(binding => isExecutionWorkerAgent(binding.agentId))
     if (targetAgent) {
       const b = bindings.find(x => x.agentId === targetAgent)
       return b ? [{ agentId: targetAgent }] : []
     }
     if (mode === "broadcast") {
-      return bindings.map(b => ({ agentId: b.agentId }))
+      return executionBindings.map(b => ({ agentId: b.agentId }))
+    }
+    if (isBridgeRequest(task.text)) {
+      const bridgeAgentId = this.getUserBridgeAgentId()
+      if (bindings.find(b => b.agentId === bridgeAgentId)) return [{ agentId: bridgeAgentId }]
     }
     // auto: route by keyword
     const router = new KeywordRouter()
-    const routed = router.route(task.text, this.registry.getAll().map(a => ({
+    const routed = router.route(task.text, this.registry.getAll().filter(a => isExecutionWorkerAgent(a.id)).map(a => ({
       id: a.id,
       name: a.name,
       status: a.status,
@@ -176,9 +275,9 @@ export class Dispatcher extends EventEmitter {
       capabilities: a.capabilities,
       lastActive: a.lastActive,
       errorCount: a.errorCount
-    })))
-    if (routed && bindings.find(b => b.agentId === routed)) return [{ agentId: routed }]
-    return bindings.length > 0 ? [{ agentId: bindings[0].agentId }] : []
+    })), this.missionStore?.getRouterContext())
+    if (routed && executionBindings.find(b => b.agentId === routed)) return [{ agentId: routed }]
+    return executionBindings.length > 0 ? [{ agentId: executionBindings[0].agentId }] : []
   }
 
   /**
@@ -190,52 +289,227 @@ export class Dispatcher extends EventEmitter {
     try {
       const mgr = getProviderManager()
       const bindings = mgr.getBindings()
-      if (bindings.length === 0) throw new Error("No agent bound. Open Settings -> Routing to bind an agent.")
+      const workerBindings = bindings.filter(binding => isExecutionWorkerAgent(binding.agentId))
+      if (workerBindings.length === 0) throw new Error("没有可执行子 Agent。请到 设置 -> 路由 绑定 Codex、Claude、Marvis 或 MiniMax Code。Hermes/OpenClaw 只作为用户通知与远程指令通道。")
 
       const router = new KeywordRouter()
-      const available = this.registry.getAll().map(a => ({
+      const available = this.registry.getAll().filter(agent => isExecutionWorkerAgent(agent.id)).map(a => ({
         id: a.id, name: a.name, status: a.status, mode: a.mode, protocol: a.protocol,
         adapter: a.adapter, capabilities: a.capabilities, lastActive: a.lastActive, errorCount: a.errorCount
       }))
-      const bound = new Set(bindings.map(b => b.agentId))
-      const routed = router.route(text, available)
-      const leadId = (routed && bound.has(routed)) ? routed : bindings[0].agentId
+      const bound = new Set(workerBindings.map(b => b.agentId))
+      const hasOrbitBinding = !!bindings.find(binding => binding.agentId === MAIN_AGENT_ID)
+      if (!hasOrbitBinding) {
+        throw new Error("Orbit 主 Agent 尚未绑定。编排模式必须先配置 Orbit，由它负责拆分、派发、校验和汇总。")
+      }
+      const leadId = MAIN_AGENT_ID
+      const leadInfo = this.registry.get(leadId)
+      const leadIsLocal = !!leadInfo && (leadInfo.adapter as any).protocol && (leadInfo.adapter as any).protocol !== 'http'
+      if (!leadIsLocal && !mgr.resolveBinding(leadId)) {
+        throw new Error("Orbit 主 Agent 尚未配置可用模型/API Key。请到 设置 -> 路由 配置 Orbit，或到 设置 -> 提供商 填写 Provider Key。")
+      }
+      const missionId = `mission-${task.id}`
+      task.missionId = missionId
+      await this.recordCollaboration({
+        type: CollaborationEventTypes.MissionStarted,
+        missionId,
+        source: humanAddress('user'),
+        payload: {
+          missionId,
+          taskId: task.id,
+          goal: text,
+          leadAgentId: leadId,
+          availableAgents: available.map(agent => agent.id)
+        }
+      })
 
-      this.emit("stream", { kind: "orchestrate:plan", taskId: task.id, leadAgentId: leadId, subtasks: [] })
+      this.emit("stream", { kind: "orchestrate:plan", taskId: task.id, missionId, leadAgentId: leadId, subtasks: [] })
 
       // 1. 分解（分解阶段 provider 报错 → 直接外显失败，不拿空内容硬跑）
-      const planRes = await this.sendToAgent(task, leadId, decompositionPrompt(text), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })
+      const plannerContext = this.missionStore?.buildPlannerContext(6) || ""
+      const planRes = await this.sendToAgent(task, leadId, decompositionPrompt(text, available.map(a => a.id), plannerContext), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })
       if (planRes.error) throw new Error("分解阶段失败: " + planRes.error)
       let plan = parsePlan(planRes.content)
+      let artifact = plan?.artifact && plan.artifact.taskDag.nodes.length
+        ? { ...plan.artifact, missionId, goal: text, leadAgentId: leadId }
+        : null
       if (!plan || plan.subtasks.length === 0) {
-        plan = { subtasks: [{ id: "1", title: text.slice(0, 40), detail: text }] }
+        artifact = fallbackPlanArtifact(missionId, text, leadId)
+        plan = { subtasks: artifact.taskDag.nodes, artifact }
       }
       // 指派：lead 未指定或不可用时按 routeScores 选可用 agent，兜底用 lead
       for (const st of plan.subtasks) {
         if (!st.agentId || !bound.has(st.agentId)) {
-          const scored = router.routeScores(st.detail || st.title, available).filter(s => bound.has(s.id))
+          const scored = router.routeScores(st.detail || st.title, available, this.missionStore?.getRouterContext()).filter(s => bound.has(s.id))
           st.agentId = scored[0]?.id || leadId
         }
       }
+      artifact = artifact
+        ? { ...artifact, taskDag: { nodes: plan.subtasks, edges: artifact.taskDag.edges }, updatedAt: new Date().toISOString() }
+        : fallbackPlanArtifact(missionId, text, leadId)
+      artifact = setPlanStatus(artifact, opts.requirePlanApproval ? "awaiting-approval" : "approved")
+      task.planArtifact = artifact
+      this.missionStore?.upsertPlan(artifact)
+      await this.recordCollaboration({
+        type: CollaborationEventTypes.MissionPlanProposed,
+        missionId,
+        payload: {
+          missionId,
+          taskId: task.id,
+          goal: text,
+          leadAgentId: leadId,
+          status: artifact.status,
+          contractCount: artifact.taskDag.nodes.length,
+          contracts: artifact.taskDag.nodes.map(contractSnapshot)
+        }
+      })
+      await this.recordUserNotification(missionId, "plan_proposed", {
+        taskId: task.id,
+        goal: text,
+        contractCount: artifact.taskDag.nodes.length,
+        status: artifact.status
+      })
+      for (const contract of artifact.taskDag.nodes) {
+        await this.recordCollaboration({
+          type: CollaborationEventTypes.ContractCreated,
+          missionId,
+          payload: contractSnapshot(contract)
+        })
+      }
+
       this.emit("stream", {
-        kind: "orchestrate:plan", taskId: task.id, leadAgentId: leadId,
-        subtasks: plan.subtasks.map(s => ({ id: s.id, title: s.title, detail: s.detail, agentId: s.agentId }))
+        kind: "orchestrate:plan", taskId: task.id, missionId, leadAgentId: leadId, planArtifact: artifact,
+        subtasks: artifact.taskDag.nodes.map(s => ({
+          id: s.id,
+          title: s.title,
+          detail: s.detail,
+          agentId: s.agentId,
+          fileScope: s.fileScope,
+          dependsOn: s.dependsOn,
+          doneWhen: s.doneWhen,
+          verifyCommand: s.verifyCommand,
+          interfaceRef: s.interfaceRef
+        }))
       })
 
-      // 2. 并行执行子任务（O3：测试 agent 校验 + 有界回环修复，最多 2 次尝试）
+      if (opts.requirePlanApproval) {
+        this.emit("stream", { kind: "orchestrate:approval", taskId: task.id, missionId, status: "awaiting", planArtifact: artifact })
+        await this.recordCollaboration({
+          type: CollaborationEventTypes.MissionPlanApprovalRequested,
+          missionId,
+          payload: { missionId, taskId: task.id, status: artifact.status, contractCount: artifact.taskDag.nodes.length }
+        })
+        const approved = await this.waitForPlanApproval(task.id)
+        if (!approved) {
+          this.missionStore?.setPlanStatus(missionId, "cancelled")
+          this.emit("stream", { kind: "orchestrate:approval", taskId: task.id, missionId, status: "rejected" })
+          await this.recordCollaboration({
+            type: CollaborationEventTypes.MissionPlanRejected,
+            missionId,
+            source: humanAddress('user'),
+            payload: { missionId, taskId: task.id, status: 'cancelled' }
+          })
+          await this.recordUserNotification(missionId, "plan_rejected", { taskId: task.id, status: "cancelled" })
+          task.status = "cancelled"
+          throw new Error("用户取消了协作计划")
+        }
+        artifact = setPlanStatus(artifact, "approved")
+        task.planArtifact = artifact
+        this.missionStore?.upsertPlan(artifact)
+        this.emit("stream", { kind: "orchestrate:approval", taskId: task.id, missionId, status: "approved", planArtifact: artifact })
+        await this.recordCollaboration({
+          type: CollaborationEventTypes.MissionPlanApproved,
+          missionId,
+          source: humanAddress('user'),
+          payload: { missionId, taskId: task.id, status: artifact.status }
+        })
+      }
+
+      artifact = setPlanStatus(artifact, "running")
+      task.planArtifact = artifact
+      this.missionStore?.upsertPlan(artifact)
+      await this.recordCollaboration({
+        type: CollaborationEventTypes.MissionStatusChanged,
+        missionId,
+        payload: { missionId, taskId: task.id, status: artifact.status }
+      })
+      await this.recordUserNotification(missionId, "mission_running", {
+        taskId: task.id,
+        status: artifact.status,
+        contractCount: artifact.taskDag.nodes.length
+      })
+
+      // 2. 按 DAG 分批执行子任务（无依赖的同批并行；有 dependsOn 的等上游完成）
       const MAX_ATTEMPTS = 2
-      const parts = await Promise.all(plan.subtasks.map(async (st) => {
+      const partsById = new Map<string, { title: string; agentId?: string; content: string; error?: string }>()
+      const finished = new Set<string>()
+      const failed = new Set<string>()
+      const remaining = new Map<string, TaskContract>(artifact.taskDag.nodes.map(st => [st.id, st]))
+
+      const runContract = async (st: TaskContract) => {
         if ((task as any).status === "cancelled") return { title: st.title, agentId: st.agentId, content: "", error: "cancelled" }
         let content = ""
         let lastNote: string | undefined
+        this.missionStore?.updateTaskStatus(missionId, st.id, "ready")
+        await this.recordCollaboration({
+          type: CollaborationEventTypes.ContractStatusChanged,
+          missionId,
+          payload: contractSnapshot(st, { status: 'ready' })
+        })
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
           if ((task as any).status === "cancelled") break
+          this.missionStore?.updateTaskStatus(missionId, st.id, "running")
           this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "running" })
+          if (attempt === 1) {
+            await this.recordCollaboration({
+              type: CollaborationEventTypes.ContractClaimed,
+              missionId,
+              source: agentAddress(st.agentId || 'unassigned'),
+              payload: contractSnapshot(st, { status: 'running', attempt })
+            })
+          }
+          await this.recordCollaboration({
+            type: CollaborationEventTypes.ContractStatusChanged,
+            missionId,
+            source: agentAddress(st.agentId || 'unassigned'),
+            payload: contractSnapshot(st, { status: 'running', attempt })
+          })
           try {
-            const prompt = attempt === 1 ? (st.detail || st.title) : retryPrompt(st.detail || st.title, lastNote)
+            const prompt = attempt === 1 ? subtaskContractPrompt(st) : retryPrompt(subtaskContractPrompt(st), lastNote)
             const r = await this.sendToAgent(task, st.agentId!, prompt, opts)
             // 失败外显：provider 报错绝不伪装成 done(空内容)，发 error 状态并退出该子任务
             if (r.error) {
+              const decision = await this.assessSupervision(task, missionId, st, errorKind(r.error), {
+                error: r.error,
+                outputPreview: content.slice(0, 600)
+              }, leadId, opts)
+              this.emit("stream", { kind: "orchestrate:supervisor", taskId: task.id, missionId, subtaskId: st.id, decision })
+              await this.recordCollaboration({
+                type: CollaborationEventTypes.SupervisorDecision,
+                missionId,
+                payload: { missionId, contractId: st.id, kind: errorKind(r.error), decision, error: r.error }
+              })
+              this.missionStore?.updateTaskStatus(missionId, st.id, decision.action === "wait" ? "waiting" : "failed")
+              await this.recordCollaboration({
+                type: CollaborationEventTypes.ContractStatusChanged,
+                missionId,
+                source: agentAddress(st.agentId || 'unassigned'),
+                payload: contractSnapshot(st, { status: decision.action === 'wait' ? 'waiting' : 'failed', attempt, error: r.error })
+              })
+              await this.recordCollaboration({
+                type: CollaborationEventTypes.ContractFailed,
+                missionId,
+                source: agentAddress(st.agentId || 'unassigned'),
+                payload: contractSnapshot(st, { status: 'failed', attempt, error: r.error })
+              })
+              await this.recordUserNotification(missionId, "contract_failed", {
+                taskId: task.id,
+                contractId: st.id,
+                title: st.title,
+                agentId: st.agentId,
+                attempt,
+                error: r.error
+              }, agentAddress(st.agentId || MAIN_AGENT_ID))
               this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "error", content: r.error })
               return { title: st.title, agentId: st.agentId, content: "", error: r.error }
             }
@@ -245,28 +519,235 @@ export class Dispatcher extends EventEmitter {
             const verifyRaw = (await this.sendToAgent(task, leadId, verifyPrompt(st.title, st.detail, content), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })).content
             const v = parseVerdict(verifyRaw)
             this.emit("stream", { kind: "orchestrate:verdict", taskId: task.id, subtaskId: st.id, pass: v.pass, note: v.note, attempt })
-            if (v.pass) return { title: st.title, agentId: st.agentId, content }
+            await this.recordCollaboration({
+              type: CollaborationEventTypes.VerificationResult,
+              missionId,
+              payload: {
+                missionId,
+                contractId: st.id,
+                agentId: st.agentId,
+                pass: v.pass,
+                note: v.note,
+                attempt,
+                outputPreview: content.slice(0, 600)
+              }
+            })
+            if (v.pass) {
+              this.missionStore?.updateTaskStatus(missionId, st.id, "done")
+              await this.recordCollaboration({
+                type: CollaborationEventTypes.ContractCompleted,
+                missionId,
+                source: agentAddress(st.agentId || 'unassigned'),
+                payload: contractSnapshot(st, { status: 'done', attempt, outputPreview: content.slice(0, 800) })
+              })
+              await this.recordUserNotification(missionId, "contract_completed", {
+                taskId: task.id,
+                contractId: st.id,
+                title: st.title,
+                agentId: st.agentId,
+                attempt
+              }, agentAddress(st.agentId || MAIN_AGENT_ID))
+              return { title: st.title, agentId: st.agentId, content }
+            }
+            const decision = await this.assessSupervision(task, missionId, st, "verification_failed", {
+              verifierNote: v.note,
+              outputPreview: content.slice(0, 800)
+            }, leadId, opts)
+            this.emit("stream", { kind: "orchestrate:supervisor", taskId: task.id, missionId, subtaskId: st.id, decision })
+            await this.recordCollaboration({
+              type: CollaborationEventTypes.SupervisorDecision,
+              missionId,
+              payload: { missionId, contractId: st.id, kind: 'verification_failed', decision, verifierNote: v.note }
+            })
             lastNote = v.note
-            if (attempt >= MAX_ATTEMPTS) return { title: st.title, agentId: st.agentId, content, error: "校验未通过: " + (v.note || "结果不达标") }
+            if (decision.action === "fail" || attempt >= MAX_ATTEMPTS) {
+              this.missionStore?.updateTaskStatus(missionId, st.id, "failed")
+              await this.recordCollaboration({
+                type: CollaborationEventTypes.ContractFailed,
+                missionId,
+                source: agentAddress(st.agentId || 'unassigned'),
+                payload: contractSnapshot(st, { status: 'failed', attempt, error: "verification failed", verifierNote: v.note })
+              })
+              await this.recordUserNotification(missionId, "contract_failed", {
+                taskId: task.id,
+                contractId: st.id,
+                title: st.title,
+                agentId: st.agentId,
+                attempt,
+                error: "verification failed",
+                verifierNote: v.note
+              }, agentAddress(st.agentId || MAIN_AGENT_ID))
+              return { title: st.title, agentId: st.agentId, content, error: "校验未通过: " + (v.note || "结果不达标") }
+            }
           } catch (e: any) {
             const err = e?.message || String(e)
+            const decision = await this.assessSupervision(task, missionId, st, errorKind(err), { error: err, outputPreview: content.slice(0, 600) }, leadId, opts)
+            this.emit("stream", { kind: "orchestrate:supervisor", taskId: task.id, missionId, subtaskId: st.id, decision })
+            await this.recordCollaboration({
+              type: CollaborationEventTypes.SupervisorDecision,
+              missionId,
+              payload: { missionId, contractId: st.id, kind: errorKind(err), decision, error: err }
+            })
+            this.missionStore?.updateTaskStatus(missionId, st.id, "failed")
+            await this.recordCollaboration({
+              type: CollaborationEventTypes.ContractFailed,
+              missionId,
+              source: agentAddress(st.agentId || 'unassigned'),
+              payload: contractSnapshot(st, { status: 'failed', attempt, error: err })
+            })
+            await this.recordUserNotification(missionId, "contract_failed", {
+              taskId: task.id,
+              contractId: st.id,
+              title: st.title,
+              agentId: st.agentId,
+              attempt,
+              error: err
+            }, agentAddress(st.agentId || MAIN_AGENT_ID))
             this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "error", content: err })
             return { title: st.title, agentId: st.agentId, content: "", error: err }
           }
         }
         return { title: st.title, agentId: st.agentId, content }
-      }))
+      }
+
+      while (remaining.size > 0) {
+        if ((task as any).status === "cancelled") break
+        const blockedByFailed = Array.from(remaining.values()).filter(st => st.dependsOn.some(dep => failed.has(dep)))
+        for (const st of blockedByFailed) {
+          this.missionStore?.updateTaskStatus(missionId, st.id, "blocked")
+          await this.recordCollaboration({
+            type: CollaborationEventTypes.ContractStatusChanged,
+            missionId,
+            payload: contractSnapshot(st, { status: 'blocked', error: 'blocked by failed dependency' })
+          })
+          await this.recordCollaboration({
+            type: CollaborationEventTypes.ContractFailed,
+            missionId,
+            payload: contractSnapshot(st, { status: 'blocked', error: 'blocked by failed dependency' })
+          })
+          await this.recordUserNotification(missionId, "contract_blocked", {
+            taskId: task.id,
+            contractId: st.id,
+            title: st.title,
+            agentId: st.agentId,
+            error: "blocked by failed dependency"
+          })
+          this.emit("stream", { kind: "orchestrate:subtask", taskId: task.id, subtaskId: st.id, agentId: st.agentId, status: "error", content: "上游依赖失败，任务被阻塞" })
+          partsById.set(st.id, { title: st.title, agentId: st.agentId, content: "", error: "blocked by failed dependency" })
+          failed.add(st.id)
+          remaining.delete(st.id)
+        }
+        const ready = Array.from(remaining.values()).filter(st => st.dependsOn.every(dep => finished.has(dep)))
+        if (ready.length === 0) {
+          for (const st of remaining.values()) {
+            const decision = await this.assessSupervision(task, missionId, st, "dependency_wait", {
+              dependencyStatuses: dependencyStatuses(st, finished, failed)
+            }, leadId, opts)
+            this.emit("stream", { kind: "orchestrate:supervisor", taskId: task.id, missionId, subtaskId: st.id, decision })
+            await this.recordCollaboration({
+              type: CollaborationEventTypes.SupervisorDecision,
+              missionId,
+              payload: { missionId, contractId: st.id, kind: 'dependency_wait', decision, dependencyStatuses: dependencyStatuses(st, finished, failed) }
+            })
+            this.missionStore?.updateTaskStatus(missionId, st.id, "blocked")
+            await this.recordCollaboration({
+              type: CollaborationEventTypes.ContractStatusChanged,
+              missionId,
+              payload: contractSnapshot(st, { status: 'blocked', error: 'dependency cycle or unresolved dependency' })
+            })
+            partsById.set(st.id, { title: st.title, agentId: st.agentId, content: "", error: "dependency cycle or unresolved dependency" })
+            failed.add(st.id)
+            remaining.delete(st.id)
+          }
+          break
+        }
+        const wave = await Promise.all(ready.map(runContract))
+        for (let i = 0; i < ready.length; i++) {
+          const st = ready[i]
+          const part = wave[i]
+          partsById.set(st.id, part)
+          if (part.error) failed.add(st.id)
+          else finished.add(st.id)
+          remaining.delete(st.id)
+        }
+      }
 
       if ((task as any).status === "cancelled") return
+      const parts = artifact.taskDag.nodes.map(st =>
+        partsById.get(st.id) || { title: st.title, agentId: st.agentId, content: "", error: "not executed" })
 
       // 3. lead 汇总（汇总阶段 provider 报错 → 外显失败，不得静默以空内容标记完成）
       this.emit("stream", { kind: "orchestrate:synthesizing", taskId: task.id })
+      await this.recordCollaboration({
+        type: CollaborationEventTypes.SynthesisStarted,
+        missionId,
+        source: agentAddress(leadId),
+        payload: { missionId, taskId: task.id, leadAgentId: leadId, failedTaskIds: Array.from(failed) }
+      })
       const synth = await this.sendToAgent(task, leadId, synthesisPrompt(text, parts), { ...opts, systemPrompt: ORCHESTRATOR_LEAD_SYSTEM })
       if (synth.error) throw new Error("汇总阶段失败: " + synth.error)
       this.emit("stream", { kind: "orchestrate:final", taskId: task.id, content: synth.content })
       task.results.set("orchestrate", synth.content)
+      this.missionStore?.setPlanStatus(missionId, failed.size ? "failed" : "completed")
+      await this.recordCollaboration({
+        type: CollaborationEventTypes.SynthesisCompleted,
+        missionId,
+        source: agentAddress(leadId),
+        payload: { missionId, taskId: task.id, leadAgentId: leadId, summary: synth.content.slice(0, 1000) }
+      })
+      const outcome = this.missionStore?.recordOutcome({
+        missionId,
+        goal: text,
+        status: failed.size ? "failed" : "completed",
+        summary: synth.content.slice(0, 600) || (failed.size ? "Mission completed with failed contracts." : "Mission completed."),
+        lessons: extractLessons(synth.content),
+        blockers: parts.filter(p => p.error).map(p => `${p.title}: ${p.error}`).slice(0, 8),
+        verified: failed.size === 0,
+        taskCount: artifact.taskDag.nodes.length,
+        failedTaskIds: Array.from(failed),
+        resultPreview: synth.content.slice(0, 1200)
+      })
+      await this.recordCollaboration({
+        type: CollaborationEventTypes.OutcomeRecorded,
+        missionId,
+        payload: outcome || {
+          missionId,
+          status: failed.size ? "failed" : "completed",
+          summary: synth.content.slice(0, 600),
+          failedTaskIds: Array.from(failed)
+        }
+      })
+      await this.recordUserNotification(missionId, failed.size ? "mission_failed" : "mission_completed", {
+        taskId: task.id,
+        status: failed.size ? "failed" : "completed",
+        failedTaskIds: Array.from(failed),
+        summary: synth.content.slice(0, 800)
+      })
       task.status = "completed"
     } catch (e: any) {
+      if (task.missionId && task.status !== "cancelled") {
+        this.missionStore?.setPlanStatus(task.missionId, "failed")
+        const outcome = this.missionStore?.recordOutcome({
+          missionId: task.missionId,
+          goal: text,
+          status: "failed",
+          summary: e?.message || String(e),
+          blockers: [e?.message || String(e)],
+          verified: false,
+          taskCount: task.planArtifact?.taskDag.nodes.length || 0,
+          failedTaskIds: task.planArtifact?.taskDag.nodes.filter(node => node.status === "failed" || node.status === "blocked").map(node => node.id) || []
+        })
+        await this.recordCollaboration({
+          type: CollaborationEventTypes.OutcomeRecorded,
+          missionId: task.missionId,
+          payload: outcome || { missionId: task.missionId, status: 'failed', summary: e?.message || String(e) }
+        })
+        await this.recordUserNotification(task.missionId, "mission_failed", {
+          taskId: task.id,
+          status: "failed",
+          error: e?.message || String(e)
+        })
+      }
       this.emit("stream", { kind: "orchestrate:error", taskId: task.id, error: e?.message || String(e) })
       throw e
     }
@@ -399,6 +880,53 @@ export class Dispatcher extends EventEmitter {
   }
   // --- /AgentHub skills ---
 
+  private async assessSupervision(
+    task: DispatchTask,
+    missionId: string,
+    contract: TaskContract,
+    kind: SupervisorSignalKind,
+    patch: Partial<Parameters<Supervisor["assess"]>[0]>,
+    leadAgentId: string,
+    opts: DispatchOptions
+  ): Promise<SupervisorDecision> {
+    return this.supervisor.assess({
+      missionId,
+      contract,
+      kind,
+      elapsedMs: Date.now() - task.createdAt.getTime(),
+      ...patch
+    }, (prompt) => this.callSupervisorLLM(leadAgentId, prompt, opts))
+  }
+
+  private async callSupervisorLLM(agentId: string, prompt: string, opts: DispatchOptions): Promise<string | undefined> {
+    try {
+      const agentInfo = this.registry.get(agentId)
+      if (agentInfo && (agentInfo.adapter as any).protocol && (agentInfo.adapter as any).protocol !== 'http') return undefined
+      const resolved = getProviderManager().resolveBinding(agentId)
+      if (!resolved) return undefined
+      const client = buildProviderClient(resolved)
+      let content = ""
+      await new Promise<void>((resolve, reject) => {
+        client.stream(
+          {
+            messages: [{ role: "user", content: prompt }],
+            systemPrompt: "You are a lightweight supervisor. Return only the requested JSON.",
+            thinkingOverride: { mode: "off", level: "minimal" },
+            signal: AbortSignal.timeout(20_000)
+          },
+          {
+            onContent: delta => { content += delta },
+            onDone: () => resolve(),
+            onError: err => reject(err)
+          }
+        )
+      })
+      return content
+    } catch {
+      return undefined
+    }
+  }
+
   // --- AgentHub native agentic 工具回环（Claude-B 新增） ---
   // HTTP agent 开启 agentic 后：用 AgentHub 自带工具回环替代纯聊天流，让模型真在工作区
   // 读写文件、跑命令；每步发 activity 事件复用既有步骤卡。自管 start/done/error 与 registry。
@@ -462,6 +990,11 @@ export class Dispatcher extends EventEmitter {
     const task = this.tasks.get(taskId)
     if (task && task.status === "running") {
       task.status = "cancelled"
+      const planApproval = this.pendingPlanApprovals.get(taskId)
+      if (planApproval) {
+        this.pendingPlanApprovals.delete(taskId)
+        planApproval.resolve(false)
+      }
       // 清理该任务所有待决审批（拒绝放行），避免工具回环在 await 上永久挂起
       for (const [id, p] of this.pendingApprovals) {
         if (id.startsWith(`appr-${taskId}-`)) {
@@ -473,6 +1006,20 @@ export class Dispatcher extends EventEmitter {
       return true
     }
     return false
+  }
+
+  resolvePlanApproval(taskId: string, approved: boolean): boolean {
+    const pending = this.pendingPlanApprovals.get(taskId)
+    if (!pending) return false
+    this.pendingPlanApprovals.delete(taskId)
+    pending.resolve(approved)
+    return true
+  }
+
+  private waitForPlanApproval(taskId: string): Promise<boolean> {
+    return new Promise(resolve => {
+      this.pendingPlanApprovals.set(taskId, { resolve })
+    })
   }
 
   /** 渲染层审批决策回传：true=放行，false=拒绝。返回是否命中一个待决请求（用于 IPC 反馈）。 */
@@ -749,4 +1296,39 @@ export class Dispatcher extends EventEmitter {
     }
     return approved
   }
+}
+
+function errorKind(error: string): SupervisorSignalKind {
+  return /timeout|timed out|无任何输出|卡死|stalled|idle|no output/i.test(error || '')
+    ? 'stall'
+    : 'worker_error'
+}
+
+function dependencyStatuses(st: TaskContract, finished: Set<string>, failed: Set<string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const dep of st.dependsOn) out[dep] = failed.has(dep) ? 'failed' : finished.has(dep) ? 'done' : 'pending'
+  return out
+}
+
+function contractSnapshot(contract: TaskContract, patch: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    contractId: contract.id,
+    title: contract.title,
+    agentId: contract.agentId,
+    status: contract.status,
+    fileScope: contract.fileScope,
+    dependsOn: contract.dependsOn,
+    doneWhen: contract.doneWhen,
+    verifyCommand: contract.verifyCommand,
+    interfaceRef: contract.interfaceRef,
+    ...patch
+  }
+}
+
+function extractLessons(text: string): string[] {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map(line => line.replace(/^[-*]\s*/, '').trim())
+    .filter(line => /lesson|经验|教训|注意|下次|风险|risk/i.test(line))
+    .slice(0, 8)
 }

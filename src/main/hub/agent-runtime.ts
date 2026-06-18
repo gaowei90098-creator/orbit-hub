@@ -81,6 +81,8 @@ function scoreMemory(memory: RuntimeMemoryEntry, terms: string[]): number {
   for (const term of terms) {
     if (term && haystack.includes(term)) score += term.length > 1 ? 2 : 1
   }
+  if (memory.category === 'semantic' || memory.category === 'procedure') score += 2
+  if (memory.category === 'episodic' || memory.category === 'decision') score += 1.8
   if (memory.category === 'conversation') score += 1.5
   if (memory.category === 'task') score += 1
   if (memory.category === 'skill') score += 0.8

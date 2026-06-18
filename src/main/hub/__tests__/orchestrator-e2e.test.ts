@@ -18,7 +18,7 @@ const h = vi.hoisted(() => {
     responder: (c: { agentId: string; kind: Kind; prompt: string; system?: string }) => Reply
     calls: Array<{ agentId: string; kind: Kind; prompt: string; system?: string }>
   } = {
-    bindings: [{ agentId: 'codex' }, { agentId: 'claude' }],
+    bindings: [{ agentId: 'orbit' }, { agentId: 'codex' }, { agentId: 'claude' }],
     responder: () => '',
     calls: []
   }
@@ -91,7 +91,7 @@ const PLAN = JSON.stringify({
 })
 
 beforeEach(() => {
-  h.state.bindings = [{ agentId: 'codex' }, { agentId: 'claude' }]
+  h.state.bindings = [{ agentId: 'orbit' }, { agentId: 'codex' }, { agentId: 'claude' }]
   h.state.calls = []
   h.state.responder = () => ''
 })

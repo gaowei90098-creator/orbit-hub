@@ -12,6 +12,7 @@ import { store, encryptSecret, decryptSecret } from '../store'
 import {
   ProvidersConfig,
   ProviderDefinition,
+  ModelDefinition,
   AgentRouteBinding,
   ThinkingConfig
 } from './types'
@@ -19,7 +20,7 @@ import { BUILTIN_PROVIDERS, THINKING_BUDGET_TOKENS } from './presets'
 
 const STORAGE_KEY = 'providers.config.v1'
 
-const CONFIG_VERSION = 1
+const CONFIG_VERSION = 2
 
 function defaultConfig(): ProvidersConfig {
   return {
@@ -40,20 +41,33 @@ const LEGACY_CLAUDE_PROVIDER_ID = 'openai'
 const LEGACY_CLAUDE_MODEL_ID = 'gpt-4o'
 
 const DEFAULT_CODEX_PROVIDER_ID = 'openai'
-const DEFAULT_CODEX_MODEL_ID = 'gpt-4o'
+const DEFAULT_CODEX_MODEL_ID = 'gpt-5.5'
 const DEFAULT_CLAUDE_PROVIDER_ID = 'anthropic'
-const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-4-5'
+const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-4-6'
 
 /**
- * 默认 Agent 路由，绑定到对应预设的官方模型。
- * 用户在 Settings 里可任意修改。
+ * 默认 Agent 路由。Codex / Claude 默认走本地 CLI 登录态，不要求 API Key；
+ * HTTP Provider 仍保留给用户主动切换、代理接管和其它云端 Agent。
  */
 export function defaultBindings(): AgentRouteBinding[] {
   return [
     {
+      agentId: 'orbit',
+      providerId: DEFAULT_CODEX_PROVIDER_ID,
+      modelId: DEFAULT_CODEX_MODEL_ID,
+      protocol: 'http',
+      thinkingAllow: ['off', 'auto', 'enabled'],
+      thinking: { mode: 'auto', level: 'medium', budgetTokens: THINKING_BUDGET_TOKENS.medium, collapseInUI: true },
+      temperature: 0.2,
+      maxOutputTokens: 8192
+    },
+    {
       agentId: 'codex',
       providerId: DEFAULT_CODEX_PROVIDER_ID,
       modelId: DEFAULT_CODEX_MODEL_ID,
+      protocol: 'stdio-plain',
+      binary: '',
+      args: '',
       thinkingAllow: ['off', 'auto', 'enabled'],
       thinking: { mode: 'auto', level: 'medium', budgetTokens: THINKING_BUDGET_TOKENS.medium, collapseInUI: true },
       temperature: 0.2,
@@ -63,6 +77,9 @@ export function defaultBindings(): AgentRouteBinding[] {
       agentId: 'claude',
       providerId: DEFAULT_CLAUDE_PROVIDER_ID,
       modelId: DEFAULT_CLAUDE_MODEL_ID,
+      protocol: 'stdio-plain',
+      binary: '',
+      args: '',
       thinkingAllow: ['off', 'auto', 'enabled'],
       thinking: { mode: 'auto', level: 'medium', budgetTokens: THINKING_BUDGET_TOKENS.medium, collapseInUI: true },
       temperature: 0.4,
@@ -109,6 +126,29 @@ export function defaultBindings(): AgentRouteBinding[] {
   ]
 }
 
+export function migrateDefaultHttpBindingsToLocalCli(bindings: AgentRouteBinding[]): AgentRouteBinding[] {
+  return bindings.map(binding => {
+    const defaultCodexHttp =
+      binding.agentId === 'codex' &&
+      (!binding.protocol || binding.protocol === 'http') &&
+      binding.providerId === DEFAULT_CODEX_PROVIDER_ID &&
+      binding.modelId === DEFAULT_CODEX_MODEL_ID
+    const defaultClaudeHttp =
+      binding.agentId === 'claude' &&
+      (!binding.protocol || binding.protocol === 'http') &&
+      binding.providerId === DEFAULT_CLAUDE_PROVIDER_ID &&
+      binding.modelId === DEFAULT_CLAUDE_MODEL_ID
+
+    if (!defaultCodexHttp && !defaultClaudeHttp) return binding
+    return {
+      ...binding,
+      protocol: 'stdio-plain',
+      binary: binding.binary || '',
+      args: binding.args || ''
+    }
+  })
+}
+
 export function migrateLegacySwappedOfficialBindings(bindings: AgentRouteBinding[]): AgentRouteBinding[] {
   const codex = bindings.find(b => b.agentId === 'codex')
   const claude = bindings.find(b => b.agentId === 'claude')
@@ -142,6 +182,35 @@ export function migrateLegacySwappedOfficialBindings(bindings: AgentRouteBinding
     }
     return binding
   })
+}
+
+export function migrateStaleOfficialModelDefaults(bindings: AgentRouteBinding[]): AgentRouteBinding[] {
+  return bindings.map(binding => {
+    if ((binding.agentId === 'orbit' || binding.agentId === 'codex') &&
+        binding.providerId === DEFAULT_CODEX_PROVIDER_ID &&
+        binding.modelId === 'gpt-4o') {
+      return { ...binding, modelId: DEFAULT_CODEX_MODEL_ID }
+    }
+    if (binding.agentId === 'claude' &&
+        binding.providerId === DEFAULT_CLAUDE_PROVIDER_ID &&
+        binding.modelId === 'claude-sonnet-4-5') {
+      return { ...binding, modelId: DEFAULT_CLAUDE_MODEL_ID }
+    }
+    return binding
+  })
+}
+
+function mergeBuiltinModels(defaultModels: ModelDefinition[], savedModels?: ModelDefinition[]): ModelDefinition[] {
+  if (!savedModels || savedModels.length === 0) return defaultModels
+  const byId = new Map<string, ModelDefinition>()
+  for (const model of defaultModels) byId.set(model.id, model)
+  for (const model of savedModels) {
+    const builtin = byId.get(model.id)
+    byId.set(model.id, builtin ? { ...builtin, ...model, label: model.label || builtin.label } : model)
+  }
+  return defaultModels
+    .map(model => byId.get(model.id)!)
+    .concat(savedModels.filter(model => !defaultModels.find(def => def.id === model.id)))
 }
 
 export class ProviderManager extends EventEmitter {
@@ -217,7 +286,7 @@ export class ProviderManager extends EventEmitter {
         customHeaders: saved.customHeaders || def.customHeaders,
         note: saved.note || def.note,
         defaultThinking: saved.defaultThinking || def.defaultThinking,
-        models: saved.models && saved.models.length > 0 ? saved.models : def.models
+        models: mergeBuiltinModels(def.models, saved.models)
       }
     })
 
@@ -228,9 +297,12 @@ export class ProviderManager extends EventEmitter {
       }
     }
 
-    const storedBindings = migrateLegacySwappedOfficialBindings(
+    let storedBindings = migrateStaleOfficialModelDefaults(migrateLegacySwappedOfficialBindings(
       stored.routing?.bindings?.length ? [...stored.routing.bindings] : defaults.routing.bindings
-    )
+    ))
+    if ((stored.version ?? 1) < 2) {
+      storedBindings = migrateDefaultHttpBindingsToLocalCli(storedBindings)
+    }
     // 新增内置 Agent 时补齐缺失的默认绑定（老配置升级）
     for (const db of defaults.routing.bindings) {
       if (!storedBindings.find(b => b.agentId === db.agentId)) storedBindings.push(db)

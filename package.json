@@ -1,7 +1,7 @@
 {
   "name": "agenthub",
   "version": "0.5.3",
-  "description": "AgentHub - 多 Agent 协同桌面工作台",
+  "description": "Orbit - 多 Agent 协同工作区",
   "main": "out/main/index.js",
   "author": {
     "name": "AgentHub Team",
@@ -22,6 +22,7 @@
     "unpack": "electron-builder --dir"
   },
   "dependencies": {
+    "ogl": "^1.0.11",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.18.0"
@@ -47,7 +48,7 @@
   },
   "build": {
     "appId": "dev.agenthub.desktop",
-    "productName": "AgentHub",
+    "productName": "Orbit",
     "copyright": "Copyright (c) 2026 AgentHubTeam",
     "buildVersion": "0.5.3",
     "files": [
@@ -179,8 +180,8 @@
       "description": "AgentHub - 多 Agent 协同桌面工作台",
       "desktop": {
         "entry": {
-          "Name": "AgentHub",
-          "Comment": "多 Agent 协同桌面工作台",
+          "Name": "Orbit",
+          "Comment": "多 Agent 协同工作区",
           "Categories": "Development;Utility;"
         },
         "MimeType": "x-scheme-handler/agenthub;"

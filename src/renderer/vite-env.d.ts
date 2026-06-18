@@ -3,7 +3,8 @@
 interface ElectronAPI {
   hub: {
     getStatus: () => Promise<any>
-    dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any; workspaceId?: string | null }) => Promise<any>
+    dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any; workspaceId?: string | null; requirePlanApproval?: boolean }) => Promise<any>
+    approvePlan: (taskId: string, approved: boolean) => Promise<boolean>
     cancel: (taskId: string) => Promise<boolean>
     onStatus: (callback: (data: any) => void) => () => void
     onStream: (callback: (data: any) => void) => () => void
@@ -55,10 +56,23 @@ interface ElectronAPI {
   }
   memory: {
     catalog: () => Promise<any>
-    list: (category?: 'conversation' | 'task' | 'skill' | 'file' | 'system') => Promise<any[]>
+    list: (category?: 'conversation' | 'task' | 'skill' | 'file' | 'system' | 'episodic' | 'semantic' | 'procedure' | 'decision') => Promise<any[]>
     addEntry: (entry: any) => Promise<any>
-    loadState: () => Promise<{ messages?: any[]; tasks?: any[] }>
-    saveState: (state: { messages: any[]; tasks: any[] }) => Promise<any>
+    loadState: () => Promise<{ messages?: any[]; tasks?: any[]; conversations?: any[]; activeConversationId?: string | null; activeWorkspaceId?: string | null }>
+    saveState: (state: { messages: any[]; tasks: any[]; conversations?: any[]; activeConversationId?: string | null; activeWorkspaceId?: string | null }) => Promise<any>
+  }
+  missions: {
+    plans: () => Promise<any[]>
+    outcomes: (limit?: number) => Promise<any[]>
+    active: () => Promise<any | null>
+    stm: () => Promise<any>
+  }
+  collaboration: {
+    events: (filter?: any) => Promise<any[]>
+    timeline: (missionId: string, limit?: number) => Promise<string>
+  }
+  openagents: {
+    compatibility: () => Promise<any>
   }
   app: {
     openExternal: (url: string) => Promise<void>

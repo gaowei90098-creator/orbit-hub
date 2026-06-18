@@ -1,71 +1,66 @@
-# AgentHub
+# Orbit
 
-> 多 Agent 协同桌面工作台 - Multi-Agent Collaboration Desktop Workbench
+> 主 Agent 协作工作区 - Main-Agent Orchestrated Collaboration Workspace
 
-AgentHub 让多个 AI Agent (Codex CLI / Claude Code / OpenClaw / Hermes ...) 在同一工作台中协同工作,像管理一个团队一样管理你的 Agent。
+![Orbit icon](src/renderer/public/icons/orbit.png)
+
+Orbit 是基于 `hycailxy/AgentHub` 改造的多 Agent 项目协作桌面应用。它不是普通多模型聊天壳，而是由 Orbit 主 Agent 接收项目目标，读取项目上下文和 Memory，生成协作流程，再派发给 Codex CLI、Claude Code、Marvis、MiniMax Code 等子 Agent 执行，最后监督、验证、汇总和返工。
+
+当前源码工作区：`/Users/gao90098/Desktop/AgentForge-MissionControl`
 
 ## 核心特性
 
-- **多 Agent 协同**:在同一会话中调度多个 AI Agent,支持自动分配 / 广播 / 链式三种模式
-- **统一 Provider 配置**:OpenAI / Anthropic / Google / DeepSeek / OpenRouter / 自定义 OpenAI 兼容端点
-- **思考控制**:为每个 Agent 精细调控推理深度 (off / auto / enabled × 5 级预算)
-- **任务看板**:拖拽式 Kanban,支持搜索、优先级筛选、任务编辑器
-- **多工作区**:在不同项目间隔离会话和任务
-- **本地 Chat Completions 代理**:其他工具可以指向 AgentHub 作为它们的 provider (端口 9528)
-- **键盘友好**:完整快捷键支持,命令面板 (Ctrl+K)
-- **深色主题**:Hermes 设计语言,玻璃态 / 渐变 / glow / spring 缓动
-
-## 系统要求
-
-- Windows 10 / 11 (x64)
-- macOS 11+ (Intel / Apple Silicon)
-- Linux (x64) - Ubuntu 20.04+ / Debian 11+ / Fedora 35+
-- 至少 4 GB RAM,推荐 8 GB+
+- **Orbit 主 Agent 编排**：先生成 `PlanArtifact / TaskDAG / TaskContract`，确认后再派发给子 Agent。
+- **工作区隔离**：侧栏按工作区分组，每个项目拥有独立对话、任务历史和上下文。
+- **新对话历史**：像 Codex 一样从侧栏新建对话，并在不同工作区下整理会话。
+- **本地 CLI 优先**：Codex CLI / Claude Code 默认使用本机登录态直连；Provider API 是可选能力。
+- **分层 Memory**：短期任务上下文、情节记忆、语义/流程记忆共同帮助 Orbit 延续项目判断。
+- **用户远程桥**：Hermes / OpenClaw 用于通知用户、远程要求和确认回传，不默认接代码或数据库写入任务。
+- **Provider 与模型绑定**：内置 OpenAI / Anthropic / Gemini / DeepSeek / MiniMax / OpenRouter 等，也支持自定义中转并手动填写 Model ID，避免中转站不支持 `/models` 时路由失败。
+- **Supervisor**：规则优先判断真卡住、等队友、验证失败或需要返工；必要时可调用轻量 LLM。
 
 ## 快速开始
 
-1. 从 Releases 下载对应平台的安装包
-2. 运行安装程序
-3. 打开 AgentHub,进入 **设置 → Providers** 添加至少一个 API key
-4. 在对话框输入消息,使用 @codex / @claude 等指定 Agent,或使用 /broadcast 开启广播模式
+1. 打开 `/Users/gao90098/Desktop/Orbit.app`。
+2. 进入 **设置 → 工作区**，为每个项目添加一个根目录。
+3. 进入 **设置 → Provider**，给 Orbit 主 Agent 配置可用模型；Codex / Claude 子 Agent 可用 StdIO 连接本机会员登录态。
+4. 在侧栏点击 **新对话**，确认当前工作区后输入项目目标。
+5. 在会话功能菜单中选择 **编排**，让 Orbit 生成协作流程，确认后再启动子 Agent。
 
-## 键盘快捷键
+## 自定义 Provider
 
-| 快捷键 | 功能 |
-|---|---|
-| Ctrl + K | 打开命令面板 |
-| Ctrl +  | 切换 Agent 侧栏 |
-| Ctrl + / | 切换上下文面板 |
-| Enter | 发送消息 |
-| Shift + Enter | 换行 |
-| @ | 提及 Agent |
-| / | 运行命令 (/broadcast, /chain, /clear, /thinking) |
-| Esc | 关闭弹窗 / 取消编辑 |
-| Shift + ? | 打开快捷键帮助 |
+创建自定义中转时必须填写：
+
+- `Base URL`：例如 `https://api.example.com/v1`
+- `API Key`：可以稍后补
+- `Model ID`：必须与中转站支持的模型名称完全一致，例如 `gpt-4o`、`deepseek-chat`、`claude-sonnet-4-6`、`gemini-2.5-flash`
+
+如果中转站不支持 `/models`，可以在 Provider 卡片中手动添加模型名称。
 
 ## 本地开发
 
-`bash
-git clone https://github.com/agenthub/agenthub.git
-cd agenthub
+```bash
+cd /Users/gao90098/Desktop/AgentForge-MissionControl
 npm install
 npm run dev
-`
+```
 
-## 打包
+## 验证与打包
 
-`bash
-npm run build:win   # Windows NSIS 安装程序
-npm run build:mac   # macOS DMG (universal)
-npm run build:linux # Linux AppImage / deb
-`
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run unpack
+```
 
 ## 协议
 
-AgentHub 注册了 agenthub: 协议,可以处理:
-- agenthub://open?workspace=<id> - 打开指定工作区
-- agenthub://chat?agent=<id> - 直接打开与指定 Agent 的对话
+Orbit 目前沿用 `agenthub:` 深链协议以保持兼容：
+
+- `agenthub://open?workspace=<id>`：打开指定工作区
+- `agenthub://chat?agent=<id>`：直接打开与指定 Agent 的会话
 
 ## 许可
 
-本项目基于 MIT 许可证开源,详见 LICENSE。
+本项目基于 MIT 许可证开源，详见 LICENSE。

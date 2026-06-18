@@ -16,8 +16,8 @@ describe('KeywordRouter 智能路由（按任务类型打分）', () => {
     expect(r.route('请分析这份报告并总结，然后翻译成英文文档', all)).toBe('claude')
   })
 
-  it('自动化/部署类任务 → openclaw', () => {
-    expect(r.route('帮我部署这个 pipeline 并写个自动化脚本', all)).toBe('openclaw')
+  it('自动化/部署类任务 → minimax-code（OpenClaw 不作为执行工人）', () => {
+    expect(r.route('帮我部署这个 pipeline 并写个自动化脚本', all)).toBe('minimax-code')
   })
 
   it('混合但编码主导 → 取命中最多的 codex', () => {
@@ -34,8 +34,19 @@ describe('KeywordRouter 智能路由（按任务类型打分）', () => {
 
   it('routeScores 降序且仅含命中者', () => {
     const s = r.routeScores('部署 pipeline 自动化脚本', all)
-    expect(s[0].id).toBe('openclaw')
+    expect(s[0].id).toBe('minimax-code')
     expect(s.every(x => x.score > 0)).toBe(true)
     for (let i = 1; i < s.length; i++) expect(s[i - 1].score).toBeGreaterThanOrEqual(s[i].score)
+  })
+
+  it('通知/远程通报类任务 → Hermes/OpenClaw 用户桥接通道', () => {
+    expect(['hermes', 'openclaw']).toContain(r.route('手机远程通知我任务进度，需要确认时提醒我', agents('hermes', 'openclaw', 'codex')))
+  })
+
+  it('全局 mission STM 会参与模糊请求路由', () => {
+    expect(r.route('继续处理下一步', agents('codex', 'claude'), {
+      goal: '实现 API 并修复 bug',
+      pendingContracts: [{ id: 'a', title: '修复代码', detail: 'debug api bug', agentId: 'codex' }]
+    })).toBe('codex')
   })
 })

@@ -129,7 +129,7 @@ export function TaskStatusBadge({ status }: { status: TaskUIStatus }) {
       fontSize: 11, fontWeight: 600, color: s.color, flex: 'none',
       border: `1px solid color-mix(in srgb, ${s.color} 40%, transparent)`,
       background: `color-mix(in srgb, ${s.color} 12%, transparent)`,
-      borderRadius: 999, padding: '2px 9px'
+      borderRadius: 6, padding: '2px 9px'
     }}>{taskStatusLabel(status)}</span>
   )
 }

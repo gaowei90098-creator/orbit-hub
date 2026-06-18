@@ -62,16 +62,16 @@ describe('connection status summary', () => {
     })
 
     expect(summary.counts).toEqual({
-      usable: 1,
+      usable: 2,
       busy: 0,
       error: 0,
       needsProvider: 1,
-      needsInstall: 1,
+      needsInstall: 0,
       off: 0
     })
-    expect(summary.headlineZh).toContain('1 个可用')
+    expect(summary.headlineZh).toContain('2 个可用')
     expect(summary.items.find(item => item.agentId === 'codex')?.state).toBe('needs-provider')
-    expect(summary.items.find(item => item.agentId === 'minimax-code')?.state).toBe('needs-install')
+    expect(summary.items.find(item => item.agentId === 'minimax-code')?.state).toBe('usable')
   })
 
   it('offers a first-run action for provider and CLI failures', () => {

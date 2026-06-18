@@ -17,6 +17,21 @@ describe('orchestrate reducer', () => {
     expect(s.subtasks.every(t => t.status === 'pending')).toBe(true)
   })
 
+  it('approval 事件让计划先停在待确认阶段', () => {
+    let s = applyOrchestrateEvent(undefined, {
+      kind: 'orchestrate:plan',
+      taskId: 'task-1',
+      missionId: 'mission-task-1',
+      planArtifact: { status: 'awaiting-approval' },
+      subtasks: [{ id: 'a', title: '写后端', fileScope: ['src/**'], dependsOn: [] }]
+    })
+    expect(s.phase).toBe('awaiting-approval')
+    expect(s.taskId).toBe('task-1')
+    expect(s.subtasks[0].fileScope).toEqual(['src/**'])
+    s = applyOrchestrateEvent(s, { kind: 'orchestrate:approval', taskId: 'task-1', status: 'approved' })
+    expect(s.phase).toBe('running')
+  })
+
   it('subtask 事件更新状态/agent/内容(支持增量拼接)', () => {
     let s = initialOrchestrateState()
     s = applyOrchestrateEvent(s, { kind: 'orchestrate:plan', subtasks: [{ id: 'a', title: 'A' }] })

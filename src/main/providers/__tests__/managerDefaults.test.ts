@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest"
 import {
   defaultBindings,
-  migrateLegacySwappedOfficialBindings
+  migrateLegacySwappedOfficialBindings,
+  migrateStaleOfficialModelDefaults
 } from "../manager"
 import type { AgentRouteBinding } from "../types"
 
@@ -17,11 +18,11 @@ describe("provider manager default route bindings", () => {
 
     expect(bindingByAgent(bindings, "codex")).toMatchObject({
       providerId: "openai",
-      modelId: "gpt-4o"
+      modelId: "gpt-5.5"
     })
     expect(bindingByAgent(bindings, "claude")).toMatchObject({
       providerId: "anthropic",
-      modelId: "claude-sonnet-4-5"
+      modelId: "claude-sonnet-4-6"
     })
   })
 
@@ -36,11 +37,11 @@ describe("provider manager default route bindings", () => {
 
     expect(bindingByAgent(migrated, "codex")).toMatchObject({
       providerId: "openai",
-      modelId: "gpt-4o"
+      modelId: "gpt-5.5"
     })
     expect(bindingByAgent(migrated, "claude")).toMatchObject({
       providerId: "anthropic",
-      modelId: "claude-sonnet-4-5"
+      modelId: "claude-sonnet-4-6"
     })
     expect(bindingByAgent(migrated, "hermes")).toEqual(bindingByAgent(legacy, "hermes"))
   })
@@ -53,5 +54,18 @@ describe("provider manager default route bindings", () => {
     custom.find(binding => binding.agentId === "claude")!.modelId = "deepseek-chat"
 
     expect(migrateLegacySwappedOfficialBindings(custom)).toEqual(custom)
+  })
+
+  it("migrates stale official HTTP defaults to current model presets", () => {
+    const bindings = defaultBindings().map(binding => ({ ...binding }))
+    bindings.find(binding => binding.agentId === "orbit")!.modelId = "gpt-4o"
+    bindings.find(binding => binding.agentId === "codex")!.modelId = "gpt-4o"
+    bindings.find(binding => binding.agentId === "claude")!.modelId = "claude-sonnet-4-5"
+
+    const migrated = migrateStaleOfficialModelDefaults(bindings)
+
+    expect(bindingByAgent(migrated, "orbit").modelId).toBe("gpt-5.5")
+    expect(bindingByAgent(migrated, "codex").modelId).toBe("gpt-5.5")
+    expect(bindingByAgent(migrated, "claude").modelId).toBe("claude-sonnet-4-6")
   })
 })

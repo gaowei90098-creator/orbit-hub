@@ -28,13 +28,30 @@ export interface AgentManifestEntry {
   probeBinary?: string
 }
 
+export const MAIN_AGENT_ID = 'orbit'
+
 export const AGENTS: AgentManifestEntry[] = [
+  {
+    id: MAIN_AGENT_ID,
+    name: 'Orbit',
+    nameZh: 'Orbit 主 Agent',
+    caps: ['planning', 'routing', 'supervision', 'synthesis'],
+    routeKeywords: [],
+    systemPrompt: [
+      'You are Orbit, the main orchestrator agent.',
+      'You do not act as a normal worker.',
+      'You read the project goal and memory, create a bounded task DAG, assign contracts to sub-agents, supervise progress, verify results, and synthesize the final answer.',
+      'Keep task granularity aligned and call out coordination risks early.'
+    ].join(' '),
+    defaultProtocol: 'http',
+    takeoverSupported: false
+  },
   {
     id: 'codex',
     name: 'Codex CLI',
     nameZh: 'Codex',
-    caps: ['coding', 'debug', 'refactor', 'api'],
-    routeKeywords: ['写代码', 'debug', '修复', '重构', '实现', '函数', 'api', 'bug', 'coding', 'implement', 'fix'],
+    caps: ['coding', 'debug', 'refactor', 'api', 'deploy'],
+    routeKeywords: ['写代码', 'debug', '修复', '重构', '实现', '函数', 'api', 'bug', 'coding', 'implement', 'fix', '部署', '脚本', 'pipeline', 'deploy', 'script'],
     systemPrompt: 'You are Codex, an expert software engineer focused on coding, debugging and refactoring. Be precise and produce working code.',
     defaultProtocol: 'http',
     takeoverSupported: true,
@@ -55,9 +72,13 @@ export const AGENTS: AgentManifestEntry[] = [
     id: 'openclaw',
     name: 'OpenClaw',
     nameZh: 'OpenClaw',
-    caps: ['automation', 'deploy', 'pipeline', 'script'],
-    routeKeywords: ['自动化', '部署', '运行', '脚本', '任务', '流程', 'pipeline', 'deploy', 'automation', 'script'],
-    systemPrompt: 'You are OpenClaw, an automation and deployment agent specialised in pipelines, scripts and runtime tasks.',
+    caps: ['notify', 'remote-control', 'progress', 'approval'],
+    routeKeywords: ['通知', '通报', '进度', '远程', '手机', '提醒', '确认', '审批', 'notify', 'progress', 'remote', 'approval'],
+    systemPrompt: [
+      'You are OpenClaw, a user communication bridge for Orbit.',
+      'Your role is to notify the user about mission progress and relay remote user instructions back to Orbit.',
+      'Do not act as a coding, deployment, database, or file-writing worker unless the user explicitly redefines your role.'
+    ].join(' '),
     defaultProtocol: 'http',
     takeoverSupported: true,
     probeBinary: 'openclaw'
@@ -66,9 +87,13 @@ export const AGENTS: AgentManifestEntry[] = [
     id: 'hermes',
     name: 'Hermes',
     nameZh: 'Hermes',
-    caps: ['tools', 'system', 'automation'],
-    routeKeywords: ['工具', '调用', '系统', '操作', '命令', '配置', '检测', 'tool', 'system', 'command', 'config'],
-    systemPrompt: 'You are Hermes, a system automation agent specialised in tooling, configuration and command execution.',
+    caps: ['notify', 'remote-control', 'progress', 'approval'],
+    routeKeywords: ['通知', '通报', '进度', '远程', '手机', '提醒', '确认', '审批', 'notify', 'progress', 'remote', 'approval'],
+    systemPrompt: [
+      'You are Hermes, a user communication bridge for Orbit.',
+      'Your role is to notify the user about mission progress and relay remote user instructions back to Orbit.',
+      'Do not act as a coding, deployment, database, or file-writing worker unless the user explicitly redefines your role.'
+    ].join(' '),
     defaultProtocol: 'http',
     takeoverSupported: true,
     probeBinary: 'hermes'
@@ -87,14 +112,27 @@ export const AGENTS: AgentManifestEntry[] = [
     id: 'minimax-code',
     name: 'MiniMax Code',
     nameZh: 'MiniMax Code',
-    caps: ['coding', 'agentic', 'tools', 'review'],
-    routeKeywords: ['minimax', 'opencode', 'agentic', '代码审查', 'review'],
+    caps: ['coding', 'agentic', 'tools', 'review', 'automation'],
+    routeKeywords: ['minimax', 'opencode', 'agentic', '代码审查', 'review', '自动化', '流水线', 'pipeline', '脚本', 'script'],
     systemPrompt: 'You are MiniMax Code, an agentic coding assistant built on OpenCode. Be precise, write working code and explain briefly.',
     defaultProtocol: 'stdio-plain',
     takeoverSupported: false,
     probeBinary: 'opencode'
   }
 ]
+
+export const WORKER_AGENTS = AGENTS.filter(agent => agent.id !== MAIN_AGENT_ID)
+export const WORKER_AGENT_IDS = WORKER_AGENTS.map(agent => agent.id)
+export const USER_BRIDGE_AGENT_IDS = ['hermes', 'openclaw'] as const
+export const NOTIFICATION_BRIDGE_STORAGE_KEY = 'orbit.notificationBridge'
+export const DEFAULT_NOTIFICATION_BRIDGE_AGENT_ID = 'hermes'
+const USER_BRIDGE_ID_SET = new Set<string>(USER_BRIDGE_AGENT_IDS)
+export const EXECUTION_WORKER_AGENTS = WORKER_AGENTS.filter(agent => !USER_BRIDGE_ID_SET.has(agent.id))
+export const EXECUTION_WORKER_AGENT_IDS = EXECUTION_WORKER_AGENTS.map(agent => agent.id)
+
+export function isUserBridgeAgent(id: string): boolean {
+  return USER_BRIDGE_ID_SET.has(id)
+}
 
 export const AGENTS_BY_ID: Record<string, AgentManifestEntry> =
   Object.fromEntries(AGENTS.map(a => [a.id, a]))

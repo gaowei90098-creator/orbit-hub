@@ -1,4 +1,4 @@
-import { AGENT_IDS, AGENT_META, AgentUIStatus, BindingDef, ProviderDef } from './meta'
+import { AGENT_META, MAIN_AGENT_ID, ROUTING_AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef } from './meta'
 
 export type ConnectionState = 'usable' | 'busy' | 'error' | 'needs-provider' | 'needs-install' | 'off'
 export type SetupTab = 'providers' | 'routing' | 'sites' | 'proxy' | 'workspaces'
@@ -62,23 +62,30 @@ function isStdioBinding(binding?: BindingDef): boolean {
 }
 
 function stdioReady(binding?: BindingDef): boolean {
-  return isStdioBinding(binding) && !!binding?.binary?.trim()
+  // Empty binary means "auto": the main process locates the preferred local CLI
+  // from env, desktop app bundles, Homebrew/npm, or PATH.
+  return isStdioBinding(binding)
 }
 
 function itemForState(agentId: string, state: ConnectionState, status: AgentUIStatus, binding?: BindingDef, provider?: ProviderDef): AgentConnectionItem {
   const name = AGENT_META[agentId]?.name ?? agentId
+  const isMainAgent = agentId === MAIN_AGENT_ID
   if (state === 'needs-provider') {
     return {
       agentId,
       state,
       status,
-      titleZh: `${name} 需要 Provider Key`,
-      titleEn: `${name} needs a provider key`,
+      titleZh: isMainAgent ? 'Orbit 主 Agent 需要 Provider Key' : `${name} 需要 Provider Key`,
+      titleEn: isMainAgent ? 'Orbit main Agent needs a provider key' : `${name} needs a provider key`,
       detailZh: provider
-        ? `当前绑定到 ${provider.name}，但该提供商未启用或缺少 API Key。`
+        ? isMainAgent
+          ? `Orbit 负责拆分、派发、校验和汇总；当前绑定到 ${provider.name}，但该提供商未启用或缺少 API Key。`
+          : `当前绑定到 ${provider.name}，但该提供商未启用或缺少 API Key。`
         : '当前 HTTP 路由没有可用提供商。',
       detailEn: provider
-        ? `It is bound to ${provider.name}, but that provider is disabled or missing an API key.`
+        ? isMainAgent
+          ? `Orbit decomposes, dispatches, verifies and synthesizes; it is bound to ${provider.name}, but that provider is disabled or missing an API key.`
+          : `It is bound to ${provider.name}, but that provider is disabled or missing an API key.`
         : 'The current HTTP route has no usable provider.',
       action: configureProviderAction
     }
@@ -92,10 +99,10 @@ function itemForState(agentId: string, state: ConnectionState, status: AgentUISt
       titleEn: `${name} local CLI not detected`,
       detailZh: binding?.binary
         ? '已选择自定义路径，但当前 Hub 状态仍未就绪。'
-        : 'StdIO 模式需要先安装 CLI，或在路由设置里选择可执行文件路径。',
+        : 'StdIO 模式会自动探测本地 CLI；如果派发失败，再到路由设置里选择可执行文件路径。',
       detailEn: binding?.binary
         ? 'A custom path is selected, but the Hub still does not report it as ready.'
-        : 'StdIO mode needs an installed CLI, or an executable path selected in Routing.',
+        : 'StdIO mode auto-detects the local CLI; if dispatch fails, choose an executable path in Routing.',
       action: binding?.binary ? chooseCliAction : installCliAction
     }
   }
@@ -130,8 +137,12 @@ function itemForState(agentId: string, state: ConnectionState, status: AgentUISt
       status,
       titleZh: `${name} 可用`,
       titleEn: `${name} is ready`,
-      detailZh: isStdioBinding(binding) ? '本地 CLI 已绑定，可直接派发任务。' : 'Provider Key 与模型绑定已就绪。',
-      detailEn: isStdioBinding(binding) ? 'The local CLI is bound and ready for dispatch.' : 'Provider key and model binding are ready.',
+      detailZh: isMainAgent
+        ? 'Orbit 主 Agent 已就绪，会负责拆分任务、派发子 Agent、监督和汇总。'
+        : isStdioBinding(binding) ? '本地 CLI 模式已启用，会使用本机登录态直接派发。' : 'Provider Key 与模型绑定已就绪。',
+      detailEn: isMainAgent
+        ? 'Orbit main Agent is ready to plan, dispatch workers, supervise and synthesize.'
+        : isStdioBinding(binding) ? 'Local CLI mode is enabled and will dispatch with your local login state.' : 'Provider key and model binding are ready.',
       action: null
     }
   }
@@ -161,7 +172,7 @@ export function summarizeAgentConnections({ agents, bindings, providers }: {
     off: 0
   }
 
-  const agentIds = AGENT_IDS.filter(agentId => agents[agentId] || bindings.some(binding => binding.agentId === agentId))
+  const agentIds = ROUTING_AGENT_IDS.filter(agentId => agents[agentId] || bindings.some(binding => binding.agentId === agentId))
 
   const items = agentIds.map(agentId => {
     const binding = bindings.find(b => b.agentId === agentId)

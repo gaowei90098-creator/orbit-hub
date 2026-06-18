@@ -9,6 +9,7 @@ import { TaskItem, fmtDur, sumTokens, fmtTokens, usageTotal, sumCost, costOf, fm
 import { tr, modeLabel } from '../glass/i18n'
 import { SetupTab, firstRunActionForError } from '../glass/connection-status'
 import { ActivityTrail } from '../glass/activity-view'
+import { SpotlightPanel } from '../glass/react-bits'
 
 /** 结果一键复制（带 1.2s “已复制”反馈） */
 function CopyBtn({ text }: { text: string }) {
@@ -49,38 +50,39 @@ export function TasksScreen({ tasks, search, onCancelTask, openSetup }: {
       }>{tr('任务历史', 'Task history')}</SectionTitle>
 
       {visible.length === 0 && (
-        <div className="glass" style={{ padding: 40, textAlign: 'center', color: 'var(--tx-3)' }}>{tr('没有匹配的任务', 'No matching tasks')}</div>
+        <SpotlightPanel className="glass" spotlightColor="rgba(90, 167, 240, 0.12)" style={{ padding: 40, textAlign: 'center', color: 'var(--tx-3)' }}>{tr('没有匹配的任务', 'No matching tasks')}</SpotlightPanel>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {visible.map((t, i) => {
           const isOpen = open === t.id
           return (
-            <Enter key={t.id} delay={i * 45} className="glass" style={{ overflow: 'hidden' }}>
-              <div onClick={() => setOpen(isOpen ? null : t.id)} style={{
-                display: 'flex', alignItems: 'center', gap: 13, padding: '13px 18px', cursor: 'pointer'
-              }}>
-                <TaskStatusBadge status={t.status} />
-                <span style={{ flex: 1, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.text}</span>
-                <span className="ah-chip">{modeLabel(t.mode)}</span>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {t.agents.map(a => <AgentMark key={a} id={a} size={20} radius={6} />)}
-                </div>
-                {sumTokens(t.usage) > 0 && (
-                  <span className="ah-chip" title={tr('Token 总量 / 估算费用', 'Total tokens / est. cost')} style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
-                    {fmtTokens(sumTokens(t.usage))} tok{sumCost(t.usage) != null ? ` · ≈${fmtCost(sumCost(t.usage)!)}` : ''}
+            <Enter key={t.id} delay={i * 45}>
+              <SpotlightPanel className="glass hover-glow rb-table" spotlightColor="rgba(90, 167, 240, 0.12)" style={{ overflow: 'hidden' }}>
+                <div onClick={() => setOpen(isOpen ? null : t.id)} style={{
+                  display: 'flex', alignItems: 'center', gap: 13, padding: '13px 18px', cursor: 'pointer'
+                }}>
+                  <TaskStatusBadge status={t.status} />
+                  <span style={{ flex: 1, fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.text}</span>
+                  <span className="ah-chip">{modeLabel(t.mode)}</span>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {t.agents.map(a => <AgentMark key={a} id={a} size={20} radius={6} />)}
+                  </div>
+                  {sumTokens(t.usage) > 0 && (
+                    <span className="ah-chip" title={tr('Token 总量 / 估算费用', 'Total tokens / est. cost')} style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                      {fmtTokens(sumTokens(t.usage))} tok{sumCost(t.usage) != null ? ` · ≈${fmtCost(sumCost(t.usage)!)}` : ''}
+                    </span>
+                  )}
+                  <span className="ah-hint" style={{ width: 50, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
+                    {t.status === 'running' ? '…' : fmtDur(t.durationMs)}
                   </span>
-                )}
-                <span className="ah-hint" style={{ width: 50, textAlign: 'right', fontFamily: 'var(--font-mono)' }}>
-                  {t.status === 'running' ? '…' : fmtDur(t.durationMs)}
-                </span>
-                <span className="ah-hint" style={{ width: 40, textAlign: 'right' }}>{t.createdAt}</span>
-                {t.status === 'running'
-                  ? <button className="ah-btn sm danger" onClick={e => { e.stopPropagation(); onCancelTask(t.id) }}>{tr('取消', 'Cancel')}</button>
-                  : <Icon d={IC.chevDown} size={14} style={{ color: 'var(--tx-3)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />}
-              </div>
-              <Collapse open={isOpen}>
-                <div style={{ borderTop: '1px solid var(--glass-border)', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <span className="ah-hint" style={{ width: 40, textAlign: 'right' }}>{t.createdAt}</span>
+                  {t.status === 'running'
+                    ? <button className="ah-btn sm danger" onClick={e => { e.stopPropagation(); onCancelTask(t.id) }}>{tr('取消', 'Cancel')}</button>
+                    : <Icon d={IC.chevDown} size={14} style={{ color: 'var(--tx-3)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />}
+                </div>
+                <Collapse open={isOpen}>
+                  <div style={{ borderTop: '1px solid var(--glass-border)', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div className="ah-hint" style={{ fontFamily: 'var(--font-mono)' }}>{t.id} · {modeLabel(t.mode)} · {tr(`${t.agents.length} 个 Agent`, `${t.agents.length} agents`)}</div>
                   {sumTokens(t.usage) > 0 && (
                     <div className="ah-hint" style={{ fontFamily: 'var(--font-mono)', display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -131,8 +133,9 @@ export function TasksScreen({ tasks, search, onCancelTask, openSetup }: {
                       </div>
                     ) : null
                   )}
-                </div>
-              </Collapse>
+                  </div>
+                </Collapse>
+              </SpotlightPanel>
             </Enter>
           )
         })}

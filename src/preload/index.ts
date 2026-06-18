@@ -4,8 +4,16 @@ const api = {
   hub: {
     getStatus: () => ipcRenderer.invoke('hub:status'),
     routePreview: (text: string) => ipcRenderer.invoke('hub:routePreview', text),
-    dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any; workspaceId?: string | null }) =>
-      ipcRenderer.invoke('hub:dispatch', { text, mode: mode || 'auto', targetAgent, thinking: opts?.thinking, workspaceId: opts?.workspaceId ?? null }),
+    dispatch: (text: string, mode?: string, targetAgent?: string, opts?: { thinking?: any; workspaceId?: string | null; requirePlanApproval?: boolean }) =>
+      ipcRenderer.invoke('hub:dispatch', {
+        text,
+        mode: mode || 'auto',
+        targetAgent,
+        thinking: opts?.thinking,
+        workspaceId: opts?.workspaceId ?? null,
+        requirePlanApproval: !!opts?.requirePlanApproval
+      }),
+    approvePlan: (taskId: string, approved: boolean) => ipcRenderer.invoke('hub:approvePlan', taskId, approved),
     cancel: (taskId: string) => ipcRenderer.invoke('hub:cancel', taskId),
     onStatus: (callback: (data: any) => void) => {
       const handler = (_event: any, data: any) => callback(data)
@@ -74,6 +82,19 @@ const api = {
     addEntry: (entry: any) => ipcRenderer.invoke('memory:addEntry', entry),
     loadState: () => ipcRenderer.invoke('memory:loadState'),
     saveState: (state: any) => ipcRenderer.invoke('memory:saveState', state)
+  },
+  missions: {
+    plans: () => ipcRenderer.invoke('missions:plans'),
+    outcomes: (limit?: number) => ipcRenderer.invoke('missions:outcomes', limit),
+    active: () => ipcRenderer.invoke('missions:active'),
+    stm: () => ipcRenderer.invoke('missions:stm')
+  },
+  collaboration: {
+    events: (filter?: any) => ipcRenderer.invoke('collaboration:events', filter),
+    timeline: (missionId: string, limit?: number) => ipcRenderer.invoke('collaboration:timeline', missionId, limit)
+  },
+  openagents: {
+    compatibility: () => ipcRenderer.invoke('openagents:compatibility')
   },
   app: {
     openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),

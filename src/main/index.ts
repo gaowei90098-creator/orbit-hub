@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, dialog } from "electron"
 import { join, resolve } from "path"
-import { existsSync } from "fs"
+import { existsSync, readFileSync } from "fs"
+import { homedir } from "os"
 import { HubServer } from "./hub/server"
 import { AgentRegistry } from "./hub/registry"
 import { EventPipeline } from "./hub/pipeline"
@@ -16,6 +17,10 @@ import { syncRegistryFromBindings } from "./hub/agent-connections"
 import { routePreview } from "./hub/route-preview"
 import { MemoryCategory, MemoryLibrary } from "./memory-library"
 import { getWorkspaceManager, WorkspaceNotFoundError, WorkspacePathInvalidError } from "./hub/workspace"
+import { MissionStore } from "./hub/mission-store"
+import { Supervisor } from "./hub/supervisor"
+import { CollaborationBus } from "./hub/collaboration-bus"
+import { checkOpenAgentsCompatibility, defaultOpenAgentsConfigDir } from "./openagents/bridge"
 // --- AgentHub skills + native agentic (Claude-B 新增) ---
 import { getSkillManager } from "./skills/manager"
 import { BUILTIN_SKILLS } from "./skills/types"
@@ -30,14 +35,157 @@ let hub: HubServer | null = null
 const registry = new AgentRegistry()
 const pipeline = new EventPipeline()
 const router = new KeywordRouter()
+app.setName("Orbit")
+try {
+  app.setPath("userData", join(app.getPath("appData"), "agenthub"))
+} catch {
+  // Keep the default Electron path if the platform refuses early path changes.
+}
 const providerMgr = getProviderManager()
 let dispatcher: Dispatcher | null = null
 const proxy = getLocalProxy()
 let memoryLibrary: MemoryLibrary | null = null
+let missionStore: MissionStore | null = null
+let collaborationBus: CollaborationBus | null = null
+
+function prepareLocalCliEnvironment(): void {
+  const home = homedir()
+  const extraPaths = [
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    join(home, ".volta", "bin"),
+    join(home, ".npm-global", "bin"),
+    join(home, ".local", "bin"),
+    join(home, ".cargo", "bin")
+  ]
+  const currentPath = process.env.PATH || ""
+  process.env.PATH = [...extraPaths, currentPath].filter(Boolean).join(":")
+
+  // Claude Code headless mode may need the subscription OAuth token exported.
+  // Users can create either file locally; the token never leaves this process.
+  if (!process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    for (const fileName of [".agenthub-oauth-token", ".orbit-oauth-token"]) {
+      const filePath = join(home, fileName)
+      try {
+        if (!existsSync(filePath)) continue
+        const token = readFileSync(filePath, "utf-8").trim()
+        if (token) {
+          process.env.CLAUDE_CODE_OAUTH_TOKEN = token
+          break
+        }
+      } catch {
+        // Ignore unreadable token files; dispatch will surface auth errors.
+      }
+    }
+  }
+}
 
 function memory(): MemoryLibrary {
   if (!memoryLibrary) memoryLibrary = new MemoryLibrary(app.getPath("userData"))
   return memoryLibrary
+}
+
+function missions(): MissionStore {
+  if (!missionStore) missionStore = new MissionStore(app.getPath("userData"))
+  return missionStore
+}
+
+function collaboration(): CollaborationBus {
+  if (!collaborationBus) collaborationBus = new CollaborationBus(app.getPath("userData"))
+  return collaborationBus
+}
+
+function seedCoreMemories(): void {
+  const entries = [
+    {
+      id: "system:agenthub-main-agent-principle",
+      category: "system" as MemoryCategory,
+      title: "AgentHub is the main orchestrator agent",
+      summary: "User intent: accept a project goal, decompose it, coordinate sub-agents, then verify and synthesize.",
+      content: [
+        "AgentHub is not primarily a multi-model chat shell.",
+        "It is the main Agent / Orchestrator for project collaboration.",
+        "The main Agent reads the project, uses memory, creates a task DAG, assigns bounded task contracts to sub-agents, supervises progress, resolves coordination issues, and produces a final acceptance summary.",
+      ].join("\n"),
+      tags: ["architecture", "main-agent", "orchestrator"]
+    },
+    {
+      id: "procedure:sub-agent-task-contract",
+      category: "procedure" as MemoryCategory,
+      title: "Sub-agent task contract",
+      summary: "Every worker task should carry file scope, done criteria, verify command, and interface reference.",
+      content: [
+        "Each sub-agent receives a bounded contract:",
+        "- title and concrete detail",
+        "- fileScope / ownership boundary",
+        "- dependsOn / task DAG ordering when work cannot safely run in parallel",
+        "- doneWhen acceptance criteria",
+        "- verifyCommand where available",
+        "- interfaceRef for shared API, data shape, UI, naming, or design decisions",
+        "This keeps task granularity aligned and prevents workers from implementing mismatched specs.",
+      ].join("\n"),
+      tags: ["task-contract", "coordination", "granularity"]
+    },
+    {
+      id: "semantic:memory-layering",
+      category: "semantic" as MemoryCategory,
+      title: "Three-layer memory model",
+      summary: "STM for active mission, episodic LTM for outcomes, semantic/procedure LTM for project rules and reusable skills.",
+      content: [
+        "STM: active mission context, current task DAG, worker state, recent decisions, and message routing context.",
+        "Episodic LTM: past mission outcomes, failures, repairs, verification results, and lessons.",
+        "Semantic/procedure LTM: project conventions, Agent capabilities, reusable commands, operating rules, and architecture decisions.",
+        "Planner startup must read recent mission outcomes before proposing a new PlanArtifact.",
+        "Workers keep private execution history; only results, contract changes, blockers, and lessons are promoted to shared memory.",
+      ].join("\n"),
+      tags: ["memory", "stm", "ltm", "episodic", "semantic"]
+    },
+    {
+      id: "semantic:user-bridge-agent-boundary",
+      category: "semantic" as MemoryCategory,
+      title: "Hermes and OpenClaw are user bridges, not execution workers",
+      summary: "Hermes/OpenClaw notify the user, receive remote instructions, and relay approvals; they should not receive coding, deployment, database, or file-writing contracts.",
+      content: [
+        "Orbit can let the user choose Hermes or OpenClaw as the user progress bridge.",
+        "The selected bridge receives notification events such as plan proposed, contract completed/failed, and mission completed/failed.",
+        "Remote user requirements arriving through the bridge should be recorded into STM or decisions before Orbit replans.",
+        "Do not route coding, deployment, database, or workspace mutation tasks to Hermes/OpenClaw by default.",
+        "Execution workers are Codex CLI, Claude Code, Marvis, and MiniMax Code unless the user explicitly changes roles."
+      ].join("\n"),
+      tags: ["agent-roles", "user-bridge", "hermes", "openclaw", "routing"]
+    }
+  ]
+  for (const entry of entries) memory().upsertEntry(entry)
+}
+
+function recordDispatchOutcome(task: any): void {
+  try {
+    const results = task?.results instanceof Map ? Object.fromEntries(task.results) : task?.results || {}
+    const errors = task?.errors instanceof Map ? Object.fromEntries(task.errors) : task?.errors || {}
+    const agentIds = Array.from(new Set([...Object.keys(results), ...Object.keys(errors)]))
+    memory().upsertEntry({
+      id: `episodic:dispatch:${task.id}`,
+      category: "episodic",
+      title: `Dispatch outcome: ${String(task.text || task.id).slice(0, 80)}`,
+      summary: `${task.status || "unknown"} · ${agentIds.join(", ") || "no agents"} · ${Object.keys(errors).length} error(s)`,
+      content: JSON.stringify({
+        taskId: task.id,
+        missionId: task.missionId,
+        text: task.text,
+        mode: task.mode,
+        status: task.status,
+        targetAgent: task.targetAgent,
+        planArtifact: task.planArtifact,
+        agents: agentIds,
+        resultPreview: Object.fromEntries(Object.entries(results).map(([agentId, value]) => [agentId, String(value).slice(0, 1200)])),
+        errors
+      }, null, 2),
+      tags: ["dispatch", "outcome", task.mode, task.status].filter(Boolean),
+      metadata: { taskId: task.id, missionId: task.missionId, mode: task.mode, status: task.status, agentIds }
+    })
+  } catch (e) {
+    console.warn("[Memory] failed to record dispatch outcome:", e)
+  }
 }
 
 function appAssetPath(fileName: string): string {
@@ -57,7 +205,7 @@ function createWindow(): void {
     height: 820,
     minWidth: 960,
     minHeight: 640,
-    title: "AgentHub",
+    title: "Orbit",
     icon: iconPath,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
@@ -89,13 +237,13 @@ function createTray(): void {
   const trayIcon = nativeImage.createFromPath(appAssetPath("icon.png"))
   tray = new Tray(trayIcon)
   const contextMenu = Menu.buildFromTemplate([
-    { label: "Open AgentHub", click: () => mainWindow?.show() },
+    { label: "Open Orbit", click: () => mainWindow?.show() },
     { type: "separator" },
     { label: "Status: Running", enabled: false },
     { type: "separator" },
     { label: "Quit", click: () => { (app as any).isQuitting = true; app.quit() } }
   ])
-  tray.setToolTip("AgentHub - Multi-Agent Workbench")
+  tray.setToolTip("Orbit - Multi-Agent Workspace")
   tray.setContextMenu(contextMenu)
   tray.on("double-click", () => mainWindow?.show())
 }
@@ -119,7 +267,14 @@ async function initHub(): Promise<void> {
       return event
     }
   })
-  dispatcher = new Dispatcher(registry, pipeline, () => memory().getCatalog().entries.slice(0, 12))
+  dispatcher = new Dispatcher(
+    registry,
+    pipeline,
+    () => memory().getCatalog().entries.slice(0, 12),
+    missions(),
+    new Supervisor(),
+    collaboration()
+  )
   hub = new HubServer(registry)
 
   hub.on("client:message", async ({ clientId: _clientId, message }) => {
@@ -128,8 +283,13 @@ async function initHub(): Promise<void> {
         message.payload.text,
         message.payload.mode || "auto",
         message.payload.targetAgent,
-        { thinking: message.payload.thinking, workspaceId: message.payload.workspaceId ?? null }
+        {
+          thinking: message.payload.thinking,
+          workspaceId: message.payload.workspaceId ?? null,
+          requirePlanApproval: !!message.payload.requirePlanApproval
+        }
       )
+      recordDispatchOutcome(task)
       hub?.broadcast("chat:response", {
         taskId: task.id,
         status: task.status,
@@ -156,13 +316,6 @@ async function initHub(): Promise<void> {
   })
 
   try {
-    await detectAgentsAsync()
-    console.log("[Hub] Initial agent detection complete")
-  } catch (e) {
-    console.error("[Hub] Initial detection failed:", e)
-  }
-
-  try {
     await proxy.start()
     console.log("[Proxy] Local Chat Completions:", proxy.getUrl())
   } catch (e) {
@@ -170,6 +323,9 @@ async function initHub(): Promise<void> {
   }
 
   hub.start()
+  detectAgentsAsync()
+    .then(() => console.log("[Hub] Initial agent detection complete"))
+    .catch(e => console.error("[Hub] Initial detection failed:", e))
 }
 
 ipcMain.handle("hub:status", () => ({
@@ -187,9 +343,17 @@ ipcMain.handle("hub:status", () => ({
 }))
 
 ipcMain.handle("hub:dispatch", async (_event, payload) => {
-  return dispatcher?.dispatch(payload.text, payload.mode || "auto", payload.targetAgent, { thinking: payload.thinking, workspaceId: payload.workspaceId ?? null })
+  const task = await dispatcher?.dispatch(payload.text, payload.mode || "auto", payload.targetAgent, {
+    thinking: payload.thinking,
+    workspaceId: payload.workspaceId ?? null,
+    requirePlanApproval: !!payload.requirePlanApproval
+  })
+  if (task) recordDispatchOutcome(task)
+  return task
 })
-ipcMain.handle("hub:routePreview", async (_event, text: string) => routePreview(text, registry, router))
+ipcMain.handle("hub:approvePlan", async (_event, taskId: string, approved: boolean) =>
+  dispatcher?.resolvePlanApproval(taskId, approved) ?? false)
+ipcMain.handle("hub:routePreview", async (_event, text: string) => routePreview(text, registry, router, missions().getRouterContext()))
 
 ipcMain.handle("hub:rescan", async () => {
   const agents = await detectAgentsAsync()
@@ -208,6 +372,18 @@ ipcMain.handle("memory:list", async (_event, category?: MemoryCategory) => memor
 ipcMain.handle("memory:addEntry", async (_event, entry) => memory().upsertEntry(entry))
 ipcMain.handle("memory:loadState", async () => memory().loadRuntimeState())
 ipcMain.handle("memory:saveState", async (_event, state) => memory().saveRuntimeState(state))
+ipcMain.handle("missions:plans", async () => missions().listPlans())
+ipcMain.handle("missions:outcomes", async (_event, limit?: number) => missions().listOutcomes(limit || 50))
+ipcMain.handle("missions:active", async () => missions().getActivePlan())
+ipcMain.handle("missions:stm", async () => missions().getSTM())
+ipcMain.handle("collaboration:events", async (_event, filter?: any) => collaboration().list(filter || {}))
+ipcMain.handle("collaboration:timeline", async (_event, missionId: string, limit?: number) =>
+  collaboration().buildMissionTimeline(missionId, limit || 50))
+ipcMain.handle("openagents:compatibility", async () => checkOpenAgentsCompatibility({
+  configDir: defaultOpenAgentsConfigDir(app.getPath("userData")),
+  endpoint: process.env.OPENAGENTS_ENDPOINT,
+  projectRoot: process.env.AGENTFORGE_PROJECT_ROOT || process.cwd()
+}))
 
 ipcMain.handle("providers:get", async () => providerMgr.getConfig())
 ipcMain.handle("providers:upsert", async (_e, p) => { providerMgr.upsertProvider(p); registerAgentsFromBindings(); return providerMgr.getConfig() })
@@ -383,7 +559,9 @@ if (initialDeepLink) pendingDeepLink = parseDeepLink(initialDeepLink)
 
 app.whenReady().then(async () => {
   if (process.platform === "win32") app.setAppUserModelId("dev.agenthub.desktop")
+  prepareLocalCliEnvironment()
   providerMgr.unlockSecrets()   // app ready 后解密落盘的 apiKey 到内存（safeStorage 此时可用）
+  seedCoreMemories()
   createWindow()
   createTray()
   await initHub()

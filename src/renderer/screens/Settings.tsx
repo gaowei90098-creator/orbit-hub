@@ -5,7 +5,18 @@
 
 import React, { useState, useEffect } from 'react'
 import { Icon, IC, AgentMark, Enter, Seg, SectionTitle, Switch } from '../glass/ui'
-import { AGENT_META, AGENT_IDS, DEFAULT_STDIO_ARGS, BindingDef, ProviderDef } from '../glass/meta'
+import {
+  AGENT_META,
+  AGENT_IDS,
+  DEFAULT_NOTIFICATION_BRIDGE_AGENT_ID,
+  EXECUTION_AGENT_IDS,
+  MAIN_AGENT_ID,
+  NOTIFICATION_BRIDGE_STORAGE_KEY,
+  USER_BRIDGE_AGENT_IDS,
+  DEFAULT_STDIO_ARGS,
+  BindingDef,
+  ProviderDef
+} from '../glass/meta'
 import { tr, agentDesc, getLang, setLang, Lang } from '../glass/i18n'
 import { ConnectionSummary, SetupTab } from '../glass/connection-status'
 import { SkillsTab } from './Skills' // AgentHub skills (Claude-B 新增)
@@ -63,7 +74,9 @@ function SetupNextStep({ summary, onTab, goChat }: {
   onTab: (tab: SetupTab | 'appearance') => void
   goChat: (agentId: string | null) => void
 }) {
-  const readyAgent = summary.items.find(item => item.state === 'usable')?.agentId ?? null
+  const readyAgent = summary.items.find(item =>
+    (item.agentId === MAIN_AGENT_ID || EXECUTION_AGENT_IDS.includes(item.agentId)) && item.state === 'usable'
+  )?.agentId ?? null
   const next = summary.items.find(item => item.action)
   return (
     <Enter className="glass" style={{ padding: 16, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -156,6 +169,27 @@ const KIND_CAPS: Record<string, any> = {
   'gemini': { protocol: 'generate_content', stream: true, nativeThinking: true, budgetTokens: true, toolCalls: true, systemPrompt: true }
 }
 
+const MODEL_PLACEHOLDER: Record<string, string> = {
+  'openai-compatible': 'gpt-4o / deepseek-chat / qwen-plus',
+  anthropic: 'claude-sonnet-4-6',
+  gemini: 'gemini-2.5-flash'
+}
+
+function manualModel(modelId: string, kind = 'openai-compatible') {
+  const id = modelId.trim().replace(/^models\//, '')
+  return {
+    id,
+    label: id,
+    contextWindow: kind === 'gemini' ? 1_000_000 : kind === 'anthropic' ? 200_000 : 128_000,
+    supportsTools: true,
+    supportsVision: kind !== 'openai-compatible',
+    supportsThinking: kind === 'anthropic' || kind === 'gemini',
+    maxThinkingLevel: kind === 'anthropic' ? 'xhigh' : kind === 'gemini' ? 'high' : undefined,
+    defaultThinkingLevel: kind === 'anthropic' || kind === 'gemini' ? 'medium' : undefined,
+    description: 'Manual model ID'
+  }
+}
+
 function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, onDelete }: {
   providers: ProviderDef[]
   onSetEnabled: (id: string, enabled: boolean) => void
@@ -169,6 +203,7 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
   const [keys, setKeys] = useState<Record<string, string>>({})
   const [fetching, setFetching] = useState<Record<string, boolean>>({})
   const [fetchMsg, setFetchMsg] = useState<Record<string, { ok: boolean; text: string }>>({})
+  const [modelInputs, setModelInputs] = useState<Record<string, string>>({})
 
   const checkHealth = async (id: string) => {
     setChecking(c => ({ ...c, [id]: true }))
@@ -197,11 +232,12 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
 
   /* 自定义提供商表单 */
   const [adding, setAdding] = useState(false)
-  const [draft, setDraft] = useState({ name: '', baseUrl: 'https://', apiKey: '', kind: 'openai-compatible' })
+  const [draft, setDraft] = useState({ name: '', baseUrl: 'https://', apiKey: '', kind: 'openai-compatible', modelId: '' })
   const [urls, setUrls] = useState<Record<string, string>>({})
 
   const saveDraft = async () => {
-    if (!draft.name.trim() || !/^https?:\/\//.test(draft.baseUrl)) return
+    const modelId = draft.modelId.trim().replace(/^models\//, '')
+    if (!draft.name.trim() || !/^https?:\/\//.test(draft.baseUrl) || !modelId) return
     const id = 'custom-' + Date.now()
     onUpsert({
       id,
@@ -211,12 +247,12 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
       apiKey: draft.apiKey.trim(),
       enabled: !!draft.apiKey.trim(),
       builtIn: false,
-      models: [],
+      models: [manualModel(modelId, draft.kind)],
       capabilities: KIND_CAPS[draft.kind] || KIND_CAPS['openai-compatible'],
       defaultThinking: { mode: 'auto', level: 'medium', collapseInUI: true }
     })
     setAdding(false)
-    setDraft({ name: '', baseUrl: 'https://', apiKey: '', kind: 'openai-compatible' })
+    setDraft({ name: '', baseUrl: 'https://', apiKey: '', kind: 'openai-compatible', modelId: '' })
     if (draft.apiKey.trim()) {
       // 建好后自动拉模型列表
       setTimeout(() => fetchModels(id), 600)
@@ -233,6 +269,17 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
   const commitKey = (p: ProviderDef) => {
     const v = keys[p.id]
     if (v !== undefined && v !== p.apiKey) onSetKey(p.id, v)
+  }
+
+  const addManualModel = (p: ProviderDef) => {
+    const modelId = (modelInputs[p.id] || '').trim().replace(/^models\//, '')
+    if (!modelId) return
+    if (p.models.some(m => m.id === modelId)) {
+      setModelInputs(inputs => ({ ...inputs, [p.id]: '' }))
+      return
+    }
+    onUpsert({ ...p, models: [...p.models, manualModel(modelId, p.kind)] })
+    setModelInputs(inputs => ({ ...inputs, [p.id]: '' }))
   }
 
   return (
@@ -272,7 +319,26 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {p.models.slice(0, 10).map(m => <span key={m.id} className="ah-chip">{m.label}</span>)}
               {p.models.length > 10 && <span className="ah-chip" title={p.models.slice(10).map(m => m.label).join('、')}>+{p.models.length - 10}</span>}
+              {p.models.length === 0 && (
+                <span style={{ fontSize: 12, color: 'var(--st-busy)' }}>{tr('未设置模型名，路由会不可用', 'No model ID set; routing cannot use this provider')}</span>
+              )}
             </div>
+
+            {!p.builtIn && (
+              <div>
+                <div className="ah-label" style={{ marginBottom: 5 }}>{tr('手动添加模型名称', 'Manual model ID')}</div>
+                <div style={{ display: 'flex', gap: 7 }}>
+                  <input className="ah-input mono" style={{ flex: 1 }}
+                    value={modelInputs[p.id] ?? ''}
+                    placeholder={MODEL_PLACEHOLDER[p.kind] || MODEL_PLACEHOLDER['openai-compatible']}
+                    onChange={e => setModelInputs(inputs => ({ ...inputs, [p.id]: e.target.value }))}
+                    onKeyDown={e => { if (e.key === 'Enter') addManualModel(p) }} />
+                  <button className="ah-btn sm" disabled={!modelInputs[p.id]?.trim()} onClick={() => addManualModel(p)}>
+                    <Icon d={IC.plus} size={13} /> {tr('添加', 'Add')}
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <button className="ah-btn sm" onClick={() => checkHealth(p.id)} disabled={!!checking[p.id]}>
@@ -335,13 +401,18 @@ function ProvidersTab({ providers, onSetEnabled, onSetKey, onReload, onUpsert, o
             </div>
           </div>
           <div>
+            <div className="ah-label" style={{ marginBottom: 5 }}>{tr('模型名称 / Model ID', 'Model ID')} <span className="ah-hint">{tr('必填，必须和中转站支持的模型名完全一致', 'required; must exactly match the relay/provider model name')}</span></div>
+            <input className="ah-input mono" value={draft.modelId} placeholder={MODEL_PLACEHOLDER[draft.kind] || MODEL_PLACEHOLDER['openai-compatible']}
+              onChange={e => setDraft(d => ({ ...d, modelId: e.target.value }))} />
+          </div>
+          <div>
             <div className="ah-label" style={{ marginBottom: 5 }}>Base URL</div>
             <input className="ah-input mono" value={draft.baseUrl} placeholder="https://api.example.com/v1"
               onChange={e => setDraft(d => ({ ...d, baseUrl: e.target.value }))} />
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
             <button className="ah-btn sm" onClick={() => setAdding(false)}>{tr('取消', 'Cancel')}</button>
-            <button className="ah-btn sm primary" disabled={!draft.name.trim() || !/^https?:\/\/./.test(draft.baseUrl)}
+            <button className="ah-btn sm primary" disabled={!draft.name.trim() || !/^https?:\/\/./.test(draft.baseUrl) || !draft.modelId.trim()}
               onClick={saveDraft}>
               <Icon d={IC.check} size={13} /> {draft.apiKey.trim() ? tr('创建并获取模型', 'Create & fetch models') : tr('创建', 'Create')}
             </button>
@@ -394,15 +465,58 @@ function RoutingTab({ providers, bindings, onSetBinding, onTab }: {
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <NotificationBridgeSelector />
       <AgenticEnableBanner bindings={bindings} located={located} onSetBinding={onSetBinding} onTab={onTab} />
       <div className="ah-hint" style={{ padding: '0 4px' }}>
         {tr('每个 Agent 可绑定到 HTTP 提供商（模型即点即切、实时生效），或切换为 StdIO 直连本地 CLI 子进程；终端版与桌面版同时安装时在 StdIO 的「使用版本」里选择。',
             'Bind each agent to an HTTP provider (models switch instantly), or use StdIO to drive the local CLI directly; pick terminal vs desktop builds under "Version" when both are installed.')}
       </div>
-      {bindings.map((b, i) => <Enter key={b.agentId} delay={i * 60}>
+      {[...bindings].sort((a, b) => Number(b.agentId === MAIN_AGENT_ID) - Number(a.agentId === MAIN_AGENT_ID)).map((b, i) => <Enter key={b.agentId} delay={i * 60}>
         <BindingRow b={b} providers={providers} patch={patch} candidates={located[b.agentId] ?? []} />
       </Enter>)}
     </div>
+  )
+}
+
+function NotificationBridgeSelector() {
+  const [choice, setChoice] = useState(DEFAULT_NOTIFICATION_BRIDGE_AGENT_ID)
+  useEffect(() => {
+    let alive = true
+    window.electronAPI?.store?.get(NOTIFICATION_BRIDGE_STORAGE_KEY)
+      .then(value => {
+        if (alive && typeof value === 'string' && USER_BRIDGE_AGENT_IDS.includes(value)) setChoice(value)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  const pick = (agentId: string) => {
+    if (!USER_BRIDGE_AGENT_IDS.includes(agentId)) return
+    setChoice(agentId)
+    window.electronAPI?.store?.set(NOTIFICATION_BRIDGE_STORAGE_KEY, agentId).catch(() => {})
+  }
+
+  return (
+    <Enter className="glass" style={{ padding: 16, display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap', borderColor: 'color-mix(in srgb, var(--mint) 34%, var(--glass-border))' }}>
+      <div style={{ width: 34, height: 34, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--mint-soft)', color: 'var(--mint)', flex: 'none' }}>
+        <Icon d={IC.send} size={16} />
+      </div>
+      <div style={{ flex: 1, minWidth: 260 }}>
+        <div style={{ fontWeight: 700 }}>{tr('用户通报通道', 'User progress bridge')}</div>
+        <div className="ah-hint" style={{ lineHeight: 1.55 }}>
+          {tr('Hermes / OpenClaw 只负责通知用户、接收远程要求和确认回传；Orbit 的执行计划不会把代码、部署或数据库写入任务派给它们。',
+              'Hermes / OpenClaw only notify the user, receive remote requests, and relay approvals; Orbit will not assign code, deploy, or database work to them.')}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <AgentMark id={choice} size={26} radius={7} />
+          <span className="ah-label">{AGENT_META[choice]?.name ?? choice}</span>
+        </div>
+        <Seg value={choice} onChange={pick}
+          options={USER_BRIDGE_AGENT_IDS.map(id => ({ value: id, label: AGENT_META[id]?.name ?? id }))} />
+      </div>
+    </Enter>
   )
 }
 
@@ -425,8 +539,8 @@ function AgenticEnableBanner({ bindings, located, onSetBinding, onTab }: {
 
   const hasCli = (agentId: string) => (located[agentId]?.length ?? 0) > 0
   const isAgentic = (b: BindingDef) => b.protocol === 'stdio-plain'
-  const eligible = bindings.filter(b => b.agentId in AGENT_META && hasCli(b.agentId) && !isAgentic(b))
-  const enabledCount = bindings.filter(b => isAgentic(b) && (hasCli(b.agentId) || !!b.binary)).length
+  const eligible = bindings.filter(b => EXECUTION_AGENT_IDS.includes(b.agentId) && hasCli(b.agentId) && !isAgentic(b))
+  const enabledCount = bindings.filter(b => EXECUTION_AGENT_IDS.includes(b.agentId) && isAgentic(b) && (hasCli(b.agentId) || !!b.binary)).length
 
   const enable = (b: BindingDef) => onSetBinding({ ...b, thinking: { ...b.thinking }, protocol: 'stdio-plain', binary: '', args: '' })
 
@@ -489,7 +603,7 @@ function BindingRow({ b, providers, patch, candidates }: {
 }) {
   const meta = AGENT_META[b.agentId]
   const prov = providers.find(p => p.id === b.providerId)
-  const stdioSupported = b.agentId in AGENT_META
+  const stdioSupported = b.agentId !== MAIN_AGENT_ID && b.agentId in AGENT_META
   const acpSupported = ['hermes', 'openclaw', 'minimax-code'].includes(b.agentId)
   const isStdio = b.protocol === 'stdio-plain'
   const isAcp = b.protocol === 'acp'
@@ -535,7 +649,11 @@ function BindingRow({ b, providers, patch, candidates }: {
         <AgentMark id={b.agentId} size={36} radius={10} />
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 700 }}>{meta.name}</div>
-          <div className="ah-hint">{agentDesc(b.agentId, meta.desc)}</div>
+          <div className="ah-hint">
+            {agentDesc(b.agentId, meta.desc)}
+            {b.agentId === MAIN_AGENT_ID && <span style={{ color: 'var(--mint)' }}> · {tr('负责拆分、派发、监督、汇总', 'plans, dispatches, supervises, synthesizes')}</span>}
+            {USER_BRIDGE_AGENT_IDS.includes(b.agentId) && <span style={{ color: 'var(--mint)' }}> · {tr('用户通知/远程指令通道，不进执行池', 'user notification / remote-instruction bridge, excluded from execution pool')}</span>}
+          </div>
         </div>
         <span className="ah-label">{tr('后端', 'Backend')}</span>
         <Seg value={b.protocol || 'http'}
@@ -657,6 +775,9 @@ function WorkspacesTab() {
     } catch (e: any) { setErr(e?.message || '加载失败') }
   }
   useEffect(() => { refresh() }, [])
+  const notifyWorkspacesChanged = () => {
+    try { window.dispatchEvent(new CustomEvent('orbit:workspaces-changed')) } catch { /* noop */ }
+  }
 
   const startNew = () => { setEditing({ id: null, name: '', rootPath: '', isNew: true }); setErr(null) }
   const startEdit = (w: WorkspaceItem) => { setEditing({ id: w.id, name: w.name, rootPath: w.rootPath, isNew: false }); setErr(null) }
@@ -678,19 +799,20 @@ function WorkspacesTab() {
       }
       setEditing(null)
       await refresh()
+      notifyWorkspacesChanged()
     } catch (e: any) {
       const code = e?.code
       setErr(code === 'WORKSPACE_PATH_INVALID' ? '路径不存在或不是目录' : (e?.message || '保存失败'))
     } finally { setBusy(false) }
   }
   const setActive = async (id: string) => {
-    try { await (window.electronAPI as any)?.workspaces?.setActive?.(id); setActiveId(id) } catch (e: any) {
+    try { await (window.electronAPI as any)?.workspaces?.setActive?.(id); setActiveId(id); notifyWorkspacesChanged() } catch (e: any) {
       setErr(e?.message || '设置当前工作区失败')
     }
   }
   const remove = async (w: WorkspaceItem) => {
     if (!window.confirm(tr(`删除工作区「${w.name}」？该操作不影响磁盘上的项目文件。`, `Delete workspace "${w.name}"? Files on disk are not affected.`))) return
-    try { await (window.electronAPI as any)?.workspaces?.remove?.(w.id); await refresh() } catch (e: any) {
+    try { await (window.electronAPI as any)?.workspaces?.remove?.(w.id); await refresh(); notifyWorkspacesChanged() } catch (e: any) {
       setErr(e?.message || '删除失败')
     }
   }

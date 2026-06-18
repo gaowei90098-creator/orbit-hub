@@ -1,9 +1,9 @@
 /**
  * Real agent detection - no mock data.
  */
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { getProviderManager } from "../providers/manager";
-import { AGENTS } from "./agents";
+import { AGENTS, agentCaps, agentName } from "./agents";
 
 export interface DetectedAgent {
   id: string;
@@ -36,11 +36,22 @@ const CLI_PROBES = [
 
 function probe(probe: typeof CLI_PROBES[0]) {
   try {
-    const out = execSync(probe.binary + " --version", { timeout: 3000, encoding: "utf-8" });
+    const out = execFileSync(probe.binary, ["--version"], {
+      timeout: 3000,
+      encoding: "utf-8",
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
     const version = out.trim().split(/\r?\n/)[0];
     let binaryPath = probe.binary;
     try {
-      binaryPath = execSync("where " + probe.binary, { timeout: 2000, encoding: "utf-8" }).trim().split(/\r?\n/)[0].trim();
+      const locator = process.platform === "win32" ? "where" : "which";
+      binaryPath = execFileSync(locator, [probe.binary], {
+        timeout: 2000,
+        encoding: "utf-8",
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"]
+      }).trim().split(/\r?\n/)[0].trim();
     } catch {}
     return { id: probe.id, name: probe.name, found: true, version, path: binaryPath, capabilities: probe.caps };
   } catch {
@@ -55,18 +66,11 @@ export function detectAgents() {
     const resolved = mgr.resolveBinding(b.agentId);
     const provider = resolved && resolved.provider;
     const health = provider && provider.health;
-    const caps = b.agentId === "codex"
-      ? ["coding", "debug", "refactor", "api"]
-      : b.agentId === "claude"
-      ? ["analysis", "writing", "translation", "research"]
-      : b.agentId === "openclaw"
-      ? ["automation", "deploy", "pipeline", "script"]
-      : ["tools", "system", "automation"];
     return {
       id: b.agentId,
-      name: b.agentId.charAt(0).toUpperCase() + b.agentId.slice(1),
+      name: agentName(b.agentId),
       found: !!provider && provider.enabled && !!provider.apiKey,
-      capabilities: caps,
+      capabilities: agentCaps(b.agentId),
       providerId: provider && provider.id,
       modelId: resolved && resolved.model.id,
       baseUrl: provider && provider.baseUrl,

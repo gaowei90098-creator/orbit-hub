@@ -9,6 +9,7 @@ import React from 'react'
 import { Icon, IC, AgentMark, Enter } from './ui'
 import { AGENT_META } from './meta'
 import { tr } from './i18n'
+import { SpotlightPanel } from './react-bits'
 
 export type OrchestrateSubtaskStatus = 'pending' | 'running' | 'done' | 'error'
 
@@ -18,6 +19,11 @@ export interface OrchestrateSubtask {
   detail?: string
   /** 委派到的 agent（来自 lead 建议或 routeScores 指派） */
   agentId?: string
+  fileScope?: string[]
+  dependsOn?: string[]
+  doneWhen?: string
+  verifyCommand?: string
+  interfaceRef?: string
   status: OrchestrateSubtaskStatus
   content?: string
   /** O3：测试 agent 校验结论 */
@@ -25,8 +31,11 @@ export interface OrchestrateSubtask {
 }
 
 export interface OrchestrateState {
-  /** 整体阶段：planning=分解中 / running=子任务执行 / synthesizing=汇总中 / done / error */
-  phase: 'planning' | 'running' | 'synthesizing' | 'done' | 'error'
+  /** 整体阶段：planning=分解中 / awaiting-approval=等用户确认 / running=子任务执行 / synthesizing=汇总中 / done / error */
+  phase: 'planning' | 'awaiting-approval' | 'running' | 'synthesizing' | 'done' | 'error'
+  taskId?: string
+  missionId?: string
+  planArtifact?: any
   subtasks: OrchestrateSubtask[]
   /** lead 的最终合成结果 */
   final?: string
@@ -54,7 +63,7 @@ function agentLabel(id?: string): string {
 /** 单个子任务卡 */
 function SubtaskRow({ st, index }: { st: OrchestrateSubtask; index: number }) {
   return (
-    <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', padding: '10px 13px', background: 'rgba(0,0,0,0.18)', borderRadius: 11 }}>
+    <SpotlightPanel className="rb-table" spotlightColor="rgba(88, 217, 149, 0.10)" style={{ display: 'flex', gap: 11, alignItems: 'flex-start', padding: '10px 13px', background: 'rgba(0,0,0,0.18)', borderRadius: 8, border: '1px solid rgba(170,194,220,0.08)' }}>
       <div style={{
         flex: 'none', width: 22, height: 22, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: 11.5, fontWeight: 700, color: 'var(--tx-2)', background: 'rgba(255,255,255,0.06)'
@@ -74,6 +83,13 @@ function SubtaskRow({ st, index }: { st: OrchestrateSubtask; index: number }) {
           )}
         </div>
         {st.detail && <div className="ah-hint" style={{ marginTop: 2 }}>{st.detail}</div>}
+        <div style={{ marginTop: 7, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {st.fileScope && st.fileScope.length > 0 && <span className="ah-chip" style={{ fontSize: 10 }}>{tr('范围', 'Scope')}: {st.fileScope.join(', ')}</span>}
+          {st.dependsOn && st.dependsOn.length > 0 && <span className="ah-chip" style={{ fontSize: 10 }}>{tr('依赖', 'Deps')}: {st.dependsOn.join(', ')}</span>}
+          {st.verifyCommand && <span className="ah-chip" style={{ fontSize: 10, fontFamily: 'var(--font-mono)' }}>{st.verifyCommand}</span>}
+          {st.interfaceRef && <span className="ah-chip" style={{ fontSize: 10 }}>{st.interfaceRef}</span>}
+        </div>
+        {st.doneWhen && <div className="ah-hint" style={{ marginTop: 5 }}>{tr('验收：', 'Done: ')}{st.doneWhen}</div>}
         {st.content && (
           <div style={{ marginTop: 7, fontSize: 12.5, color: 'var(--tx-2)', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
             maxHeight: 200, overflowY: 'auto', background: 'rgba(0,0,0,0.22)', borderRadius: 8, padding: '7px 10px' }}>{st.content}</div>
@@ -85,16 +101,17 @@ function SubtaskRow({ st, index }: { st: OrchestrateSubtask; index: number }) {
           : <div style={{ width: 26, height: 26, borderRadius: 8, background: 'rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Icon d={IC.bolt} size={13} style={{ color: 'var(--tx-3)' }} /></div>}
         <span className="ah-hint" style={{ fontSize: 10, maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agentLabel(st.agentId)}</span>
       </div>
-    </div>
+    </SpotlightPanel>
   )
 }
 
-export function OrchestrateView({ state }: { state: OrchestrateState }) {
-  const { phase, subtasks, final, leadAgentId, error } = state
+export function OrchestrateView({ state, onApprovePlan }: { state: OrchestrateState; onApprovePlan?: (taskId: string, approved: boolean) => void }) {
+  const { phase, subtasks, final, leadAgentId, error, taskId } = state
   const doneCount = subtasks.filter(s => s.status === 'done').length
 
   return (
-    <Enter className="glass" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <Enter>
+      <SpotlightPanel className="glass rb-command-surface" spotlightColor="rgba(88, 217, 149, 0.14)" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* 头部：阶段 + lead + 进度 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <Icon d={IC.broadcast} size={16} style={{ color: 'var(--mint)' }} />
@@ -110,6 +127,7 @@ export function OrchestrateView({ state }: { state: OrchestrateState }) {
         )}
         <span className="ah-chip" style={{ fontSize: 11 }}>
           {phase === 'planning' ? tr('分解中…', 'Planning…')
+            : phase === 'awaiting-approval' ? tr('待确认', 'Awaiting approval')
             : phase === 'running' ? tr('执行子任务', 'Running subtasks')
             : phase === 'synthesizing' ? tr('汇总中…', 'Synthesizing…')
             : phase === 'error' ? tr('出错', 'Error')
@@ -120,6 +138,14 @@ export function OrchestrateView({ state }: { state: OrchestrateState }) {
       {/* 分解中占位 */}
       {phase === 'planning' && subtasks.length === 0 && (
         <div className="ah-hint" style={{ padding: '8px 2px' }}>{tr('总控 agent 正在分解任务…', 'Lead agent is decomposing the task…')}</div>
+      )}
+
+      {phase === 'awaiting-approval' && taskId && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', padding: '9px 11px', border: '1px solid rgba(84,214,147,0.22)', background: 'rgba(84,214,147,0.08)', borderRadius: 10 }}>
+          <span className="ah-hint" style={{ flex: 1, minWidth: 220 }}>{tr('主 Agent 已生成协作流程，确认后才会派发给子 Agent。', 'The main Agent generated the workflow. Workers start only after approval.')}</span>
+          <button className="ah-btn sm primary" onClick={() => onApprovePlan?.(taskId, true)}>{tr('确认派发', 'Approve')}</button>
+          <button className="ah-btn sm" onClick={() => onApprovePlan?.(taskId, false)}>{tr('退回', 'Reject')}</button>
+        </div>
       )}
 
       {/* 子任务列表 */}
@@ -143,6 +169,7 @@ export function OrchestrateView({ state }: { state: OrchestrateState }) {
           <div style={{ fontSize: 13, color: 'var(--tx-1)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{final}</div>
         </div>
       )}
+      </SpotlightPanel>
     </Enter>
   )
 }

@@ -170,11 +170,15 @@ function firstExistingAncestor(path: string): string | null {
 
 export function acpResolveWorkspacePath(root: string, requested: unknown): AcpFileResult {
   if (typeof requested !== 'string' || !requested.trim()) return { ok: false, error: 'path must be a non-empty string' }
+  const rootAbs = resolve(root)
   let rootReal: string
-  try { rootReal = realpathSync(root) } catch { return { ok: false, error: 'workspace root is not accessible' } }
+  try { rootReal = realpathSync(rootAbs) } catch { return { ok: false, error: 'workspace root is not accessible' } }
   const raw = requested.trim()
   const abs = isAbsolute(raw) ? resolve(raw) : resolve(rootReal, raw)
-  if (!isWithin(rootReal, abs)) return { ok: false, error: 'path escapes the workspace' }
+  // On macOS tmp paths often enter through /var while realpath resolves to
+  // /private/var. Accept lexical containment in the user-facing root first, then
+  // verify the existing ancestor against the real root below to catch symlinks.
+  if (!isWithin(rootAbs, abs) && !isWithin(rootReal, abs)) return { ok: false, error: 'path escapes the workspace' }
   const ancestor = firstExistingAncestor(abs)
   if (!ancestor) return { ok: false, error: 'path has no existing ancestor' }
   let ancestorReal: string

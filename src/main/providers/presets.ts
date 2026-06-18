@@ -33,10 +33,12 @@ function oaiModel(id: string, label: string, opts: Partial<ModelDefinition> = {}
   return {
     id,
     label,
-    contextWindow: 128000,
+    contextWindow: 400000,
     supportsTools: true,
-    supportsVision: false,
-    supportsThinking: false,
+    supportsVision: true,
+    supportsThinking: /^gpt-5|^o[134]/i.test(id),
+    maxThinkingLevel: /^gpt-5|^o[134]/i.test(id) ? 'xhigh' : undefined,
+    defaultThinkingLevel: /^gpt-5|^o[134]/i.test(id) ? 'medium' : undefined,
     description: opts.description,
     ...opts
   }
@@ -100,8 +102,16 @@ export const BUILTIN_PROVIDERS: ProviderDefinition[] = [
     },
     defaultThinking: OAI_DEFAULT_THINKING,
     models: [
-      oaiModel('gpt-4o', 'GPT-4o', { description: 'OpenAI 旗舰多模态，128K 上下文' }),
-      oaiModel('gpt-4o-mini', 'GPT-4o mini', { description: '轻量高速版本，成本低' }),
+      oaiModel('gpt-5.5', 'GPT-5.5', { contextWindow: 1_000_000, description: 'OpenAI 最新旗舰，适合复杂编码、Agent、长上下文工作流' }),
+      oaiModel('gpt-5.5-pro', 'GPT-5.5 Pro', { contextWindow: 1_000_000, description: 'GPT-5.5 高精度版本，成本更高' }),
+      oaiModel('gpt-5.4', 'GPT-5.4', { contextWindow: 400000, description: '更经济的专业工作与编码模型' }),
+      oaiModel('gpt-5.4-pro', 'GPT-5.4 Pro', { contextWindow: 400000, description: 'GPT-5.4 高精度版本' }),
+      oaiModel('gpt-5.4-mini', 'GPT-5.4 mini', { contextWindow: 400000, description: '强小模型，适合子 Agent、编码和计算机使用' }),
+      oaiModel('gpt-5.4-nano', 'GPT-5.4 nano', { contextWindow: 400000, description: '低成本高吞吐任务' }),
+      oaiModel('gpt-5.3-codex', 'GPT-5.3 Codex', { contextWindow: 400000, description: 'Agentic coding 专用模型，需 Responses API/API 权限' }),
+      oaiModel('gpt-5.2', 'GPT-5.2', { contextWindow: 400000, description: '上一代专业工作模型' }),
+      oaiModel('gpt-4o', 'GPT-4o', { contextWindow: 128000, supportsThinking: false, maxThinkingLevel: undefined, defaultThinkingLevel: undefined, description: '旧版多模态模型（已非最新）' }),
+      oaiModel('gpt-4o-mini', 'GPT-4o mini', { contextWindow: 128000, supportsThinking: false, maxThinkingLevel: undefined, defaultThinkingLevel: undefined, description: '旧版轻量高速版本' }),
       oaiModel('gpt-4.1', 'GPT-4.1', { description: 'OpenAI 4.1 长上下文' }),
       oaiModel('gpt-4.1-mini', 'GPT-4.1 mini', { description: '4.1 轻量版本' }),
       oaiModel('o3-mini', 'o3-mini', { supportsThinking: true, maxThinkingLevel: 'high', description: 'OpenAI 推理模型' }),
@@ -126,9 +136,12 @@ export const BUILTIN_PROVIDERS: ProviderDefinition[] = [
     },
     defaultThinking: ANTHROPIC_DEFAULT_THINKING,
     models: [
-      anthropicModel('claude-sonnet-4-5', 'Claude Sonnet 4.5', { description: '主力推理模型，支持 thinking 预算' }),
-      anthropicModel('claude-opus-4-5', 'Claude Opus 4.5', { maxThinkingLevel: 'xhigh', description: '顶级质量模型' }),
-      anthropicModel('claude-haiku-4-5', 'Claude Haiku 4.5', { maxThinkingLevel: 'medium', description: '高速低延迟版本' }),
+      anthropicModel('claude-fable-5', 'Claude Fable 5', { contextWindow: 1_000_000, supportsThinking: false, maxThinkingLevel: undefined, defaultThinkingLevel: undefined, description: 'Anthropic 最强广泛发布模型，适合高难度推理和长程 Agent' }),
+      anthropicModel('claude-opus-4-8', 'Claude Opus 4.8', { contextWindow: 1_000_000, supportsThinking: false, maxThinkingLevel: undefined, defaultThinkingLevel: undefined, description: '最新 Opus，复杂推理与高自治编码' }),
+      anthropicModel('claude-sonnet-4-6', 'Claude Sonnet 4.6', { contextWindow: 1_000_000, description: '速度与智能平衡，适合 Claude Code / 子 Agent' }),
+      anthropicModel('claude-haiku-4-5-20251001', 'Claude Haiku 4.5', { maxThinkingLevel: 'medium', description: '高速低延迟版本' }),
+      anthropicModel('claude-sonnet-4-5', 'Claude Sonnet 4.5', { description: '上一代 Sonnet' }),
+      anthropicModel('claude-opus-4-5', 'Claude Opus 4.5', { maxThinkingLevel: 'xhigh', description: '上一代 Opus' }),
       anthropicModel('claude-3-7-sonnet-latest', 'Claude 3.7 Sonnet', { description: '稳定版 3.7' })
     ]
   },

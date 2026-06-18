@@ -1,36 +1,37 @@
 /* ============================================================
-   AgentHub — 玻璃拟态设计系统
-   冷灰蓝基调 · 薄荷绿强调 · frosted glass
-   （设计令牌权威来源：design_handoff_glass_ui/app/styles.css）
+   Orbit — operational multi-agent workspace UI system
+   React Bits inspired: spotlight cards · grid surfaces · restrained sheen
    ============================================================ */
 
 :root {
   /* 背景 */
-  --bg-0: #101319;
-  --bg-1: #151922;
-  --bg-blob-1: rgba(64, 116, 168, 0.32);
-  --bg-blob-2: rgba(72, 168, 150, 0.22);
-  --bg-blob-3: rgba(96, 88, 170, 0.20);
+  --bg-0: #091016;
+  --bg-1: #101821;
+  --bg-2: #14212b;
 
   /* 玻璃 */
-  --glass-bg: rgba(255, 255, 255, 0.055);
-  --glass-bg-strong: rgba(255, 255, 255, 0.09);
-  --glass-border: rgba(255, 255, 255, 0.09);
-  --glass-border-strong: rgba(255, 255, 255, 0.16);
-  --glass-blur: 24px;
+  --glass-bg: rgba(17, 25, 34, 0.74);
+  --glass-bg-strong: rgba(21, 31, 42, 0.88);
+  --glass-border: rgba(170, 194, 220, 0.13);
+  --glass-border-strong: rgba(205, 225, 248, 0.24);
+  --glass-blur: 18px;
+  --shadow-panel: 0 18px 46px -30px rgba(0, 0, 0, 0.86), inset 0 1px 0 rgba(255,255,255,0.045);
 
   /* 文字 */
   --tx-1: rgba(244, 247, 250, 0.96);
-  --tx-2: rgba(220, 228, 238, 0.62);
-  --tx-3: rgba(210, 220, 232, 0.38);
+  --tx-2: rgba(218, 228, 238, 0.66);
+  --tx-3: rgba(210, 220, 232, 0.42);
 
   /* 强调 — 薄荷绿 */
-  --mint: #5fd49a;
-  --mint-soft: rgba(95, 212, 154, 0.16);
-  --mint-line: rgba(95, 212, 154, 0.38);
+  --mint: #58d995;
+  --mint-soft: rgba(88, 217, 149, 0.15);
+  --mint-line: rgba(88, 217, 149, 0.42);
+  --cyan: #5aa7f0;
+  --violet: #a78bfa;
+  --amber: #e8b34d;
 
   /* 状态 */
-  --st-idle: #5fd49a;
+  --st-idle: #58d995;
   --st-busy: #e8b34d;
   --st-error: #e8706a;
 
@@ -42,9 +43,9 @@
   --ag-marvis: #4f8ef7;
   --ag-mmcode: #6db8f5;
 
-  --radius-lg: 20px;
-  --radius-md: 14px;
-  --radius-sm: 10px;
+  --radius-lg: 8px;
+  --radius-md: 8px;
+  --radius-sm: 6px;
 
   --font-ui: -apple-system, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
@@ -67,23 +68,36 @@ body {
 /* ---------- 背景氛围 ---------- */
 .ah-backdrop {
   position: fixed; inset: 0; z-index: 0; overflow: hidden;
-  background: linear-gradient(160deg, var(--bg-1) 0%, var(--bg-0) 60%, #0c0f15 100%);
-}
-.ah-backdrop::before, .ah-backdrop::after, .ah-backdrop .blob3 {
-  content: ""; position: absolute; border-radius: 50%;
-  filter: blur(110px); pointer-events: none;
+  background:
+    radial-gradient(ellipse at 18% 0%, rgba(101, 214, 255, 0.16), transparent 42%),
+    radial-gradient(ellipse at 82% 12%, rgba(167, 139, 250, 0.14), transparent 42%),
+    linear-gradient(160deg, #13242c 0%, var(--bg-1) 45%, var(--bg-0) 100%);
 }
 .ah-backdrop::before {
-  width: 720px; height: 720px; top: -260px; left: -160px;
-  background: var(--bg-blob-1);
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(7, 11, 16, 0.02), rgba(7, 11, 16, 0.72)),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.028) 0 1px, transparent 1px 4px);
+  opacity: 0.54;
 }
 .ah-backdrop::after {
-  width: 640px; height: 640px; bottom: -280px; right: -120px;
-  background: var(--bg-blob-2);
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(7, 11, 16, 0.62), transparent 28%, transparent 68%, rgba(7, 11, 16, 0.42));
+  opacity: 0.74;
 }
-.ah-backdrop .blob3 {
-  width: 480px; height: 480px; top: 30%; left: 48%;
-  background: var(--bg-blob-3);
+.orbit-aurora {
+  position: absolute;
+  inset: -12% -8% 14% 12%;
+  pointer-events: none;
+  opacity: 0.92;
+  mix-blend-mode: screen;
+  filter: saturate(1.05);
 }
 
 /* ---------- 玻璃面板 ---------- */
@@ -93,6 +107,7 @@ body {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
 }
 .glass-strong {
   background: var(--glass-bg-strong);
@@ -100,6 +115,7 @@ body {
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
 }
 
 /* ---------- 滚动条 ---------- */
@@ -114,7 +130,7 @@ body {
   font: inherit; color: var(--tx-1);
   background: var(--glass-bg-strong);
   border: 1px solid var(--glass-border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 8px 18px;
   cursor: pointer;
   transition: background 0.18s, border-color 0.18s, transform 0.12s;
@@ -123,7 +139,7 @@ body {
 .ah-btn:hover { background: rgba(255,255,255,0.14); border-color: var(--glass-border-strong); }
 .ah-btn:active { transform: scale(0.97); }
 .ah-btn.primary {
-  background: var(--mint-soft);
+  background: linear-gradient(180deg, rgba(88,217,149,0.22), rgba(88,217,149,0.12));
   border-color: var(--mint-line);
   color: var(--mint);
 }
@@ -169,20 +185,20 @@ body {
   display: inline-flex; gap: 3px; padding: 3px;
   background: rgba(0,0,0,0.25);
   border: 1px solid var(--glass-border);
-  border-radius: 999px;
+  border-radius: var(--radius-md);
 }
 .ah-seg button {
   font: inherit; font-size: 12.5px; color: var(--tx-2);
-  background: transparent; border: none; border-radius: 999px;
+  background: transparent; border: none; border-radius: var(--radius-sm);
   padding: 5px 14px; cursor: pointer;
   transition: background 0.18s, color 0.18s;
   white-space: nowrap;
 }
 .ah-seg button:hover { color: var(--tx-1); }
 .ah-seg button.active {
-  background: rgba(255,255,255,0.14);
+  background: linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.08));
   color: var(--tx-1);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 4px rgba(0,0,0,0.25);
 }
 .ah-seg button:disabled { opacity: 0.3; cursor: not-allowed; }
 
@@ -192,7 +208,7 @@ body {
   font-size: 11.5px; color: var(--tx-2);
   background: rgba(255,255,255,0.07);
   border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 999px; padding: 2.5px 10px;
+  border-radius: var(--radius-sm); padding: 2.5px 10px;
   white-space: nowrap;
 }
 .ah-chip.mint { color: var(--mint); background: var(--mint-soft); border-color: transparent; }
@@ -306,16 +322,16 @@ body {
 
 .ah-chat-bubble.user {
   color: #07120d;
-  background: var(--mint);
+  background: linear-gradient(180deg, #68e6a6, var(--mint));
   border-color: rgba(95, 212, 154, 0.62);
-  border-radius: 12px 4px 12px 12px;
+  border-radius: 8px 4px 8px 8px;
   max-width: calc(100% - 44px);
 }
 
 .ah-chat-bubble.agent {
   color: var(--tx-1);
-  background: rgba(255,255,255,0.075);
-  border-radius: 4px 12px 12px 12px;
+  background: rgba(15, 24, 33, 0.74);
+  border-radius: 4px 8px 8px 8px;
 }
 
 .ah-chat-avatar {
@@ -460,12 +476,10 @@ body {
 /* 关闭档：禁用一切装饰动画 */
 [data-motion="off"] * { animation: none !important; }
 
-/* 丰富档：背景光斑缓慢漂移 */
-@keyframes ah-drift-a { from { transform: translate(0, 0) scale(1); } to { transform: translate(70px, 45px) scale(1.08); } }
-@keyframes ah-drift-b { from { transform: translate(0, 0) scale(1); } to { transform: translate(-60px, -35px) scale(1.1); } }
-[data-motion="rich"] .ah-backdrop::before { animation: ah-drift-a 17s ease-in-out infinite alternate; }
-[data-motion="rich"] .ah-backdrop::after { animation: ah-drift-b 14s ease-in-out infinite alternate; }
-[data-motion="rich"] .ah-backdrop .blob3 { animation: ah-drift-a 21s ease-in-out infinite alternate-reverse; }
+/* 丰富档：背景纹理轻微巡航 */
+@keyframes ah-noise-drift { from { background-position: 0 0, 0 0; } to { background-position: 0 28px, 0 12px; } }
+[data-motion="rich"] .ah-backdrop::before { animation: ah-noise-drift 18s linear infinite; }
+[data-motion="off"] .orbit-aurora { display: none; }
 
 /* 丰富档：悬浮与按钮微交互 */
 [data-motion="rich"] .ah-btn { transition: background 0.18s, border-color 0.18s, transform 0.18s, box-shadow 0.25s; }
@@ -479,6 +493,78 @@ body {
 /* 丰富档：玻璃卡悬浮辉光（配合 .hover-glow） */
 [data-motion="rich"] .hover-glow { transition: border-color 0.25s, transform 0.25s, box-shadow 0.3s; }
 [data-motion="rich"] .hover-glow:hover { box-shadow: 0 14px 40px -18px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--glass-border-strong); }
+
+/* ============================================================
+   React Bits inspired local components
+   ============================================================ */
+.rb-spotlight {
+  --rb-x: 50%;
+  --rb-y: 50%;
+  --rb-spotlight: rgba(95, 212, 154, 0.16);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.rb-spotlight > * {
+  position: relative;
+  z-index: 1;
+}
+.rb-spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at var(--rb-x) var(--rb-y), var(--rb-spotlight), transparent 58%),
+    linear-gradient(135deg, rgba(255,255,255,0.045), transparent 36%);
+  opacity: 0;
+  transition: opacity 0.32s ease;
+}
+.rb-spotlight:hover::before,
+.rb-spotlight:focus-within::before {
+  opacity: 1;
+}
+
+.rb-command-surface {
+  border-color: rgba(88,217,149,0.18);
+  background:
+    linear-gradient(180deg, rgba(22, 34, 45, 0.92), rgba(14, 22, 31, 0.86)),
+    repeating-linear-gradient(90deg, transparent 0 28px, rgba(88,217,149,0.04) 28px 29px);
+}
+
+.rb-composer {
+  border-color: rgba(90,167,240,0.22);
+  background:
+    linear-gradient(180deg, rgba(22, 34, 45, 0.94), rgba(11, 18, 26, 0.9)),
+    linear-gradient(90deg, rgba(88,217,149,0.08), rgba(90,167,240,0.08));
+}
+
+.rb-table {
+  background:
+    linear-gradient(180deg, rgba(18, 27, 37, 0.86), rgba(13, 20, 29, 0.82)),
+    repeating-linear-gradient(0deg, transparent 0 42px, rgba(170,194,220,0.035) 42px 43px);
+}
+
+.rb-shiny {
+  color: var(--tx-1);
+  display: inline-block;
+  background:
+    linear-gradient(115deg, var(--tx-1) 0%, var(--tx-1) 35%, #ffffff 48%, var(--mint) 54%, var(--cyan) 62%, var(--tx-1) 78%);
+  background-size: 230% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: rb-shine 5.8s linear infinite;
+}
+.rb-shiny.disabled {
+  animation: none;
+}
+@keyframes rb-shine {
+  from { background-position: 140% center; }
+  to { background-position: -120% center; }
+}
+[data-motion="off"] .rb-shiny { animation: none; }
 
 /* ============================================================
    应用外壳（Electron frame:false）

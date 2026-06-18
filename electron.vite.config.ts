@@ -4,26 +4,6 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-/**
- * 设计资产同步：把 design_handoff_glass_ui 的官方 Agent 图标（320×320 PNG）
- * 复制到 renderer 静态资源目录。设计包不存在时静默跳过（CI / 其他机器）。
- */
-function syncDesignIcons(): void {
-  try {
-    const srcDir = resolve('AgentHub UI设计/design_handoff_glass_ui/app/icons')
-    const dstDir = resolve('src/renderer/public/icons')
-    if (!existsSync(srcDir)) return
-    mkdirSync(dstDir, { recursive: true })
-    for (const f of ['codex.png', 'claude.png', 'hermes.png', 'openclaw.png']) {
-      const src = resolve(srcDir, f)
-      if (existsSync(src)) copyFileSync(src, resolve(dstDir, f))
-    }
-  } catch (e) {
-    console.warn('[design-icons] sync skipped:', e)
-  }
-}
-syncDesignIcons()
-
 /** Marvis 官方图标：从本机腾讯 Marvis 安装目录提取（文件名带内容哈希，按版本扫描；未安装则跳过） */
 function syncMarvisIcon(): void {
   try {

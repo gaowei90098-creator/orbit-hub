@@ -8,6 +8,9 @@ import { resolve } from 'node:path'
  * 仅影响 import 'electron' 的文件；其余测试不受影响。test 发现规则保持 vitest 默认。
  */
 export default defineConfig({
+  test: {
+    exclude: ['**/node_modules/**', '**/dist/**', '**/out/**', '**/reference_repos/**']
+  },
   resolve: {
     alias: {
       electron: resolve(process.cwd(), 'test/electron-stub.ts')

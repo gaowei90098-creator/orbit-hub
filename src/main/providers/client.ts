@@ -77,12 +77,109 @@ export class ProviderClient {
         await this.streamAnthropic(provider, model, messages, opts, thinking, cb, opts.signal)
       } else if (provider.kind === 'gemini') {
         await this.streamGemini(provider, model, messages, opts, thinking, cb, opts.signal)
+      } else if (provider.kind === 'openai' && usesOpenAIResponses(model.id)) {
+        await this.streamOpenAIResponses(provider, model, messages, opts, thinking, cb, opts.signal)
       } else {
         await this.streamOpenAICompat(provider, model, messages, opts, thinking, cb, opts.signal)
       }
     } catch (e: any) {
       cb.onError?.(e)
     }
+  }
+
+  // ---- OpenAI Responses API（GPT-5 系列） ----
+  private async streamOpenAIResponses(provider: ProviderDefinition, model: ModelDefinition, messages: ChatCompletionMessage[], opts: CallOptions, thinking: ThinkingConfig, cb: StreamCallbacks, signal?: AbortSignal): Promise<void> {
+    const url = `${provider.baseUrl.replace(/\/$/, '')}/responses`
+    const body: any = {
+      model: model.id,
+      input: openaiMessagesToResponsesInput(messages),
+      stream: true,
+      metadata: { agentId: this.binding.agentId, providerId: provider.id }
+    }
+    if (opts.systemPrompt) body.instructions = opts.systemPrompt
+    if (this.binding.maxOutputTokens) body.max_output_tokens = this.binding.maxOutputTokens
+    if (thinking.mode !== 'off' && model.supportsThinking) {
+      body.reasoning = { effort: normalizeOpenAIReasoningEffort(thinking.level) }
+    } else if (this.binding.temperature !== undefined) {
+      body.temperature = this.binding.temperature
+    }
+    if (opts.tools && opts.tools.length) {
+      body.tools = opts.tools.map(openaiChatToolToResponsesTool).filter(Boolean)
+      if (opts.toolChoice !== undefined) body.tool_choice = opts.toolChoice
+    }
+
+    const res = await fetch(url, { method: 'POST', headers: this.headersFor(provider), body: JSON.stringify(body), signal })
+    if (!res.ok || !res.body) {
+      const txt = await res.text().catch(() => '')
+      throw new Error(`OpenAI Responses HTTP ${res.status}: ${txt.slice(0, 300)}`)
+    }
+
+    let content = ''
+    let usage: any = undefined
+    let finishReason: string | undefined
+    const toolAcc = new Map<string, { index: number; id: string; type: 'function'; function: { name: string; arguments: string } }>()
+    let toolSeq = 0
+
+    await this.readSse(res.body, (evt) => {
+      if (!evt || evt === '[DONE]') return
+      try {
+        const obj = JSON.parse(evt)
+        const type = obj.type || obj.event
+        if ((type === 'response.output_text.delta' || type === 'response.text.delta') && typeof obj.delta === 'string') {
+          content += obj.delta
+          cb.onContent?.(obj.delta)
+        }
+        if ((type === 'response.reasoning_text.delta' || type === 'response.reasoning_summary_text.delta') && typeof obj.delta === 'string') {
+          cb.onThinking?.(obj.delta)
+        }
+        if (type === 'response.output_item.added' && obj.item?.type === 'function_call') {
+          const key = String(obj.item.call_id || obj.item.id || obj.output_index || toolSeq)
+          toolAcc.set(key, {
+            index: toolSeq++,
+            id: String(obj.item.call_id || obj.item.id || key),
+            type: 'function',
+            function: { name: String(obj.item.name || 'unknown'), arguments: String(obj.item.arguments || '') }
+          })
+        }
+        if (type === 'response.function_call_arguments.delta') {
+          const key = String(obj.call_id || obj.item_id || obj.output_index || '')
+          const existing = toolAcc.get(key) || {
+            index: toolSeq++,
+            id: key || `call-${toolSeq}`,
+            type: 'function' as const,
+            function: { name: String(obj.name || 'unknown'), arguments: '' }
+          }
+          existing.function.arguments += obj.delta || ''
+          toolAcc.set(key || existing.id, existing)
+        }
+        if (type === 'response.output_item.done' && obj.item?.type === 'function_call') {
+          const key = String(obj.item.call_id || obj.item.id || obj.output_index || '')
+          const existing = toolAcc.get(key) || {
+            index: toolSeq++,
+            id: String(obj.item.call_id || obj.item.id || key || `call-${toolSeq}`),
+            type: 'function' as const,
+            function: { name: String(obj.item.name || 'unknown'), arguments: '' }
+          }
+          existing.function.name = String(obj.item.name || existing.function.name)
+          existing.function.arguments = String(obj.item.arguments || existing.function.arguments || '')
+          toolAcc.set(key || existing.id, existing)
+        }
+        if (type === 'response.completed' && obj.response) {
+          usage = normalizeUsage(obj.response.usage)
+          finishReason = responseFinishReason(obj.response)
+          const fromOutput = responsesToolCalls(obj.response.output || [])
+          for (const tc of fromOutput) if (!toolAcc.has(tc.id)) toolAcc.set(tc.id, tc)
+        }
+      } catch {}
+    })
+
+    const toolCalls = Array.from(toolAcc.values()).sort((a, b) => a.index - b.index)
+    cb.onDone?.({
+      content,
+      usage,
+      finishReason: toolCalls.length ? 'tool_calls' : finishReason,
+      toolCalls: toolCalls.length ? toolCalls : undefined
+    })
   }
 
   // ---- OpenAI 兼容（含 OpenAI / DeepSeek / OpenRouter / 自定义） ----
@@ -335,6 +432,77 @@ export function openaiToolsToGemini(tools: any[]): any[] {
     description: t.function.description || '',
     parameters: t.function.parameters || { type: 'object', properties: {} }
   }))
+}
+
+function usesOpenAIResponses(modelId: string): boolean {
+  return /^gpt-5/i.test(modelId)
+}
+
+function normalizeOpenAIReasoningEffort(level: ThinkingConfig['level']): string {
+  if (level === 'minimal') return 'minimal'
+  if (level === 'xhigh') return 'high'
+  return level
+}
+
+function openaiChatToolToResponsesTool(tool: any): any | null {
+  if (!tool?.function?.name) return null
+  return {
+    type: 'function',
+    name: tool.function.name,
+    description: tool.function.description || '',
+    parameters: tool.function.parameters || { type: 'object', properties: {} }
+  }
+}
+
+function openaiMessagesToResponsesInput(messages: ChatCompletionMessage[]): any[] {
+  const input: any[] = []
+  for (const m of messages) {
+    if (m.role === 'system') {
+      input.push({ role: 'system', content: [{ type: 'input_text', text: m.content || '' }] })
+      continue
+    }
+    if (m.role === 'tool') {
+      input.push({ type: 'function_call_output', call_id: m.tool_call_id, output: m.content || '' })
+      continue
+    }
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length) {
+      if (m.content) input.push({ role: 'assistant', content: [{ type: 'output_text', text: m.content }] })
+      for (const tc of m.tool_calls) {
+        input.push({
+          type: 'function_call',
+          call_id: tc.id,
+          name: tc.function?.name || 'unknown',
+          arguments: tc.function?.arguments || '{}'
+        })
+      }
+      continue
+    }
+    input.push({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: [{
+        type: m.role === 'assistant' ? 'output_text' : 'input_text',
+        text: m.content || ''
+      }]
+    })
+  }
+  return input
+}
+
+function responsesToolCalls(output: any[]): Array<{ index: number; id: string; type: 'function'; function: { name: string; arguments: string } }> {
+  return (output || [])
+    .map((item: any, index: number) => item?.type === 'function_call' ? {
+      index,
+      id: String(item.call_id || item.id || `call-${index}`),
+      type: 'function' as const,
+      function: { name: String(item.name || 'unknown'), arguments: String(item.arguments || '{}') }
+    } : null)
+    .filter(Boolean) as Array<{ index: number; id: string; type: 'function'; function: { name: string; arguments: string } }>
+}
+
+function responseFinishReason(response: any): string | undefined {
+  if (!response) return undefined
+  if ((response.output || []).some((item: any) => item?.type === 'function_call')) return 'tool_calls'
+  return normFinish(response.status === 'completed' ? 'stop' : response.status)
 }
 
 /** 从 assistant.tool_calls 收集 id→工具名（供 tool 结果按名回灌，Gemini 用）。 */

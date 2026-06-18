@@ -84,7 +84,9 @@ export function codexCandidates(): AgentBinaryCandidate[] {
     }
   } catch { /* noop */ }
 
+  cands.push({ source: 'desktop', label: '桌面版 (Codex.app)', path: '/Applications/Codex.app/Contents/Resources/codex' })
   cands.push({ source: 'terminal', label: '终端版 (cargo)', path: join(homedir(), '.cargo', 'bin', 'codex.exe') })
+  cands.push({ source: 'terminal', label: '终端版 (cargo)', path: join(homedir(), '.cargo', 'bin', 'codex') })
   cands.push(npmCandidate('codex'))
   cands.push(pathCandidate('codex'))
   return dedupe(cands)

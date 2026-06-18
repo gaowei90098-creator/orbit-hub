@@ -28,8 +28,8 @@ describe('agent runtime capability injection', () => {
 
     expect(prompt).toContain('AgentHub agent runtime')
     expect(prompt).toContain('Hermes')
-    expect(prompt).toContain('tools')
-    expect(prompt).toContain('system')
+    expect(prompt).toContain('notify')
+    expect(prompt).toContain('remote-control')
     expect(prompt).toContain('User task')
     expect(prompt).toContain('检查本机 CLI 配置')
   })

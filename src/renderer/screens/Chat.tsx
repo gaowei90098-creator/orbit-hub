@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, ReactNode } from 'react'
 import { Icon, IC, AgentMark, Enter, Seg } from '../glass/ui'
-import { AGENT_META, AGENT_IDS, DispatchMode, ChatMessage } from '../glass/meta'
+import { AGENT_META, AGENT_IDS, DispatchMode, ChatMessage, WorkspaceItem } from '../glass/meta'
 import { ActivityTrail } from '../glass/activity-view'
 import { tr, modeLabel } from '../glass/i18n'
 import { ConnectionSummary, SetupTab, firstRunActionForError } from '../glass/connection-status'
@@ -10,47 +10,27 @@ import {
   TranscriptReply,
   visibleSequentialReplies
 } from '../glass/chat-transcript'
+import { OrchestrateView } from '../glass/orchestrate-view'
+import { SpotlightPanel } from '../glass/react-bits'
 
-export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, onSend, onCancel, connectionSummary, openSetup }: {
+export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, onSend, onApprovePlan, onCancel, connectionSummary, openSetup, workspaceId, workspaces, pickWorkspace }: {
   activeAgent: string | null
   setActiveAgent: (id: string | null) => void
   messages: ChatMessage[]
   streaming: boolean
   onSend: (text: string, mode: DispatchMode, targetAgent: string | null, workspaceId?: string | null) => void
+  onApprovePlan: (taskId: string, approved: boolean) => void
   onCancel: () => void
   connectionSummary: ConnectionSummary
   openSetup: (tab?: SetupTab) => void
+  workspaceId: string | null
+  workspaces: WorkspaceItem[]
+  pickWorkspace: (id: string | null) => void
 }) {
   const [mode, setMode] = useState<DispatchMode>('auto')
   const [input, setInput] = useState('')
   const [routeHint, setRouteHint] = useState<string | null>(null)
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null)
-  const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string; rootPath: string }>>([])
   const scrollRef = useRef<HTMLDivElement>(null)
-
-  // 启动时拉一次工作区列表 + 活动工作区；用户后续改设置时通过 IPC 事件可再次刷新（这里仅首加载）
-  useEffect(() => {
-    let alive = true
-    ;(async () => {
-      try {
-        const list = await (window.electronAPI as any)?.workspaces?.list?.()
-        if (alive && Array.isArray(list)) setWorkspaces(list)
-        const active = await (window.electronAPI as any)?.workspaces?.getActive?.()
-        if (!alive) return
-        if (typeof active === 'string' && active) {
-          // 拿到的 active 若在列表里才设；否则视为空（被外部删了）
-          setWorkspaceId(Array.isArray(list) && list.some((w: any) => w.id === active) ? active : null)
-        }
-      } catch { /* 容忍：业务未就绪时为空数组 */ }
-    })()
-    return () => { alive = false }
-  }, [])
-
-  // Chat 顶部选了 workspace 后回写为活动（持久化到主进程 store）
-  const pickWorkspace = async (next: string | null) => {
-    setWorkspaceId(next)
-    try { await (window.electronAPI as any)?.workspaces?.setActive?.(next) } catch { /* noop */ }
-  }
 
   useEffect(() => {
     const el = scrollRef.current
@@ -120,15 +100,19 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
         {messages.map(m => (
           <Enter key={m.id} className="ah-chat-thread">
             <UserMessageRow text={m.text} meta={modeLabel(m.mode)} />
-            {messageAgentReplies(m).map((reply, idx) => (
-              <AgentMessageRow key={`${m.id}-${reply.agentId}-${idx}`} reply={reply} delay={idx * 70} openSetup={openSetup} />
-            ))}
+            {m.mode === 'orchestrate' && m.orchestration ? (
+              <OrchestrateView state={m.orchestration} onApprovePlan={onApprovePlan} />
+            ) : (
+              messageAgentReplies(m).map((reply, idx) => (
+                <AgentMessageRow key={`${m.id}-${reply.agentId}-${idx}`} reply={reply} delay={idx * 70} openSetup={openSetup} />
+              ))
+            )}
           </Enter>
         ))}
       </div>
 
       {blocked && targetItem && (
-        <div className="glass" style={{ flex: 'none', padding: '10px 13px', display: 'flex', alignItems: 'center', gap: 10, borderColor: 'rgba(232,179,77,0.28)' }}>
+        <SpotlightPanel className="glass" spotlightColor="rgba(232, 179, 77, 0.14)" style={{ flex: 'none', padding: '10px 13px', display: 'flex', alignItems: 'center', gap: 10, borderColor: 'rgba(232,179,77,0.28)' }}>
           <Icon d={IC.pulse} size={14} style={{ color: 'var(--st-busy)', flex: 'none' }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12.5, color: 'var(--tx-1)' }}>{tr(targetItem.titleZh, targetItem.titleEn)}</div>
@@ -139,10 +123,10 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
               {tr(targetItem.action.labelZh, targetItem.action.labelEn)}
             </button>
           )}
-        </div>
+        </SpotlightPanel>
       )}
 
-      <div className="glass-strong" style={{ flex: 'none', display: 'flex', alignItems: 'flex-end', gap: 10, padding: 10, borderRadius: 18 }}>
+      <SpotlightPanel className="glass-strong rb-composer" spotlightColor="rgba(90, 167, 240, 0.16)" style={{ flex: 'none', display: 'flex', alignItems: 'flex-end', gap: 10, padding: 10, borderRadius: 8 }}>
         <textarea value={input} rows={1}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
@@ -153,8 +137,8 @@ export function ChatScreen({ activeAgent, setActiveAgent, messages, streaming, o
           }} />
         {streaming
           ? <button className="ah-btn danger" onClick={onCancel}><Icon d={IC.stop} size={14} /> {tr('停止', 'Stop')}</button>
-          : <button className="ah-btn primary" onClick={send} disabled={!input.trim() || blocked}><Icon d={IC.send} size={14} /> {tr('发送', 'Send')}</button>}
-      </div>
+          : <button className="ah-btn primary" onClick={send} disabled={!input.trim() || blocked}><Icon d={IC.send} size={14} /> {mode === 'orchestrate' && !activeAgent ? tr('生成流程', 'Plan') : tr('发送', 'Send')}</button>}
+      </SpotlightPanel>
     </div>
   )
 }
@@ -169,72 +153,147 @@ function ChatToolbar({ activeAgent, setActiveAgent, mode, setMode, routeHint, ta
   selectableAgentIds: string[]
   openSetup: (tab?: SetupTab) => void
   workspaceId: string | null
-  workspaces: Array<{ id: string; name: string; rootPath: string }>
+  workspaces: WorkspaceItem[]
   pickWorkspace: (id: string | null) => void
 }) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const workspace = workspaces.find(w => w.id === workspaceId)
+  const modeText = activeAgent ? tr('指定 Agent', 'Targeted') : modeLabel(mode)
+  const targetText = activeAgent
+    ? AGENT_META[activeAgent]?.name
+    : mode === 'auto' && routeHint && AGENT_META[routeHint]
+    ? tr(`预判 ${AGENT_META[routeHint].name}`, `Likely ${AGENT_META[routeHint].name}`)
+    : tr('自动选择', 'Auto select')
+  const workspaceText = workspace?.name ?? (workspaces.length ? tr('自动工作区', 'Auto workspace') : tr('未设工作区', 'No workspace'))
+
+  useEffect(() => {
+    if (!open) return
+    const closeOnOutside = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', closeOnOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+
+  const openSetupAndClose = (tab?: SetupTab) => {
+    setOpen(false)
+    openSetup(tab)
+  }
+
   return (
-    <div className="glass" style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', flexWrap: 'wrap' }}>
-      <Seg value={activeAgent ? 'single' : mode} onChange={v => { setActiveAgent(null); setMode(v as DispatchMode) }}
-        options={[
-          { value: 'auto', label: tr('智能路由', 'Auto route') },
-          { value: 'broadcast', label: tr('广播全部', 'Broadcast') },
-          { value: 'chain', label: tr('链式接力', 'Chain relay') },
-          { value: 'orchestrate', label: tr('编排', 'Orchestrate') }
-        ]} />
-      <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }}></div>
-      <span className="ah-label">{tr('指定：', 'Target:')}</span>
-      {selectableAgentIds.length > 0 ? (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {selectableAgentIds.map(id => (
-            <button key={id} onClick={() => setActiveAgent(activeAgent === id ? null : id)}
-              className="ah-chip" style={{
-                cursor: 'pointer', font: 'inherit', fontSize: 11.5, border: '1px solid',
-                borderColor: activeAgent === id ? AGENT_META[id].colorRaw : 'rgba(255,255,255,0.08)',
-                color: activeAgent === id ? AGENT_META[id].colorRaw : 'var(--tx-2)',
-                background: activeAgent === id ? `color-mix(in srgb, ${AGENT_META[id].colorRaw} 14%, transparent)` : 'rgba(255,255,255,0.05)'
-              }}>{AGENT_META[id].name}</button>
-          ))}
-        </div>
-      ) : (
-        <span className="ah-hint" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {tr('暂无已配置的 Agent', 'No configured agents yet')}
-          <button className="ah-btn sm" onClick={() => openSetup('routing')}>{tr('去设置', 'Set up')}</button>
-        </span>
-      )}
-      <div style={{ width: 1, height: 20, background: 'var(--glass-border)' }}></div>
-      {/* 工作区选择器：让 agent 知道当前对话对应的项目（cwd） */}
-      <span className="ah-label">{tr('工作区：', 'Workspace:')}</span>
-      <select className="ah-select" style={{ minWidth: 140, maxWidth: 220, padding: '4px 8px' }}
-        value={workspaceId ?? '__auto__'}
-        onChange={e => pickWorkspace(e.target.value === '__auto__' ? null : e.target.value)}
-        title={tr('选择工作目录，agent 将在此目录下工作', 'Pick a workspace so the agent runs in your project directory')}>
-        <option value="__auto__">{tr('自动（沿用上次）', 'Auto (use last)')}</option>
-        {workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
-      </select>
-      {workspaceId && (() => {
-        const w = workspaces.find(x => x.id === workspaceId)
-        return w ? <span className="ah-hint" style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={w.rootPath}>{w.rootPath}</span> : null
-      })()}
-      {!workspaceId && workspaces.length > 0 && (
-        <span className="ah-hint">{tr('agent 将在 home 目录运行（无项目上下文）', 'agent runs in your home dir (no project context)')}</span>
-      )}
-      {workspaces.length === 0 && (
-        <button className="ah-btn sm" onClick={() => openSetup('workspaces')}>{tr('新建工作区', 'New workspace')}</button>
-      )}
-      <div style={{ flex: 1 }}></div>
-      {activeAgent && <span className="ah-hint">{tr(`仅派发给 ${AGENT_META[activeAgent].name}`, `Dispatch to ${AGENT_META[activeAgent].name} only`)}</span>}
-      {mode === 'chain' && !activeAgent && <span className="ah-hint">{tr('Codex 到 Claude，前者输出作为后者输入', 'Codex to Claude, output of the first feeds the second')}</span>}
-      {mode === 'auto' && !activeAgent && routeHint && AGENT_META[routeHint] && (
-        <span className="ah-hint" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-          <Icon d={IC.bolt} size={12} style={{ color: AGENT_META[routeHint].colorRaw }} />
-          {tr(`将路由到 ${AGENT_META[routeHint].name}`, `Routes to ${AGENT_META[routeHint].name}`)}
-          {targetItem && targetItem.state !== 'usable' && targetItem.state !== 'busy' && (
-            <span style={{ color: 'var(--st-busy)' }}>{tr('需要配置', 'setup needed')}</span>
-          )}
-        </span>
+    <div ref={menuRef} style={{ position: 'relative', flex: 'none', zIndex: 12 }}>
+      <SpotlightPanel className="glass rb-command-surface" spotlightColor="rgba(139, 145, 232, 0.14)" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', minHeight: 50 }}>
+        <button className={'ah-btn sm' + (open ? ' primary' : '')} onClick={() => setOpen(v => !v)} aria-expanded={open} aria-haspopup="menu">
+          <Icon d={IC.plus} size={15} /> {tr('功能', 'Controls')} <Icon d={IC.chevDown} size={12} />
+        </button>
+        <span className="ah-chip mint">{modeText}</span>
+        <span className="ah-chip">{targetText}</span>
+        <span className="ah-chip">{workspaceText}</span>
+        <div style={{ flex: 1 }}></div>
+        {mode === 'auto' && !activeAgent && routeHint && AGENT_META[routeHint] && (
+          <span className="ah-hint" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Icon d={IC.bolt} size={12} style={{ color: AGENT_META[routeHint].colorRaw }} />
+            {tr(`将路由到 ${AGENT_META[routeHint].name}`, `Routes to ${AGENT_META[routeHint].name}`)}
+            {targetItem && targetItem.state !== 'usable' && targetItem.state !== 'busy' && (
+              <span style={{ color: 'var(--st-busy)' }}>{tr('需要配置', 'setup needed')}</span>
+            )}
+          </span>
+        )}
+      </SpotlightPanel>
+
+      {open && (
+        <SpotlightPanel role="menu" className="glass-strong" spotlightColor="rgba(139, 145, 232, 0.18)" style={{
+          position: 'absolute', top: 'calc(100% + 8px)', left: 0, width: 'min(760px, 100%)',
+          padding: 16, display: 'flex', flexDirection: 'column', gap: 14,
+          boxShadow: '0 24px 70px -34px rgba(0,0,0,0.94), inset 0 1px 0 rgba(255,255,255,0.06)'
+        }}>
+          <ToolbarSection title={tr('派发模式', 'Dispatch mode')}>
+            <Seg value={mode} onChange={v => { setActiveAgent(null); setMode(v as DispatchMode) }}
+              options={[
+                { value: 'auto', label: tr('智能路由', 'Auto route') },
+                { value: 'broadcast', label: tr('广播全部', 'Broadcast') },
+                { value: 'chain', label: tr('链式接力', 'Chain relay') },
+                { value: 'orchestrate', label: tr('编排', 'Orchestrate') }
+              ]} />
+            {mode === 'chain' && !activeAgent && <span className="ah-hint">{tr('Codex 到 Claude，前者输出作为后者输入', 'Codex to Claude, output of the first feeds the second')}</span>}
+            {mode === 'orchestrate' && !activeAgent && <span className="ah-hint">{tr('Orbit 先生成协作流程，确认后再派发给子 Agent。', 'Orbit drafts the workflow first, then workers run after approval.')}</span>}
+          </ToolbarSection>
+
+          <ToolbarDivider />
+
+          <ToolbarSection title={tr('指定 Agent', 'Target agent')}>
+            {selectableAgentIds.length > 0 ? (
+              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                <button onClick={() => setActiveAgent(null)} className="ah-chip" style={{
+                  cursor: 'pointer', font: 'inherit', fontSize: 11.5, border: '1px solid',
+                  borderColor: activeAgent ? 'rgba(255,255,255,0.08)' : 'var(--mint-line)',
+                  color: activeAgent ? 'var(--tx-2)' : 'var(--mint)',
+                  background: activeAgent ? 'rgba(255,255,255,0.05)' : 'var(--mint-soft)'
+                }}>{tr('不指定', 'None')}</button>
+                {selectableAgentIds.map(id => (
+                  <button key={id} onClick={() => setActiveAgent(activeAgent === id ? null : id)}
+                    className="ah-chip" style={{
+                      cursor: 'pointer', font: 'inherit', fontSize: 11.5, border: '1px solid',
+                      borderColor: activeAgent === id ? AGENT_META[id].colorRaw : 'rgba(255,255,255,0.08)',
+                      color: activeAgent === id ? AGENT_META[id].colorRaw : 'var(--tx-2)',
+                      background: activeAgent === id ? `color-mix(in srgb, ${AGENT_META[id].colorRaw} 14%, transparent)` : 'rgba(255,255,255,0.05)'
+                    }}>{AGENT_META[id].name}</button>
+                ))}
+              </div>
+            ) : (
+              <span className="ah-hint" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {tr('暂无已配置的 Agent', 'No configured agents yet')}
+                <button className="ah-btn sm" onClick={() => openSetupAndClose('routing')}>{tr('去设置', 'Set up')}</button>
+              </span>
+            )}
+            {activeAgent && <span className="ah-hint">{tr(`仅派发给 ${AGENT_META[activeAgent].name}`, `Dispatch to ${AGENT_META[activeAgent].name} only`)}</span>}
+          </ToolbarSection>
+
+          <ToolbarDivider />
+
+          <ToolbarSection title={tr('工作区', 'Workspace')}>
+            <select className="ah-select" style={{ minWidth: 210, maxWidth: 300 }}
+              value={workspaceId ?? '__auto__'}
+              onChange={e => pickWorkspace(e.target.value === '__auto__' ? null : e.target.value)}
+              title={tr('选择工作目录，agent 将在此目录下工作', 'Pick a workspace so the agent runs in your project directory')}>
+              <option value="__auto__">{tr('自动（沿用上次）', 'Auto (use last)')}</option>
+              {workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            </select>
+            {workspace && (
+              <span className="ah-hint" style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={workspace.rootPath}>{workspace.rootPath}</span>
+            )}
+            {!workspaceId && workspaces.length > 0 && (
+              <span className="ah-hint">{tr('agent 将在 home 目录运行（无项目上下文）', 'agent runs in your home dir (no project context)')}</span>
+            )}
+            {workspaces.length === 0 && (
+              <button className="ah-btn sm" onClick={() => openSetupAndClose('workspaces')}>{tr('新建工作区', 'New workspace')}</button>
+            )}
+          </ToolbarSection>
+        </SpotlightPanel>
       )}
     </div>
   )
+}
+
+function ToolbarSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+      <span className="ah-label" style={{ width: 72, flex: 'none' }}>{title}</span>
+      {children}
+    </div>
+  )
+}
+
+function ToolbarDivider() {
+  return <div style={{ height: 1, background: 'var(--glass-border)' }}></div>
 }
 
 function EmptyChatState() {

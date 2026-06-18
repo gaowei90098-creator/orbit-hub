@@ -15,6 +15,7 @@ export function applyOrchestrateEvent(prev: OrchestrateState | undefined, ev: an
   const state: OrchestrateState = prev
     ? { ...prev, subtasks: prev.subtasks.map(s => ({ ...s })) }
     : initialOrchestrateState()
+  const base = ev?.taskId ? { ...state, taskId: String(ev.taskId), missionId: ev.missionId ?? state.missionId } : state
 
   switch (ev?.kind) {
     case 'orchestrate:plan': {
@@ -24,15 +25,33 @@ export function applyOrchestrateEvent(prev: OrchestrateState | undefined, ev: an
             title: s.title || String(s.id),
             detail: s.detail,
             agentId: s.agentId,
+            fileScope: Array.isArray(s.fileScope) ? s.fileScope : undefined,
+            dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn : undefined,
+            doneWhen: s.doneWhen,
+            verifyCommand: s.verifyCommand,
+            interfaceRef: s.interfaceRef,
             status: 'pending' as const,
             content: ''
           }))
         : []
-      return { ...state, phase: 'running', subtasks, leadAgentId: ev.leadAgentId ?? state.leadAgentId }
+      return {
+        ...base,
+        phase: ev.planArtifact?.status === 'awaiting-approval' ? 'awaiting-approval' : 'running',
+        subtasks,
+        leadAgentId: ev.leadAgentId ?? state.leadAgentId,
+        planArtifact: ev.planArtifact ?? state.planArtifact
+      }
+    }
+
+    case 'orchestrate:approval': {
+      if (ev.status === 'awaiting') return { ...base, phase: 'awaiting-approval', planArtifact: ev.planArtifact ?? state.planArtifact }
+      if (ev.status === 'approved') return { ...base, phase: 'running', planArtifact: ev.planArtifact ?? state.planArtifact }
+      if (ev.status === 'rejected') return { ...base, phase: 'error', error: 'Plan rejected' }
+      return base
     }
 
     case 'orchestrate:subtask': {
-      const subtasks = state.subtasks.slice()
+      const subtasks = base.subtasks.slice()
       let idx = subtasks.findIndex(s => s.id === String(ev.subtaskId))
       if (idx < 0) {
         subtasks.push({ id: String(ev.subtaskId), title: ev.title || String(ev.subtaskId), status: 'pending' })
@@ -44,23 +63,23 @@ export function applyOrchestrateEvent(prev: OrchestrateState | undefined, ev: an
       if (typeof ev.contentDelta === 'string') cur.content = (cur.content || '') + ev.contentDelta
       else if (typeof ev.content === 'string') cur.content = ev.content
       subtasks[idx] = cur
-      return { ...state, subtasks }
+      return { ...base, subtasks }
     }
 
     case 'orchestrate:verdict': {
-      const subtasks = state.subtasks.map(s =>
+      const subtasks = base.subtasks.map(s =>
         s.id === String(ev.subtaskId) ? { ...s, verdict: { pass: !!ev.pass, note: ev.note } } : s)
-      return { ...state, subtasks }
+      return { ...base, subtasks }
     }
 
     case 'orchestrate:synthesizing':
-      return { ...state, phase: 'synthesizing' }
+      return { ...base, phase: 'synthesizing' }
 
     case 'orchestrate:final':
-      return { ...state, phase: 'done', final: typeof ev.content === 'string' ? ev.content : state.final }
+      return { ...base, phase: 'done', final: typeof ev.content === 'string' ? ev.content : state.final }
 
     case 'orchestrate:error':
-      return { ...state, phase: 'error', error: ev.error || 'orchestration error' }
+      return { ...base, phase: 'error', error: ev.error || 'orchestration error' }
 
     default:
       return state

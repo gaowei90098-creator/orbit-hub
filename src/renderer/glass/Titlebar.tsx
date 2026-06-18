@@ -8,6 +8,7 @@
 import React from 'react'
 import { Icon, IC } from './ui'
 import { tr } from './i18n'
+import { ShinyText } from './react-bits'
 
 export function Titlebar({ search, onSearch, hubRunning }:
   { search: string; onSearch: (v: string) => void; hubRunning: boolean }) {
@@ -31,17 +32,18 @@ export function Titlebar({ search, onSearch, hubRunning }:
         ))}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600 }}>
-        <span style={{
-          width: 20, height: 20, borderRadius: 6, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          background: 'var(--mint-soft)', color: 'var(--mint)', fontSize: 11, fontWeight: 800
-        }}>AH</span>
-        AgentHub
-        <span className="ah-hint" style={{ fontWeight: 400 }}>{tr('多智能体工作台', 'Multi-Agent Workbench')}</span>
+        <img src="icons/orbit.png" alt="Orbit" style={{
+          width: 23, height: 23, borderRadius: 6, objectFit: 'cover',
+          boxShadow: '0 5px 16px -8px rgba(139,145,232,0.72)',
+          border: '1px solid rgba(255,255,255,0.12)'
+        }} />
+        <ShinyText>Orbit</ShinyText>
+        <span className="ah-hint" style={{ fontWeight: 400 }}>{tr('多智能体工作台', 'Multi-Agent Workspace')}</span>
       </div>
       <div style={{ flex: 1 }}></div>
       <div className="glass app-no-drag" style={{
         display: 'flex', alignItems: 'center', gap: 8, padding: '6px 13px',
-        borderRadius: 999, width: 280, color: 'var(--tx-3)'
+        borderRadius: 8, width: 300, color: 'var(--tx-3)'
       }}>
         <Icon d={IC.search} size={14} />
         <input value={search} onChange={e => onSearch(e.target.value)} placeholder={tr('搜索任务、Agent、设置…', 'Search tasks, agents, settings…')}

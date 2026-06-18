@@ -6,10 +6,11 @@
 
 import React, { useState } from 'react'
 import { Icon, IC, AgentMark, StatusDot, Enter, SectionTitle, TaskStatusBadge } from '../glass/ui'
-import { AGENT_META, AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, sumTokens, fmtTokens, sumCost, fmtCost } from '../glass/meta'
+import { AGENT_META, AGENT_IDS, EXECUTION_AGENT_IDS, MAIN_AGENT_ID, USER_BRIDGE_AGENT_IDS, AgentUIStatus, BindingDef, ProviderDef, TaskItem, sumTokens, fmtTokens, sumCost, fmtCost } from '../glass/meta'
 import { tr, statusLabel, modeLabel, agentDesc } from '../glass/i18n'
 import { useBudget, setBudget, useBudgetMode, setBudgetMode, budgetLevel } from '../glass/budget'
 import { ConnectionState, ConnectionSummary, SetupTab } from '../glass/connection-status'
+import { ShinyText, SpotlightPanel } from '../glass/react-bits'
 
 /** 本次会话预算条：口径切换(Token/$) + 进度 + 分级告警(ok/warn≥80%/over≥100%) + 可编辑上限 */
 function BudgetBar({ tokens, cost }: { tokens: number; cost: number }) {
@@ -29,7 +30,7 @@ function BudgetBar({ tokens, cost }: { tokens: number; cost: number }) {
     setEditing(false); setVal('')
   }
   return (
-    <div className="glass" style={{ padding: '11px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
+    <SpotlightPanel className="glass rb-command-surface" spotlightColor="rgba(88, 217, 149, 0.14)" style={{ padding: '11px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12 }}>
       <Icon d={IC.bolt} size={15} style={{ color }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, marginBottom: limit > 0 ? 5 : 0 }}>
@@ -63,7 +64,7 @@ function BudgetBar({ tokens, cost }: { tokens: number; cost: number }) {
           {limit > 0 ? tr('改', 'Edit') : tr('设预算', 'Set')}
         </button>
       )}
-    </div>
+    </SpotlightPanel>
   )
 }
 
@@ -94,12 +95,17 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
 
   return (
     <div data-screen-label="总览" style={{ padding: '6px 4px 30px', width: '100%', maxWidth: 1540, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 20, gap: 18 }}>
         <div>
-          <h1 style={{ fontSize: 26, fontWeight: 700, letterSpacing: '-0.01em' }}>{greeting()}</h1>
+          <div className="ah-label" style={{ marginBottom: 3, letterSpacing: 0, textTransform: 'uppercase' }}>
+            {tr('主 Agent 协作工作区', 'Main Agent Workspace')}
+          </div>
+          <h1 style={{ fontSize: 27, fontWeight: 760, letterSpacing: 0 }}>
+            <ShinyText>Orbit</ShinyText>
+          </h1>
           <div style={{ color: 'var(--tx-2)', marginTop: 3 }}>
-            {tr(`${connectionSummary.headlineZh} · ${runningCount} 个任务运行中 · 今日完成 ${doneToday} 个${tokZh}`,
-                `${connectionSummary.headlineEn} · ${runningCount} running · ${doneToday} done today${tokEn}`)}
+            {tr(`${greeting()} · ${connectionSummary.headlineZh} · ${runningCount} 个任务运行中 · 今日完成 ${doneToday} 个${tokZh}`,
+                `${greeting()} · ${connectionSummary.headlineEn} · ${runningCount} running · ${doneToday} done today${tokEn}`)}
           </div>
         </div>
         <button className="ah-btn primary" onClick={() => goChat(null)}>
@@ -120,10 +126,11 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
           const prov = providers.find(p => p.id === b?.providerId)
           const model = prov?.models.find(m => m.id === b?.modelId)
           const isStdio = b?.protocol === 'stdio-plain'
+          const isBridge = USER_BRIDGE_AGENT_IDS.includes(id)
           const connection = connectionSummary.items.find(item => item.agentId === id)
           return (
             <Enter key={id} delay={idx * 70} style={{ display: 'flex' }}>
-              <div data-agent-card className="glass hover-glow" style={{ flex: 1, padding: 18, display: 'flex', flexDirection: 'column', gap: 13, transition: 'border-color 0.2s, transform 0.2s', cursor: 'default', minWidth: 0 }}
+              <SpotlightPanel data-agent-card className="glass hover-glow" spotlightColor={`color-mix(in srgb, ${meta.colorRaw} 18%, transparent)`} style={{ flex: 1, padding: 18, display: 'flex', flexDirection: 'column', gap: 13, transition: 'border-color 0.2s, transform 0.2s', cursor: 'default', minWidth: 0 }}
                 onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--glass-border-strong)'; e.currentTarget.style.transform = 'translateY(-2px)' }}
                 onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--glass-border)'; e.currentTarget.style.transform = 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 13, height: 48 }}>
@@ -139,7 +146,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
 
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, height: 37, flex: 'none',
-                  background: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: '0 12px',
+                  background: 'rgba(0,0,0,0.24)', borderRadius: 7, padding: '0 12px',
                   fontFamily: 'var(--font-mono)', color: 'var(--tx-2)'
                 }}>
                   <Icon d={isStdio ? IC.terminal : IC.link} size={13} style={{ color: meta.colorRaw, flex: 'none' }} />
@@ -156,10 +163,15 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
                     {tr(connection.detailZh, connection.detailEn)}
                   </div>
                 )}
+                {isBridge && (!connection || connection.state === 'usable' || connection.state === 'busy') && (
+                  <div className="ah-hint" style={{ lineHeight: 1.5 }}>
+                    {tr('这是用户通知/远程指令通道，不参与代码、部署或数据库写入任务。', 'User notification and remote-instruction bridge; not used for code, deploy, or database execution.')}
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', gap: 8, marginTop: 'auto', flexWrap: 'wrap' }}>
                   <button className="ah-btn sm" style={{ flex: '1 1 128px' }} onClick={() => goChat(id)}>
-                    <Icon d={IC.send} size={13} /> {tr('派发任务', 'Dispatch')}
+                    <Icon d={IC.send} size={13} /> {isBridge ? tr('远程通道', 'Remote bridge') : tr('派发任务', 'Dispatch')}
                   </button>
                   {connection?.action && (
                     <button className="ah-btn sm primary" style={{ flex: '1 1 128px' }} onClick={() => openSetup(connection.action!.tab)}>
@@ -167,7 +179,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
                     </button>
                   )}
                 </div>
-              </div>
+              </SpotlightPanel>
             </Enter>
           )
         })}
@@ -176,7 +188,7 @@ export function HomeScreen({ agents, bindings, providers, tasks, goChat, connect
       {/* 最近任务 */}
       <Enter delay={320} style={{ marginTop: 28 }}>
         <SectionTitle right={<span className="ah-hint">{tr(`${tasks.length} 条记录`, `${tasks.length} records`)}</span>}>{tr('最近任务', 'Recent tasks')}</SectionTitle>
-        <div className="glass" style={{ padding: '6px 0' }}>
+        <div className="glass rb-table" style={{ padding: '6px 0' }}>
           {tasks.length === 0 && (
             <div style={{ padding: '18px 18px', color: 'var(--tx-3)', fontSize: 13 }}>{tr('还没有任务 — 去会话页派发第一个任务吧', 'No tasks yet — dispatch your first one from Chat')}</div>
           )}
@@ -218,21 +230,31 @@ function FirstRunPanel({ summary, openSetup, goChat }: {
   goChat: (agentId: string | null) => void
 }) {
   const ready = summary.counts.usable + summary.counts.busy
-  const firstUsable = summary.items.find(item => item.state === 'usable')?.agentId ?? null
+  const mainItem = summary.items.find(item => item.agentId === MAIN_AGENT_ID)
+  const mainReady = !!mainItem && (mainItem.state === 'usable' || mainItem.state === 'busy')
+  const workerReadyItems = summary.items.filter(item => EXECUTION_AGENT_IDS.includes(item.agentId) && (item.state === 'usable' || item.state === 'busy'))
+  const firstUsable = workerReadyItems[0]?.agentId ?? null
+  const workerReady = workerReadyItems.length > 0
   const firstAction = summary.firstAction
   return (
-    <div className="glass" style={{ padding: 16, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-      <div style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: ready ? 'var(--mint-soft)' : 'rgba(232,179,77,0.12)', color: ready ? 'var(--mint)' : 'var(--st-busy)', flex: 'none' }}>
-        <Icon d={ready ? IC.check : IC.bolt} size={17} />
+    <SpotlightPanel className="glass" spotlightColor={mainReady && workerReady ? 'rgba(88, 217, 149, 0.13)' : 'rgba(232, 179, 77, 0.13)'} style={{ padding: 16, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+      <div style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', background: mainReady && workerReady ? 'var(--mint-soft)' : 'rgba(232,179,77,0.12)', color: mainReady && workerReady ? 'var(--mint)' : 'var(--st-busy)', flex: 'none' }}>
+        <Icon d={mainReady && workerReady ? IC.check : IC.bolt} size={17} />
       </div>
       <div style={{ flex: 1, minWidth: 260 }}>
         <div style={{ fontWeight: 700, marginBottom: 2 }}>
-          {ready ? tr('已具备可派发 Agent', 'At least one agent is ready') : tr('完成首次连接', 'Finish first connection')}
+          {!mainReady
+            ? tr('先配置 Orbit 主 Agent', 'Configure Orbit main Agent first')
+            : workerReady
+            ? tr('Orbit 已就绪，可以派发协作流程', 'Orbit is ready to dispatch collaboration flows')
+            : tr('Orbit 已就绪，再连接一个子 Agent', 'Orbit is ready; connect one worker agent')}
         </div>
         <div className="ah-hint" style={{ lineHeight: 1.55 }}>
-          {ready
-            ? tr('可以先发送一条试跑任务；其他 Agent 可随后继续补 Key 或 CLI 路径。', 'Send a test task now; add keys or CLI paths for the remaining agents later.')
-            : tr('先配置一个 Provider Key 或选择一个本地 CLI 路径，再回到会话页发送第一条任务。', 'Configure one provider key or choose one local CLI path, then return to Chat and send the first task.')}
+          {!mainReady
+            ? tr('Orbit 负责拆分、派发、监督和汇总；它需要一个可用 Provider/API Key。子 Agent 才负责具体执行。', 'Orbit plans, dispatches, supervises and synthesizes; it needs a usable provider/API key. Worker agents do the execution.')
+            : workerReady
+            ? tr('在会话页选择“编排”，Orbit 会先生成协作流程，确认后再派发给子 Agent。', 'Use Orchestrate in Chat: Orbit generates the collaboration plan first, then workers run after approval.')
+            : tr('接下来给 Codex、Claude 或其他子 Agent 配置本地 CLI / Provider，让它们接领 Orbit 的任务。', 'Next, connect Codex, Claude or another worker via local CLI / provider so it can receive Orbit tasks.')}
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -241,10 +263,10 @@ function FirstRunPanel({ summary, openSetup, goChat }: {
             {tr(firstAction.labelZh, firstAction.labelEn)}
           </button>
         )}
-        <button className="ah-btn sm" disabled={!ready} onClick={() => goChat(firstUsable)}>
+        <button className="ah-btn sm" disabled={!mainReady || !workerReady} onClick={() => goChat(firstUsable)}>
           <Icon d={IC.send} size={13} /> {tr('发送试跑任务', 'Send test task')}
         </button>
       </div>
-    </div>
+    </SpotlightPanel>
   )
 }

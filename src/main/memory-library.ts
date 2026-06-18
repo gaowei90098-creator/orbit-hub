@@ -1,7 +1,16 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, normalize } from 'node:path'
 
-export type MemoryCategory = 'conversation' | 'task' | 'skill' | 'file' | 'system'
+export type MemoryCategory =
+  | 'conversation'
+  | 'task'
+  | 'skill'
+  | 'file'
+  | 'system'
+  | 'episodic'
+  | 'semantic'
+  | 'procedure'
+  | 'decision'
 
 export interface MemoryEntryInput {
   id?: string
@@ -26,6 +35,19 @@ export interface MemoryEntry extends MemoryEntryInput {
 export interface RuntimeMemoryState {
   messages: any[]
   tasks: any[]
+  conversations?: RuntimeConversationState[]
+  activeConversationId?: string | null
+  activeWorkspaceId?: string | null
+}
+
+export interface RuntimeConversationState {
+  id: string
+  workspaceId: string | null
+  title: string
+  createdAt: number
+  updatedAt: number
+  messages: any[]
+  tasks: any[]
 }
 
 export interface MemoryCatalog {
@@ -42,7 +64,17 @@ interface MemoryIndex {
   runtimeUpdatedAt?: string
 }
 
-const CATEGORIES: MemoryCategory[] = ['conversation', 'task', 'skill', 'file', 'system']
+const CATEGORIES: MemoryCategory[] = [
+  'conversation',
+  'task',
+  'skill',
+  'file',
+  'system',
+  'episodic',
+  'semantic',
+  'procedure',
+  'decision'
+]
 const DEFAULT_INDEX: MemoryIndex = { version: 1, entries: [] }
 
 export class MemoryLibrary {
@@ -105,9 +137,14 @@ export class MemoryLibrary {
     const index = this.readIndex()
     const now = new Date().toISOString()
     const dailyHistory = todayName()
+    const tasksForEntries = normalized.conversations.length > 0
+      ? normalized.conversations.flatMap(conv => conv.tasks.map(task => ({ ...task, conversationId: conv.id, workspaceId: conv.workspaceId })))
+      : normalized.tasks
     const runtimeEntries = [
-      ...normalized.messages.map(messageToEntry),
-      ...normalized.tasks.map(taskToEntry),
+      ...(normalized.conversations.length > 0
+        ? normalized.conversations.map(conversationToEntry)
+        : normalized.messages.map(messageToEntry)),
+      ...tasksForEntries.map(taskToEntry),
       historyFileToEntry('history/session-latest.json', 'Latest session snapshot'),
       historyFileToEntry(`history/${dailyHistory}`, 'Daily session snapshot')
     ].map(entry => ({
@@ -126,11 +163,11 @@ export class MemoryLibrary {
   }
 
   loadRuntimeState(): RuntimeMemoryState {
-    if (!existsSync(this.latestPath)) return { messages: [], tasks: [] }
+    if (!existsSync(this.latestPath)) return normalizeRuntimeState({})
     try {
       return normalizeRuntimeState(JSON.parse(readFileSync(this.latestPath, 'utf-8')))
     } catch {
-      return { messages: [], tasks: [] }
+      return normalizeRuntimeState({})
     }
   }
 
@@ -163,9 +200,45 @@ export class MemoryLibrary {
 }
 
 function normalizeRuntimeState(input: any): RuntimeMemoryState {
-  const messages = Array.isArray(input?.messages) ? input.messages.map(normalizeMessage) : []
-  const tasks = Array.isArray(input?.tasks) ? input.tasks.map(normalizeTask) : []
-  return { messages, tasks }
+  const activeWorkspaceId = typeof input?.activeWorkspaceId === 'string' ? input.activeWorkspaceId : null
+  let conversations: RuntimeConversationState[] = Array.isArray(input?.conversations)
+    ? input.conversations.filter((conv: any) => conv && typeof conv.id === 'string').map(normalizeConversation)
+    : []
+  const legacyMessages = Array.isArray(input?.messages) ? input.messages.map(normalizeMessage) : []
+  const legacyTasks = Array.isArray(input?.tasks) ? input.tasks.map(normalizeTask) : []
+  if (conversations.length === 0 && (legacyMessages.length > 0 || legacyTasks.length > 0)) {
+    const now = Date.now()
+    conversations = [{
+      id: `conv-${now.toString(36)}-legacy`,
+      workspaceId: activeWorkspaceId,
+      title: cleanTitle(legacyMessages[0]?.text || 'Migrated conversation'),
+      createdAt: now,
+      updatedAt: now,
+      messages: legacyMessages,
+      tasks: legacyTasks
+    }]
+  }
+  conversations = conversations.sort((a, b) => b.updatedAt - a.updatedAt)
+  const activeConversationId = typeof input?.activeConversationId === 'string' && conversations.some(conv => conv.id === input.activeConversationId)
+    ? input.activeConversationId
+    : conversations[0]?.id ?? null
+  const active = conversations.find(conv => conv.id === activeConversationId)
+  const messages = active ? active.messages : legacyMessages
+  const tasks = active ? active.tasks : legacyTasks
+  return { messages, tasks, conversations, activeConversationId, activeWorkspaceId }
+}
+
+function normalizeConversation(conv: any): RuntimeConversationState {
+  const now = Date.now()
+  return {
+    id: conv.id,
+    workspaceId: typeof conv.workspaceId === 'string' ? conv.workspaceId : null,
+    title: cleanTitle(conv.title || conv.messages?.[0]?.text || 'New conversation'),
+    createdAt: typeof conv.createdAt === 'number' ? conv.createdAt : now,
+    updatedAt: typeof conv.updatedAt === 'number' ? conv.updatedAt : now,
+    messages: Array.isArray(conv.messages) ? conv.messages.map(normalizeMessage) : [],
+    tasks: Array.isArray(conv.tasks) ? conv.tasks.map(normalizeTask) : []
+  }
 }
 
 function normalizeMessage(message: any): any {
@@ -216,6 +289,27 @@ function taskToEntry(task: any): MemoryEntry {
       status: task.status,
       agents: task.agents || [],
       durationMs: task.durationMs
+    },
+    createdAt: '',
+    updatedAt: ''
+  }
+}
+
+function conversationToEntry(conversation: RuntimeConversationState): MemoryEntry {
+  const failedTasks = conversation.tasks.filter((task: any) => task?.status === 'failed').length
+  const doneTasks = conversation.tasks.filter((task: any) => task?.status === 'completed').length
+  return {
+    id: makeEntryId('conversation', conversation.id),
+    category: 'conversation',
+    title: cleanTitle(conversation.title || 'Conversation'),
+    summary: `${conversation.messages.length} message(s) · ${doneTasks} completed · ${failedTasks} failed`,
+    content: JSON.stringify(conversation, null, 2),
+    tags: ['conversation', conversation.workspaceId ? 'workspace' : 'no-workspace'].filter(Boolean),
+    metadata: {
+      conversationId: conversation.id,
+      workspaceId: conversation.workspaceId,
+      messageCount: conversation.messages.length,
+      taskCount: conversation.tasks.length
     },
     createdAt: '',
     updatedAt: ''
