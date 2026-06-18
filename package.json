@@ -1,84 +1,202 @@
 {
-  "name": "orbit",
-  "version": "0.1.0",
-  "description": "Local collaboration hub for heterogeneous AI coding agents (Claude Code, Codex). Inter-agent messaging, shared task board, file-conflict prevention, live dashboard.",
-  "type": "module",
-  "main": "electron/main.mjs",
-  "bin": {
-    "orbit": "./dist/cli.js",
-    "agent-hub": "./dist/cli.js"
+  "name": "agenthub",
+  "version": "0.5.3",
+  "description": "Orbit - 多 Agent 协同工作区",
+  "main": "out/main/index.js",
+  "author": {
+    "name": "AgentHub Team",
+    "email": "team@agenthub.dev"
   },
+  "license": "MIT",
   "scripts": {
-    "dev": "tsx src/cli.ts start",
-    "mcp": "tsx src/cli.ts mcp",
-    "build": "tsc -p tsconfig.json",
-    "build:dashboard": "npm --prefix dashboard install && npm --prefix dashboard run build",
-    "build:all": "npm run build && npm run build:dashboard",
-    "start": "node dist/cli.js start",
+    "dev": "electron-vite dev --watch",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "build:win": "npm run build && electron-builder --win --publish never",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "test:cov": "vitest run --coverage",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "app": "electron electron/main.mjs",
-    "app:icon": "node electron/generate-icon.mjs",
-    "app:pack": "electron-builder --mac dir"
-  },
-  "engines": {
-    "node": ">=22"
-  },
-  "license": "AGPL-3.0-only",
-  "author": "Orbit",
-  "build": {
-    "appId": "com.orbit.localai",
-    "productName": "Orbit",
-    "asar": false,
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "**/*",
-      "!src/**",
-      "!tests/**",
-      "!coverage/**",
-      "!release/**",
-      "!dashboard/node_modules/**",
-      "!dashboard/src/**",
-      "!dashboard/public/**",
-      "!dashboard/index.html",
-      "!dashboard/vite.config.ts",
-      "!dashboard/tsconfig.json",
-      "!dashboard/package.json",
-      "!dashboard/package-lock.json",
-      "!integrations/**",
-      "!examples/**",
-      "!README.md",
-      "!tsconfig.json",
-      "!vitest.config.ts",
-      "!electron/generate-icon.mjs"
-    ],
-    "mac": {
-      "target": "dir",
-      "icon": "electron/icon.png",
-      "category": "public.app-category.developer-tools",
-      "identity": null
-    }
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/node": "^25.9.1",
-    "@types/supertest": "^7.2.0",
-    "@vitest/coverage-v8": "^4.1.8",
-    "electron": "^42.3.3",
-    "electron-builder": "^26.8.1",
-    "supertest": "^7.2.2",
-    "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "lint": "eslint .",
+    "build:mac": "npm run build && electron-builder --mac --publish never",
+    "build:linux": "npm run build && electron-builder --linux --publish never",
+    "build:all": "npm run build && electron-builder -mw --publish never",
+    "unpack": "electron-builder --dir"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "express": "^5.2.1",
-    "node-pty": "^1.1.0",
-    "zod": "^4.4.3"
+    "ogl": "^1.0.11",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^20.17.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.5.12",
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^2.3.0",
+    "eslint": "^9.17.0",
+    "globals": "^15.14.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.18.0",
+    "vite": "^5.4.8",
+    "vitest": "^4.1.7"
+  },
+  "build": {
+    "appId": "dev.agenthub.desktop",
+    "productName": "Orbit",
+    "copyright": "Copyright (c) 2026 AgentHubTeam",
+    "buildVersion": "0.5.3",
+    "files": [
+      "out/**/*",
+      "package.json",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,readme.md,*.d.ts,*.map,test/**,__tests__/**,*.test.*,*.spec.*}",
+      "!**/node_modules/.bin",
+      "!**/*.{md,markdown}",
+      "!**/node_modules/*/{.bin,.cache,build,docs,example,examples,test,tests,__tests__,coverage,*.d.ts.map,*.d.ts}"
+    ],
+    "extraResources": [
+      {
+        "from": "build/installerSidebar.bmp",
+        "to": "build/installerSidebar.bmp"
+      },
+      {
+        "from": "LICENSE",
+        "to": "LICENSE"
+      }
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "protocols": [
+      {
+        "name": "AgentHub Protocol",
+        "schemes": [
+          "agenthub"
+        ]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "agenthub-chat",
+        "name": "AgentHub Chat Export",
+        "role": "Editor"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "publisherName": "AgentHubTeam",
+      "verifyUpdateCodeSignature": false,
+      "signAndEditExecutable": false,
+      "requestedExecutionLevel": "asInvoker",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": false,
+      "shortcutName": "AgentHub",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeader": "build/installerSidebar.bmp",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "include": "build/installer.nsh",
+      "displayLanguageSelector": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "darkModeSupport": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSHumanReadableCopyright": "Copyright (c) 2026 AgentHubTeam. All rights reserved.",
+        "CFBundleURLSchemes": [
+          "agenthub"
+        ],
+        "LSApplicationCategoryType": "public.app-category.developer-tools",
+        "LSEnvironment": {
+          "AGENTHUB_VERSION": "${version}"
+        }
+      },
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon-linux.png",
+      "category": "Development",
+      "vendor": "AgentHubTeam",
+      "maintainer": "AgentHubTeam <team@agenthub.dev>",
+      "description": "AgentHub - 多 Agent 协同桌面工作台",
+      "desktop": {
+        "entry": {
+          "Name": "Orbit",
+          "Comment": "多 Agent 协同工作区",
+          "Categories": "Development;Utility;"
+        },
+        "MimeType": "x-scheme-handler/agenthub;"
+      },
+      "artifactName": "${productName}-${version}.${ext}"
+    },
+    "publish": null,
+    "compression": "normal",
+    "asar": true,
+    "afterPack": null
+  },
+  "homepage": "https://agenthub.dev",
+  "bugs": "https://github.com/agenthub/agenthub/issues",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agenthub/agenthub.git"
   }
 }

@@ -1,21 +1,38 @@
-node_modules/
+﻿node_modules/
+out/
 dist/
-dashboard/dist/
-coverage/
-*.log
+build/*
+!build/icon.ico
+!build/icon.png
+!build/icon-linux.png
+!build/installerSidebar.bmp
+!build/installer.nsh
+.vite/
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.log
+*.local
+*.pid
+*.seed
+*.pid.lock
+.env
+.env.local
+.env.*.local
+.vscode/
+.idea/
+*.swp
+*.swo
+coverage/
+*.tsbuildinfo
 
-# 运行时数据（hub 数据库 + 隔离工作区）
-.agent-hub/
-.orbit/
-*-orbit/
-*.sqlite
-*.sqlite-journal
-*.sqlite-wal
-*.sqlite-shm
+# AI 会话协作白板（本地实时协调，不进版本库）
+COLLAB.md
 
-# 构建/打包产物
-release/
+# UX 审查产物（Playwright 截图/快照、临时 mock 页）
+.playwright-cli/
+output/
 
-# 工具临时目录
-.preview-snake/
+# 外部参考仓库：用于架构借鉴，不作为本项目源码提交
+reference_repos/
