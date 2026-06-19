@@ -40,8 +40,6 @@ AI coding agents have gotten genuinely good — but you still drive them **one p
 
 The main Agent never writes code itself — it **plans, routes, supervises, and synthesizes**. The actual editing is done by vendor-neutral workers (Codex CLI, Claude Code, Marvis, MiniMax Code), preferably over their **local CLI login** so your subscription does the work and no keys are shared.
 
-> Orbit evolved from [`hycailxy/AgentHub`](https://github.com/hycailxy/AgentHub) (working codename *AgentForge Mission Control*). The pivot is deliberate: **from a multi-model chat shell into a main-Agent orchestrator.**
-
 ## 💡 Why it matters
 
 Orbit turns the everyday failure modes of "driving AI agents by hand" into wins:
