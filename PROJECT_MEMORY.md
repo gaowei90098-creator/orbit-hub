@@ -307,7 +307,8 @@ GitHub publish:
 - Created common-history PR branch based on `orbit-hub/main`: `codex/orbit-agenthub-pivot-pr`.
 - User clarified they wanted a direct GitHub update, not a PR.
 - Directly updated `gaowei90098-creator/orbit-hub` `main` from `codex/orbit-agenthub-pivot-pr`.
-- Closed draft PR `https://github.com/gaowei90098-creator/orbit-hub/pull/2` after direct publish.
+- GitHub auto-marked draft PR `https://github.com/gaowei90098-creator/orbit-hub/pull/2` as merged because `main` now points at the PR branch commit.
+- Deleted the temporary remote branch `codex/orbit-agenthub-pivot-pr`; retained direct snapshot branch `codex/orbit-agenthub-pivot` for reference.
 
 This is not yet the full Orbit coordination engine. Missing pieces:
 
