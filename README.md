@@ -222,7 +222,7 @@ Built on Electron 33, React 18, Vite (electron-vite), Tailwind CSS 4, and TypeSc
 
 ## 📜 License
 
-**Orbit is released under the [MIT License](./LICENSE).** © 2026 AgentHub Team.
+**Orbit is released under the [MIT License](./LICENSE).**
 
 You may use, modify, and distribute it freely; keep the copyright and license notice.
 
